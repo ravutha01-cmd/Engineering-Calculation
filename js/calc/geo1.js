@@ -537,7 +537,7 @@
       it.push({ c: 'conc', p: [[ox - 2 * H * sc, oy], [ox, oy], [ox + n * H * sc, oy - H * sc], [ox + (n * H + +i.cw) * sc, oy - H * sc], [ox + (n * H + +i.cw) * sc, oy + depth * sc], [ox - 2 * H * sc, oy + depth * sc]] });
       const arc = []; for (let a = 0; a <= 60; a++) { const t = Math.PI + a / 60 * Math.PI; const x = best.xc + best.R * Math.cos(t), y = best.yc + best.R * Math.sin(t); if (y <= surf(x) + 0.01) arc.push([ox + x * sc, oy - y * sc]); }
       if (arc.length > 1) it.push({ c: 'perim', l: arc });
-      it.push({ t: [ox + best.xc * sc, oy - best.yc * sc, `F_d = ${fmt(best.F, 2)}`] }, { c: 'ppt', o: [ox + best.xc * sc, oy - best.yc * sc, 3] });
+      it.push({ t: [ox + best.xc * sc + 6, Math.max(oy - best.yc * sc, 36), `F_d = ${fmt(best.F, 2)}`] }, { c: 'ppt', o: [ox + best.xc * sc, Math.max(oy - best.yc * sc, 30), 3] });
       const svg = EC.sketch(460, oy + depth * sc + 20, 'CROSS-SECTION - CRITICAL CIRCLE', it);
       return c.result({ spec: [['Embankment', `H = ${H} m, slope 1:${n}, fill φ' = ${i.phif}°`], ['Condition', i.mode === 'und' ? 'short term (undrained)' : 'long term (drained)'], ['Result', `F_d = ${fmt(best.F, 2)} (F_k = ${fmt(Fk, 2)})`]], bars: [], svg, Fd: best.F });
     }

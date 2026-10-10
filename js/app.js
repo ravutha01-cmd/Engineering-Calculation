@@ -75,7 +75,12 @@
         el('slab', 'S2', 'Roof', 'Typical', 1, 'Not started', 8, 30, { h: 175, qk: 1.5, gsdl: 2.5 }),
         el('punching', 'P1', 'L1–L8', 'B/2', 8, 'In design', -4, 14, { VEd: 640 }),
         el('steel', 'SB1', 'Roof', 'Canopy', 6, 'Not started', 10, 35),
-        el('steel', 'SC1', 'Roof', 'Canopy', 4, 'Not started', 12, 35, { sec: 'HEB 240', L: 4.5, NEd: 600, MEd: 45, VEd: 30, kLT: 1, wk: 0 })
+        el('steel', 'SC1', 'Roof', 'Canopy', 4, 'Not started', 12, 35, { sec: 'HEB 240', L: 4.5, NEd: 600, MEd: 45, VEd: 30, kLT: 1, wk: 0 }),
+        el('shearwall', 'W1', 'GF–L3', 'Core', 2, 'In design', -14, 8),
+        el('retainingwall', 'RW1', 'Basement', 'North', 1, 'Checked', -25, 1),
+        el('pileaxial', 'PA1', 'Foundation', 'All', 64, 'Approved', -42, -12),
+        el('windbuilding', 'WL1', 'Roof', 'Global', 1, 'Approved', -38, -10),
+        el('corbel', 'CB1', 'L1', 'C/4', 6, 'In design', -3, 16)
       ]
     };
     return { projects: [p], current: p.id };
@@ -181,7 +186,7 @@
       const ok = xs.filter(x => x.r.ok).length;
       const mu = xs.reduce((a, x) => Math.max(a, Number.isFinite(x.r.Umax) ? x.r.Umax : 0), 0);
       const dn = xs.filter(x => x.e.status === 'Approved' || x.e.status === 'IFC').length;
-      return `<div class="card cat-card" data-go="elements/${c.k}"><div class="top"><div class="ic">${ic(c.icon)}</div><div><h3>${c.l}</h3><div class="meta">${c.types.map(typeName).join(' · ')}</div></div></div>
+      return `<div class="card cat-card" data-go="elements/${c.k}"><div class="top"><div class="ic">${ic(c.icon)}</div><div><h3>${c.l}</h3><div class="meta">${c.types.length} element types available</div></div></div>
         <div class="nums"><div><b>${xs.length}</b>types</div><div><b>${xs.reduce((a, x) => a + (+x.e.qty || 1), 0)}</b>no. off</div><div><b style="color:${xs.length - ok ? 'var(--critical)' : 'inherit'}">${xs.length - ok}</b>revise</div><div><b>${xs.length ? fmt(mu, 2) : '–'}</b>U max</div></div>
         <div style="margin-top:10px">${ubar(xs.length ? dn / xs.length : 0).replace(/<span class="v">.*?<\/span>/, `<span class="v">${xs.length ? Math.round(dn / xs.length * 100) : 0}%</span>`).replace('title="Maximum utilisation', 'title="Approved / IFC share')}</div></div>`;
     }).join('');
@@ -220,7 +225,7 @@
       <td class="mark">${esc(e.mark)}</td><td>${esc(typeName(e.type))}</td><td>${esc(e.level || '')}</td><td>${esc(e.grid || '')}</td><td class="num">${esc(e.qty)}</td>
       <td>${pill(e.status)}</td><td class="num">${esc(e.due || '')}</td><td>${ubar(r.Umax)}</td><td>${resTag(r)}</td>
       <td class="no-print" style="white-space:nowrap"><button class="btn sm" data-dup="${e.id}" title="Duplicate">${ic('copy')}</button> <button class="btn sm danger" data-del="${e.id}" title="Delete">${ic('trash')}</button></td></tr>`; }).join('');
-    return `<div class="page-head"><div><h1>${cat ? cat.l : 'All elements'}</h1><div class="sub">${cat ? cat.types.map(typeName).join(' · ') : 'Project → main elements → elements'} · ${els.length} element types</div></div>
+    return `<div class="page-head"><div><h1>${cat ? cat.l : 'All elements'}</h1><div class="sub">${cat ? `${cat.types.length} design modules` : 'Project → main elements → elements'} · ${els.length} elements in this project</div></div>
       <div class="actions"><button class="btn primary" data-add="${cat ? cat.k : ''}">${ic('plus')}New element</button></div></div>
       <div class="tabs">${[{ k: '', l: 'All' }].concat(CATS).map(c => `<button class="${(c.k || '') === (catKey || '') ? 'active' : ''}" data-go="elements${c.k ? '/' + c.k : ''}">${c.l}<span class="badge">${p.elements.filter(e => !c.k || MOD[e.type].cat === c.k).length}</span></button>`).join('')}</div>
       <div class="card"><div class="tbl-wrap">${els.length ? `<table class="tbl"><thead><tr><th>Mark</th><th>Type</th><th>Level</th><th>Grid / location</th><th class="num">Qty</th><th>Status</th><th class="num">Due</th><th>Utilisation</th><th>Result</th><th class="no-print"></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty">No elements in this group yet.<br><br><button class="btn primary" data-add="${cat ? cat.k : ''}">${ic('plus')}Add the first one</button></div>`}</div></div>`;

@@ -230,7 +230,7 @@ EC.svg = {
 
 /* x-y line plot (used for interaction diagrams, M/V diagrams) */
 EC.plot = function (o) {
-  const W = o.w || 360, H = o.h || 260, P = { l: 52, r: 14, t: 26, b: 40 };
+  const W = o.w || 360, H = (o.h || 260) + (o.legend ? 14 : 0), P = { l: 52, r: 14, t: o.legend ? 40 : 26, b: 40 };
   const all = o.series.flatMap(s => s.pts);
   let xs = all.map(p => p[0]), ys = all.map(p => p[1]);
   if (o.extra) { xs = xs.concat(o.extra.map(p => p[0])); ys = ys.concat(o.extra.map(p => p[1])); }
@@ -251,7 +251,7 @@ EC.plot = function (o) {
     s += `<polyline class="pline s${se.cls === undefined ? i : se.cls}${se.dash ? ' dash' : ''}" points="${se.pts.map(p => px(p[0]) + ',' + py(p[1])).join(' ')}"><title>${se.name || ''}</title></polyline>`;
   });
   (o.points || []).forEach(p => { s += `<circle class="ppt ${p.ok === false ? 'bad' : ''}" cx="${px(p.x)}" cy="${py(p.y)}" r="5"><title>${p.t || ''}</title></circle><text class="tick strong" x="${px(p.x) + 8}" y="${py(p.y) - 6}">${p.t || ''}</text>`; });
-  if (o.legend) { let lx = W - P.r - 4; o.series.slice().reverse().forEach((se, k) => { const i = o.series.length - 1 - k; if (!se.name) return; const tw = se.name.length * 6 + 22; lx -= tw; s += `<line class="pline s${se.cls === undefined ? i : se.cls}${se.dash ? ' dash' : ''}" x1="${lx}" x2="${lx + 14}" y1="12" y2="12"/><text class="tick" x="${lx + 18}" y="15">${se.name}</text>`; }); }
+  if (o.legend) { let lx = W - P.r - 4; o.series.slice().reverse().forEach((se, k) => { const i = o.series.length - 1 - k; if (!se.name) return; const tw = se.name.length * 6 + 22; lx -= tw; s += `<line class="pline s${se.cls === undefined ? i : se.cls}${se.dash ? ' dash' : ''}" x1="${lx}" x2="${lx + 14}" y1="28" y2="28"/><text class="tick" x="${lx + 18}" y="31">${se.name}</text>`; }); }
   return s + '</svg>';
 };
 

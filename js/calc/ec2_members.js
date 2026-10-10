@@ -77,7 +77,7 @@
     }
   });
   function drawWall(i, L, dc) {
-    const lw = +i.lw, t = +i.t, sc = 700 / lw, H = Math.max(t * sc, 40), oy = 40;
+    const lw = Math.max(+i.lw, 1), t = +i.t, sc = 700 / lw, H = EC.clamp(t * sc, 30, 120), oy = 40;
     let s = EC.svg.open(760, H + 80) + EC.svg.label(30, 20, 'WALL PLAN', 'ttl');
     s += `<rect class="conc" x="30" y="${oy}" width="${lw * sc}" height="${H}"/>`;
     s += `<rect class="tieband" x="30" y="${oy}" width="${i.le * sc}" height="${H}"/><rect class="tieband" x="${30 + (lw - i.le) * sc}" y="${oy}" width="${i.le * sc}" height="${H}"/>`;

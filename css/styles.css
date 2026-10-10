@@ -451,3 +451,4 @@ table.rmat td { border: 1px solid var(--border); padding: 2px 8px; text-align: r
 .calc .vtab.sumv td:nth-child(2) { min-width: 220px; }
 .calc .vtab td.tx { text-align: left; white-space: normal; min-width: 140px; }
 .calc .vtab th { text-align: left; }
+.res.info { background: var(--key-bg); color: var(--accent); border-color: var(--key-border); }

@@ -214,6 +214,7 @@
     if (isStr(c)) {
       if (STOK.test(c.s) && !STBAD.test(c.s)) return `<span class="res ok">${esc(c.s)}</span>`;
       if (STBAD.test(c.s)) return `<span class="res bad">${esc(c.s)}</span>`;
+      if (/^[A-Z][A-Z0-9 \-–/()+.,]{3,}$/.test(c.s) && !/\d{2,}/.test(c.s)) return `<span class="res info">${esc(c.s)}</span>`;
       return esc(c.s);
     }
     if (c.m) return valH(c);
@@ -395,13 +396,29 @@
           const rows = items.map((it, k) => {
             const u = uv[k] && uv[k].n;
             const st = sv && sv[k] && sv[k].s !== undefined ? sv[k].s : '';
-            const ok = !st || (STOK.test(st) && !STBAD.test(st));
+            const sc = STBAD.test(st) ? 'bad' : STOK.test(st) ? 'ok' : 'info';
             const ex = Array.isArray(uexp) && uexp[0] === 'M' && uexp[3][k] ? fm(R.mm(uexp[3][k])) : '';
             const cx = Array.isArray(sexp) && sexp[0] === 'M' && sexp[3][k] && sexp[3][k][0] === 'v' ? `<small class="ref">${symH(sexp[3][k][1])}</small>` : '';
-            return `<tr><td class="rn">${k + 1}</td><td>${esc(it && it.s !== undefined ? it.s : '')}</td><td class="ex">${ex}</td><td class="ub">${Number.isFinite(u) ? api.ubar(u) : ''}</td><td>${st ? `<span class="res ${ok ? 'ok' : 'bad'}">${esc(st)}</span>` : ''}${cx}</td></tr>`;
+            return `<tr><td class="rn">${k + 1}</td><td>${esc(it && it.s !== undefined ? it.s : '')}</td><td class="ex">${ex}</td><td class="ub">${Number.isFinite(u) ? api.ubar(u) : ''}</td><td>${st ? `<span class="res ${sc}">${esc(st)}</span>` : ''}${cx}</td></tr>`;
           }).join('');
           out += `<div class="sumblock"><div class="h2">Summary of checks <small>(Item / U / Status)</small></div><div class="vtab sumv"><table><thead><tr><th>#</th><th>Item</th><th>Check</th><th>Utilisation U</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
           skip.add(iu); if (is >= 0) skip.add(is);
+          // the worksheet's own Summary := augment(Item, U, Status) repeats this table: hide it (and its label)
+          for (let k = i + 1; k < flat.length; k++) {
+            const g = flat[k];
+            if (g.k !== 'm' || g.e[0] !== 'def') continue;
+            const rx = Array.isArray(g.e[2]) && g.e[2][0] === 'ev' ? g.e[2][1] : g.e[2];
+            if (Array.isArray(rx) && rx[0] === 'c' && rx[1][1] === 'augment' && rx[2].length >= 2 && rx[2].some(a => Array.isArray(a) && a[1] === 'Item') && rx[2].some(a => Array.isArray(a) && (a[1] === 'U' || a[1] === 'Status'))) {
+              skip.add(k);
+              if (labelOf[k] != null) {
+                isLabel[labelOf[k]] = true;
+                // pass its label on to the next result without one (e.g. U_max "Governing utilisation")
+                for (let q = k + 1; q < Math.min(flat.length, k + 4); q++) if (flat[q].k === 'm' && !skip.has(q)) { if (labelOf[q] == null) labelOf[q] = labelOf[k]; break; }
+              }
+              // a caption just above it ("Summary table Item | U | Status") goes too
+              for (let q = k - 1; q > k - 3 && q > i; q--) if (flat[q].k === 't' && !/<h[234]>/.test(flat[q].h) && /summary/i.test(plainText(flat[q].h))) isLabel[q] = true;
+            }
+          }
           if (labelOf[iu] != null) isLabel[labelOf[iu]] = true; if (is >= 0 && labelOf[is] != null) isLabel[labelOf[is]] = true;
           continue;
         }

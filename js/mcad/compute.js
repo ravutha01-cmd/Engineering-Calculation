@@ -110,15 +110,18 @@
     const g = n => { try { const v = S.env.get(n); return v === undefined ? undefined : v; } catch (e) { return undefined; } };
     const vec = v => (isM(v) ? v.a : v === undefined ? [] : [v]);
     const out = { rows: [] };
-    const U = g('U'), St = g('Status'), It = g('Item'), Sm = g('Summary'), Um = g('U_max'), R = g('Result');
     const num = x => (typeof x === 'number' ? x : isQ(x) ? x.v : NaN);
+    const U = g('U'), St = g('Status'), It = g('Item'), Sm = g('Summary'), Um = g('U_max'), R = g('Result');
     if (isM(Sm) && Sm.c >= 2) {
       for (let i = 0; i < Sm.r; i++) {
         const cells = []; for (let j = 0; j < Sm.c; j++) cells.push(Sm.get(i, j));
         const item = cells.find(c => typeof c === 'string');
         const st = cells.slice(1).reverse().find(c => typeof c === 'string');
-        const u = cells.find(c => typeof c === 'number');
-        out.rows.push({ item: item || '', U: Number.isFinite(u) ? u : null, st: st || '' });
+        const u = cells.find(c => typeof c === 'number' || isQ(c));
+        // the numeric column is a utilisation only when the worksheet defines U (Wind_Building lists values)
+        const row = { item: item || '', U: U !== undefined && Number.isFinite(num(u)) ? num(u) : null, st: st || '' };
+        if (U === undefined && u !== undefined) row.val = num(u);
+        out.rows.push(row);
       }
     } else if (St !== undefined) {
       const sv = vec(St), uv = vec(U), iv = vec(It);

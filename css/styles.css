@@ -396,3 +396,5 @@ svg.mplot .pt { fill: var(--muted); }
 @media print { .ws { font-size: 11px; } details.warea { border: 0; } .wm { break-inside: avoid; } }
 .mres { font-weight: 600; }
 .inputs .field.wide input:not([type="number"]) { text-align: left; }
+/* long labels on drop-downs / text inputs: label on its own line, control full width */
+.field.wide.lab-top { grid-template-columns: minmax(0, 1fr); gap: 3px; margin-bottom: 10px; }

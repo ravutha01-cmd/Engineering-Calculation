@@ -142,7 +142,7 @@
     const sym = n => `<math class="isym">${R.ident(n)}</math>`;
     const field = i => {
       const o = ov[i.n];
-      const edited = o !== undefined ? ' edited' : '';
+      const edited = (o !== undefined ? ' edited' : '') + ((i.l || '').length > 26 && i.kind !== 'num' ? ' lab-top' : '');
       const lab = `<span class="fl" title="${esc(i.l || i.n)}">${esc(i.l || i.n)} ${sym(i.n)}</span>`;
       if (i.kind === 'combo') {
         const k = o !== undefined ? o : i.v;

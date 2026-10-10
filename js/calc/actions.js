@@ -191,7 +191,7 @@
   EC.modules.selfweight = def({
     type: 'selfweight', name: 'Self Weight Build-ups', prefix: 'GW', code: 'prEN 1991-1-1:2023 Annex A', mathcad: 'EC1_Actions\\SelfWeight_Design',
     groups: [
-      { t: 'Floor build-up', f: [T('floor', 'Layers (material no., thickness mm)', ['mat no.', 't (mm)'], [[1, 200], [3, 50], [4, 15], [9, 12]]), F('serv', 'Services / ceiling', 'kPa', 0.5), F('gass', 'Assumed floor g_k in design', 'kPa', 7.0)] },
+      { t: 'Floor build-up', f: [T('floor', 'Layers (material no., thickness mm)', ['mat no.', 't (mm)'], [[1, 200], [3, 50], [4, 15], [9, 12]]), F('serv', 'Services / ceiling', 'kPa', 0.5), F('gass', 'Assumed floor g_k in design', 'kPa', 7.5)] },
       { t: 'Wall', f: [T('wall', 'Wall layers', ['mat no.', 't (mm)'], [[7, 200], [9, 12], [9, 12]]), F('hw', 'Wall height', 'm', 3.2), F('open', 'Openings', '%', 15), F('wass', 'Assumed wall line load', 'kN/m', 14)] },
       { t: 'Take-down', f: [F('A', 'Column tributary area', 'm²', 50), F('nf', 'Floors', 'no', 8), F('Lw', 'Wall length on tributary area', 'm', 6)] }
     ],

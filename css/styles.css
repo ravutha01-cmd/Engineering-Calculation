@@ -398,3 +398,30 @@ svg.mplot .pt { fill: var(--muted); }
 .inputs .field.wide input:not([type="number"]) { text-align: left; }
 /* long labels on drop-downs / text inputs: label on its own line, control full width */
 .field.wide.lab-top { grid-template-columns: minmax(0, 1fr); gap: 3px; margin-bottom: 10px; }
+
+/* ---------- worksheet in report form (Calculation tab) ---------- */
+.calc .row .math { line-height: 1.6; }
+.calc .row .math math.fm { font-size: 14px; }
+.calc .row .math .f math.fm { color: var(--ink-2); }
+.calc .row .math .n math.fm { color: var(--muted); font-size: 13px; }
+.calc .row .math .n { margin-left: 4px; }
+.calc .row .math .sep { height: 6px; }
+.calc .row .val.blk { display: block; white-space: normal; }
+.calc .row .val.edited { box-shadow: inset 3px 0 0 var(--accent); }
+.calc .row.chk .val { background: var(--ok-bg); padding: 0 6px; border-radius: 4px; }
+.calc .row.bad { background: var(--bad-bg); }
+.calc .row .vname { font-weight: 700; }
+.calc .row .vname::after { content: ' ='; font-weight: 400; }
+.calc details.prog > summary { cursor: pointer; list-style: none; }
+.calc details.prog > summary span { color: var(--accent); font-family: Inter, system-ui, sans-serif; font-size: 12px; }
+.calc details.prog[open] > summary span { display: none; }
+.calc details.prog > math { display: block; overflow-x: auto; padding: 6px 0; }
+table.rmat { border-collapse: collapse; font-size: 13px; margin: 4px 0; }
+table.rmat td { border: 1px solid var(--border); padding: 2px 8px; text-align: right; font-variant-numeric: tabular-nums; }
+.calc .rtab { margin: 6px 0 12px; }
+.calc .rtab td.rn { color: var(--muted); }
+.calc figure.rplot { margin: 10px 0 14px 300px; max-width: 560px; }
+@media (max-width: 760px) { .calc figure.rplot { margin-left: 0; } }
+.calc .row .math { overflow-x: auto; min-width: 0; }
+.calc .row .math .f math.fm { math-style: normal; }
+.calc .row .math .n math.fm { math-style: normal; font-size: 12.5px; }

@@ -186,40 +186,162 @@
     }).join('') || '<div class="empty">This worksheet has no editable inputs.</div>';
   }
 
-  /* ---------- worksheet (calculation) view ---------- */
-  function worksheetHTML(e, doc, r) {
+  /* ---------- calculation report (worksheet regions in report form) ---------- */
+  const SUPS = { '2': '²', '3': '³', '4': '⁴', '-1': '⁻¹', '-2': '⁻²', '0.5': '⁰·⁵' };
+  function unitStr(u) {
+    let t = typeof u === 'string' ? u : R.unitText(u);
+    t = t.replace(/\^(-?[\d.]+)/g, (m, k) => SUPS[k] || '^' + k).replace(/kN·m/g, 'kNm').replace(/^1\//, '1/');
+    return t;
+  }
+  const symH = n => { const k = n.indexOf('_'); return k > 0 ? `${esc(n.slice(0, k))}<sub>${esc(n.slice(k + 1))}</sub>` : esc(n); };
+  const STOK = /^(OK|PASS|SATISFIED)\b/i, STBAD = /(NOT OK|REVISE|FAIL|INADEQUATE|REQUIRED)/i;
+  function fnum(x) {
+    if (!Number.isFinite(x)) return Number.isNaN(x) ? 'NaN' : (x > 0 ? '∞' : '−∞');
+    const a = Math.abs(x);
+    if (a !== 0 && (a < 1e-4 || a >= 1e9)) return EC.mcad.fmtNum(x, 3);
+    const dp = a >= 1000 ? 0 : a >= 100 ? 1 : a >= 10 ? 2 : a >= 1 ? 3 : a === 0 ? 0 : Math.min(6, 2 - Math.floor(Math.log10(a)));
+    return x.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: dp });
+  }
+  function numH(v) {
+    if (v.n === undefined || v.n === null || Number.isNaN(v.n)) return 'NaN';
+    const u = v.uA ? unitStr(v.uA) : v.us ? unitStr(v.us) : '';
+    return fnum(v.n) + (u ? ' ' + esc(u) : '');
+  }
+  function valH(v) {
+    if (!v) return '';
+    if (v.s !== undefined) return `“${esc(v.s)}”`;
+    if (v.f !== undefined) return 'f(…)';
+    if (v.m) {
+      const [r, c] = v.m;
+      if (c === 1 && r <= 8) return '[' + v.cells.map(x => valH(x)).join(', ') + ']ᵀ';
+      if (r === 1 && c <= 8) return '[' + v.cells.map(x => valH(x)).join(', ') + ']';
+      const rr = Math.min(r, 60), cc = Math.min(c, 16);
+      let t = '<table class="rmat"><tbody>';
+      for (let a = 0; a < rr; a++) { t += '<tr>'; for (let b = 0; b < cc; b++) t += `<td>${valH(v.cells[a * cc + b])}</td>`; t += '</tr>'; }
+      return t + `</tbody></table>${v.cut ? `<small class="ref">${r} × ${c}, first rows shown</small>` : ''}`;
+    }
+    return numH(v);
+  }
+  const plainText = h => h.replace(/<br>/g, ' ').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
+  function splitLabel(t) {
+    const refs = [];
+    let lab = t;
+    let m;
+    while ((m = lab.match(/\s*(\[[^\]]*\]|\((?=[^)]*(?:\d|Table|Annex|Eq|NDP|EN ))[^)]*\))\s*$/))) { refs.unshift(m[1].replace(/^\(|\)$/g, '')); lab = lab.slice(0, m.index); }
+    return { lab: lab.trim(), ref: refs.join(' · ') };
+  }
+  const isLiteral = x => typeof x === 'number' || (Array.isArray(x) && (x[0] === 's' || x[0] === 'cb' || ((x[0] === 'o' || x[0] === '()' || x[0] === 'M') && (function lit(y) { if (y == null || typeof y === 'number') return true; if (!Array.isArray(y)) return true; if (y[0] === 'v' || y[0] === 'c' || y[0] === 'P' || y[0] === 'f' || y[0] === 'k') return false; if (y[0] === 'o' && !['*', '/', '^', 'neg', '-'].includes(y[1])) return false; return y.every(lit); })(x))));
+  const fm = x => `<math class="fm">${x}</math>`;
+
+  /* one math region -> {cls, html} */
+  function mathLine(reg, v, ov) {
+    const e = reg.e;
+    const c = (reg.c || '').toUpperCase();
+    let cls = c === '#FFF2CC' ? 'inp' : c === '#DDEBF7' ? 'key' : c === '#E2EFDA' ? 'chk' : '';
+    const err = v && v.err ? `<div class="errmsg">⚠ ${esc(v.err)}</div>` : '';
+    if (e[0] === 'def' && e[1][0] === 'fn') {
+      const t = e[1];
+      const body = Array.isArray(e[2]) && e[2][0] === 'ev' ? e[2][1] : e[2];
+      const head = `<mrow>${R.ident(t[1])}<mo stretchy="false">(</mo>${t[2].map(R.ident).join('<mo>,</mo>')}<mo stretchy="false">)</mo><mo>≔</mo></mrow>`;
+      if (Array.isArray(body) && body[0] === 'P') return { cls: 'fn', html: `<details class="prog" ${opts.areas ? 'open' : ''}><summary>${fm(head)} <span>program, ${body[1].length} lines – show</span></summary>${fm(R.mm(body))}</details>${err}` };
+      return { cls: 'fn', html: `<span class="f">${fm(head + R.mm(body))}</span>${err}` };
+    }
+    let lhs = '', rhs = null, shown = false;
+    if (e[0] === 'def') {
+      lhs = e[1][0] === 'v' ? e[1][1] : null;
+      shown = Array.isArray(e[2]) && e[2][0] === 'ev';
+      rhs = shown ? e[2][1] : e[2];
+    } else if (e[0] === 'ev') { rhs = e[1]; shown = true; }
+    const lhsH = lhs ? symH(lhs) : (e[0] === 'def' ? fm(R.mm(e[1])) : fm(R.mm(rhs)));
+    const ovr = lhs && ov[lhs] !== undefined;
+    let fLine = '';
+    let resH = v && v.v ? valH(v.v) : '';
+    if (Array.isArray(rhs) && rhs[0] === 'cb') {
+      const k = v && v.sel != null ? v.sel : rhs[3];
+      const name = rhs[1][k] || '';
+      const n = v && v.v ? valH(v.v) : '';
+      resH = esc(name) + (n && n !== esc(name) && n !== `“${esc(name)}”` ? ` → ${n}` : '');
+      cls = cls || 'inp';
+    } else if (rhs && !isLiteral(rhs) && e[0] === 'def') {
+      fLine = `<span class="f">${fm((lhs ? R.ident(lhs) : R.mm(e[1])) + '<mo>=</mo>' + R.mm(rhs))}</span>`;
+      if (opts.sub && v && v.sub) fLine += `<span class="n">${fm('<mo>=</mo>' + R.mm(v.sub))}</span>`;
+    } else if (ovr) cls = 'inp';
+    let verdict = '';
+    if (v && v.v && v.v.s !== undefined && (STOK.test(v.v.s) || STBAD.test(v.v.s))) {
+      verdict = `<span class="verdict res ${STOK.test(v.v.s) && !STBAD.test(v.v.s) ? 'ok' : 'bad'}">${esc(v.v.s)}</span>`;
+      resH = '';
+    }
+    const valLine = resH ? `<span class="val${v && v.v && v.v.m && !(v.v.m[0] <= 8 && (v.v.m[1] === 1 || v.v.m[0] === 1)) ? ' blk' : ''}${ovr ? ' edited' : ''}">${lhs ? lhsH + ' = ' : ''}${resH}</span>` : (verdict && lhs ? `<span class="vname">${lhsH}</span>` : '');
+    const html = `${fLine}${fLine ? '<br>' : ''}${valLine}${verdict}${err}`;
+    return { cls: (v && v.err ? 'bad ' : '') + cls, html: html || `<span class="f">${fm(R.mm(e))}</span>` };
+  }
+
+  function reportHTML(e, doc, r) {
     const flat = EC.mcadc.flatten(doc);
     const ov = e.inputs || {};
-    let out = '', rowItems = [], rowY = null;
-    const flush = () => {
-      if (!rowItems.length) return;
-      const left = rowItems.filter(x => x.x < 290 && x.k === 't');
-      const right = rowItems.filter(x => !(x.x < 290 && x.k === 't'));
-      if (left.length && right.length) out += `<div class="wrow">${'<div class="wl">' + left.map(x => x.h).join('') + '</div><div class="wr">' + right.map(x => x.h).join('') + '</div>'}</div>`;
-      else out += rowItems.map(x => x.h).join('');
-      rowItems = []; rowY = null;
-    };
-    flat.forEach((reg, idx) => {
-      if (reg.k === 'area') { flush(); out += reg.end ? '</div></details>' : `<details class="warea" ${opts.areas || !reg.col ? 'open' : ''}><summary>Mathcad area (hidden in the worksheet) – click to show</summary><div>`; return; }
-      if (reg.k === 'st') { flush(); return; }
-      let h = '';
-      if (reg.k === 't') h = `<div class="wt">${reg.h}</div>`;
-      else if (reg.k === 'm') {
-        let v = r && r.vals[idx];
-        const name = reg.e[0] === 'def' && reg.e[1][0] === 'v' ? reg.e[1][1] : null;
-        if (v && name && ov[name] !== undefined && !(Array.isArray(reg.e[2]) && (reg.e[2][0] === 'cb' || (reg.e[2][0] === 'ev' && reg.e[2][1][0] === 'cb')))) v = Object.assign({}, v, { inputHTML: R.mm(ov[name]) });
-        const c = (reg.c || '').toUpperCase();
-        const cls = c === '#FFF2CC' ? 'cin' : c === '#E2EFDA' ? 'cchk' : c === '#DDEBF7' ? 'ckey' : '';
-        let m;
-        try { m = R.region(reg, v, opts); } catch (er) { m = `<code>${esc(R.text(reg.e))}</code>`; }
-        h = `<div class="wm ${cls}${v && v.err ? ' werr' : ''}${v && v.ov ? ' wov' : ''}">${m}${v && v.err ? `<div class="errmsg">⚠ ${esc(v.err)}</div>` : ''}</div>`;
-      } else if (reg.k === 'p') h = `<div class="wp">${R.plot(reg, r && r.vals[idx])}</div>`;
-      if (!h) return;
-      const y = reg.y;
-      if (rowY !== null && Math.abs(y - rowY) > 10) flush();
-      if (rowY === null) rowY = y;
-      rowItems.push({ x: reg.x, k: reg.k, h });
+    // containers: regions between area markers share coordinates
+    const cont = []; let cid = 0; const stack = [0];
+    flat.forEach(reg => { if (reg.k === 'area') { if (reg.end) stack.pop(); else stack.push(++cid); cont.push(-1); return; } cont.push(stack[stack.length - 1]); });
+    // label of each math/plot region: text on the same line to its left
+    const labelOf = {}, isLabel = {};
+    flat.forEach((reg, i) => {
+      if (reg.k !== 'm' || reg.inSt) return;
+      let best = -1, d = 1e9;
+      for (let k = Math.max(0, i - 6); k < Math.min(flat.length, i + 6); k++) {
+        const t = flat[k];
+        if (t.k !== 't' || cont[k] !== cont[i] || t.x >= reg.x - 40) continue;
+        const dy = Math.abs(t.y - reg.y);
+        if (dy < 14 && dy < d) { d = dy; best = k; }
+      }
+      if (best < 0 && reg.x >= 290 && i > 0 && flat[i - 1].k === 't' && !isLabel[i - 1] && cont[i - 1] === cont[i] && !/<h[234]>/.test(flat[i - 1].h) && reg.y - flat[i - 1].y < 45 && plainText(flat[i - 1].h).length < 160) best = i - 1;
+      if (best < 0 && reg.x < 290) {
+        // wide formula placed under its description: use the plain text just above
+        for (let k = i - 1; k >= Math.max(0, i - 3); k--) {
+          const t = flat[k];
+          if (t.k === 'm' || t.k === 'p' || t.k === 'area' || t.k === 'st' || cont[k] !== cont[i]) break;
+          if (t.k === 't' && !isLabel[k] && !/<h[234]>/.test(t.h) && reg.y - t.y < 130 && plainText(t.h).length < 160) { best = k; break; }
+        }
+      }
+      if (best >= 0) { labelOf[i] = best; isLabel[best] = true; }
     });
+    let out = '', first = true, row = null;
+    const flush = () => { if (!row) return; const sp = splitLabel(row.lab); out += `<div class="row ${row.cls}"><div class="lab">${esc(sp.lab)}${sp.ref ? `<span class="ref">${esc(sp.ref)}</span>` : ''}</div><div class="math">${row.lines.join('<div class="sep"></div>')}</div></div>`; row = null; };
+    for (let i = 0; i < flat.length; i++) {
+      const reg = flat[i];
+      if (reg.k === 'area') { flush(); out += reg.end ? '</div></details>' : `<details class="warea" ${opts.areas || !reg.col ? 'open' : ''}><summary>Supporting calculation (collapsed area in the Mathcad worksheet)</summary><div>`; continue; }
+      if (reg.k === 'st') {
+        flush();
+        const cols = []; let k = i + 1;
+        while (k < flat.length && flat[k].inSt) cols.push(k++);
+        const vs = cols.map(c => r.vals[c] && r.vals[c].v);
+        const nrow = Math.max(0, ...vs.map(v => (v && v.m ? v.m[0] : 1)));
+        const head = cols.map(c => { const ee = flat[c].e; const n = ee[0] === 'def' && ee[1][0] === 'v' ? ee[1][1] : '?'; const v = r.vals[c] && r.vals[c].v; const u = v && v.cells && v.cells[0] && (v.cells[0].uA || v.cells[0].us); return `<th>${symH(n)}${u ? ` <small>(${esc(unitStr(u))})</small>` : ''}</th>`; }).join('');
+        let body = '';
+        for (let a = 0; a < nrow; a++) body += `<tr><td class="rn">${a + 1}</td>${vs.map(v => { const cell = v && v.m ? v.cells[a * v.m[1]] : v; const t = cell ? (cell.s !== undefined ? esc(cell.s) : fnum(cell.n)) : ''; return `<td class="num">${t}</td>`; }).join('')}</tr>`;
+        const err = cols.map(c => r.vals[c] && r.vals[c].err).filter(Boolean);
+        out += `<div class="tbl-wrap rtab"><table class="tbl"><thead><tr><th>#</th>${head}</tr></thead><tbody>${body}</tbody></table>${err.length ? `<div class="errmsg">⚠ ${esc(err[0])}</div>` : ''}</div>`;
+        i = k - 1; continue;
+      }
+      if (reg.k === 't') {
+        if (isLabel[i]) continue;
+        flush();
+        const m = reg.h.match(/<h([234])>/);
+        const txt = plainText(reg.h);
+        if (!txt) continue;
+        if (m) { out += first ? `<div class="ctitle">${esc(txt)}</div>` : `<div class="${m[1] === '4' ? 'h2' : 'h1'}">${esc(txt)}</div>`; first = false; continue; }
+        first = false;
+        out += /^(note|nb|warning|important)\b|\[verify\]|\[practice\]/i.test(txt) ? `<div class="note">${esc(txt)}</div>` : `<div class="text">${esc(txt)}</div>`;
+        continue;
+      }
+      if (reg.k === 'p') { flush(); out += `<figure class="rplot">${R.plot(reg, r.vals[i])}</figure>`; continue; }
+      if (reg.k !== 'm') continue;
+      let line;
+      try { line = mathLine(reg, r.vals[i], ov); } catch (er) { line = { cls: '', html: `<code>${esc(R.text(reg.e))}</code>` }; }
+      const lab = labelOf[i] != null ? plainText(flat[labelOf[i]].h) : '';
+      if (row && labelOf[i] != null && row.li === labelOf[i]) { row.lines.push(line.html); if (line.cls && !row.cls) row.cls = line.cls; continue; }
+      flush();
+      row = { li: labelOf[i], lab, cls: line.cls, lines: [line.html] };
+    }
     flush();
     return out;
   }
@@ -264,8 +386,8 @@
     const summary = `<div class="verdict-banner ${verdict}">${api.ic(s.ok ? 'check' : 'alert')}<div>${esc(s.result || (s.ok ? 'All checks satisfied' : 'REVISE - see NOT OK items'))}<div style="font-weight:400;font-size:12px;opacity:.85">${s.rows.length} checks · ${s.nBad} not OK${r.errors ? ` · ${r.errors} regions with errors` : ''} · calculated in ${r.ms} ms</div></div><div class="big">U<sub>max</sub> = ${U == null ? '–' : api.fmt(U, 3)}</div></div>
       ${s.rows.length ? `<div class="tbl-wrap"><table class="tbl sumtbl"><thead><tr><th>Item</th><th>Utilisation U</th><th>Status</th></tr></thead><tbody>${s.rows.map(x => { const ok = !x.st || /^(OK|PASS|N\/A|-|INFO|SATISFIED)/i.test(x.st.trim()); return `<tr><td class="item">${esc(x.item)}</td><td>${x.U == null ? '' : api.ubar(x.U)}</td><td><span class="res ${ok ? 'ok' : 'bad'}">${esc(x.st || '')}</span></td></tr>`; }).join('')}</tbody></table></div>` : ''}
       ${keyTable(r, doc, 'ckey', 'Key results')}`;
-    const tools = `<div class="wtools no-print"><label><input type="checkbox" data-wopt="sub" ${opts.sub ? 'checked' : ''}> Substituted values</label><label><input type="checkbox" data-wopt="all" ${opts.all ? 'checked' : ''}> Value of every definition</label><label><input type="checkbox" data-wopt="areas" ${opts.areas ? 'checked' : ''}> Open hidden areas</label><span class="hint">Formulas are read directly from ${esc(mod.mcFile)} – unchanged.</span></div>`;
-    const calc = tab === 'calc' ? `${tools}<div class="ws">${worksheetHTML(e, doc, r)}</div>` : '<div class="ws"></div>';
+    const tools = `<div class="wtools no-print"><label><input type="checkbox" data-wopt="sub" ${opts.sub ? 'checked' : ''}> Show substituted values</label><label><input type="checkbox" data-wopt="areas" ${opts.areas ? 'checked' : ''}> Open programs &amp; supporting calculations</label><span class="hint">Formulas from ${esc(mod.mcFile)} – unchanged</span></div>`;
+    const calc = tab === 'calc' ? `${tools}<div class="calc">${reportHTML(e, doc, r)}</div>` : '<div class="calc"></div>';
     const detail = detailHTML(e, doc, r);
     const spec = `<dl class="spec">${[['Element', `${e.mark} – ${mod.name}`], ['Location', `${e.level || '–'}, ${e.grid || '–'} (${e.qty || 1} no.)`], ['Design basis', mod.title], ['Worksheet', mod.mathcad]].map(x => `<dt>${esc(x[0])}</dt><dd>${esc(x[1])}</dd>`).join('')}</dl>
       ${inputSummary(e, doc)}${keyTable(r, doc, 'ckey', 'Design results to specify')}${keyTable(r, doc, 'cchk', 'Checks')}`;

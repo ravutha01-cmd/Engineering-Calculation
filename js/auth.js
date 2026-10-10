@@ -37,7 +37,7 @@
     return gis;
   }
   /* must be called from a click (opens Google's sign-in window) */
-  async function googleToken(hint) {
+  async function googleToken(hint, choose) {
     if (!CFG.googleClientId) throw new Error('Google Drive is not set up yet: add the Google OAuth client ID to js/config.js (see README, "Accounts").');
     await loadGis();
     const tok = await new Promise((res, rej) => {
@@ -46,7 +46,7 @@
         callback: r => (r && r.access_token ? res(r) : rej(new Error((r && r.error) || 'Google sign-in cancelled'))),
         error_callback: e => rej(new Error((e && (e.message || e.type)) || 'Google sign-in failed'))
       });
-      client.requestAccessToken({ prompt: '' });
+      client.requestAccessToken({ prompt: choose ? 'select_account' : '', hint: hint || undefined, login_hint: hint || undefined });
     });
     const info = await (await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: 'Bearer ' + tok.access_token } })).json();
     const allowed = (CFG.adminEmails || []).map(x => x.toLowerCase());
@@ -71,11 +71,11 @@
     const L = lock();
     if (L) {
       if (L.user.toLowerCase() !== user.toLowerCase() || (await check(user, password, ub64(L.salt), L.iter)) !== L.check) throw new Error('Wrong username or password');
-      const t = await googleToken(L.email || (CFG.adminEmails || [])[0]);
+      const t = await googleToken(L.email || (CFG.adminEmails || [])[0], true);
       if (L.email && t.email && t.email.toLowerCase() !== L.email.toLowerCase()) { ss.del(TKEY); throw new Error('This device is set up for ' + L.email + ' - sign in with that Google account'); }
     } else {
       // first Admin sign-in on this device: Google proves who you are, then the username / password are set
-      const t = await googleToken((CFG.adminEmails || [])[0]);
+      const t = await googleToken((CFG.adminEmails || [])[0], true);
       const salt = crypto.getRandomValues(new Uint8Array(16));
       ls.set(LKEY, { user, salt: b64(salt), iter: ITER, check: await check(user, password, salt, ITER), email: t.email, set: new Date().toISOString() });
     }

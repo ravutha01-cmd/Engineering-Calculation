@@ -254,3 +254,105 @@ EC.plot = function (o) {
   if (o.legend) { let lx = W - P.r - 4; o.series.slice().reverse().forEach((se, k) => { const i = o.series.length - 1 - k; if (!se.name) return; const tw = se.name.length * 6 + 22; lx -= tw; s += `<line class="pline s${se.cls === undefined ? i : se.cls}${se.dash ? ' dash' : ''}" x1="${lx}" x2="${lx + 14}" y1="12" y2="12"/><text class="tick" x="${lx + 18}" y="15">${se.name}</text>`; }); }
   return s + '</svg>';
 };
+
+/* ---------- table inputs + small helpers ---------- */
+EC.T = (k, l, cols, rows) => ({ k, l, cols, d: rows });
+EC.rows = v => (Array.isArray(v) ? v : []).map(r => r.map(Number)).filter(r => r.every(Number.isFinite));
+EC.interp = function (xs, ys, x) {
+  if (x <= xs[0]) return ys[0];
+  for (let i = 1; i < xs.length; i++) if (x <= xs[i]) return ys[i - 1] + (ys[i] - ys[i - 1]) * (x - xs[i - 1]) / (xs[i] - xs[i - 1]);
+  return ys[ys.length - 1];
+};
+EC.rad = d => d * Math.PI / 180;
+EC.deg = r => r * 180 / Math.PI;
+EC.Calc.prototype.q = function (l, s, f, v, u, r, key) { return this.v({ l, s, f, v, u, r, key }); };
+EC.Calc.prototype.c = function (l, s, Ed, Rd, u, r, item, f) { return this.chk({ l, s, Ed, Rd, u, r, item: item === undefined ? l : item, f }); };
+EC.Calc.prototype.tbl = function (head, rows, dp) { this.out.push({ k: 'tbl', head, rows, dp }); };
+
+/* ---------- soil mechanics ---------- */
+EC.soil = {
+  Ka: phi => Math.pow(Math.tan(EC.rad(45 - phi / 2)), 2),
+  Kp: phi => Math.pow(Math.tan(EC.rad(45 + phi / 2)), 2),
+  K0: phi => 1 - Math.sin(EC.rad(phi)),
+  /* Coulomb active / passive; phi, delta (wall friction), beta (backfill slope), alpha (back face from vertical) in degrees */
+  KaC(phi, delta, beta, alpha) {
+    const f = EC.rad(phi), d = EC.rad(delta || 0), b = EC.rad(beta || 0), a = EC.rad(alpha || 0);
+    const num = Math.pow(Math.cos(f - a), 2);
+    const root = Math.sqrt(Math.max(0, Math.sin(f + d) * Math.sin(f - b) / (Math.cos(d + a) * Math.cos(a - b))));
+    return num / (Math.pow(Math.cos(a), 2) * Math.cos(d + a) * Math.pow(1 + root, 2));
+  },
+  KpC(phi, delta, beta) {
+    const f = EC.rad(phi), d = EC.rad(delta || 0), b = EC.rad(beta || 0);
+    const root = Math.sqrt(Math.max(0, Math.sin(f + d) * Math.sin(f + b) / (Math.cos(d) * Math.cos(b))));
+    return Math.pow(Math.cos(f), 2) / (Math.cos(d) * Math.pow(1 - root, 2));
+  },
+  /* EN 1997-1 Annex D bearing factors */
+  Nq: phi => Math.exp(Math.PI * Math.tan(EC.rad(phi))) * Math.pow(Math.tan(EC.rad(45 + phi / 2)), 2),
+  Nc: phi => phi < 0.01 ? Math.PI + 2 : (EC.soil.Nq(phi) - 1) / Math.tan(EC.rad(phi)),
+  Ng: phi => 2 * (EC.soil.Nq(phi) - 1) * Math.tan(EC.rad(phi)),
+  gw: 9.81
+};
+
+/* ---------- wind EN 1991-1-4 (peak velocity pressure) ---------- */
+EC.TERRAIN = [{ v: '0', l: '0 - sea / coastal', z0: 0.003, zmin: 1 }, { v: 'I', l: 'I - lakes, flat open', z0: 0.01, zmin: 1 }, { v: 'II', l: 'II - low vegetation, isolated obstacles', z0: 0.05, zmin: 2 }, { v: 'III', l: 'III - suburban / forest', z0: 0.3, zmin: 5 }, { v: 'IV', l: 'IV - urban (≥ 15 % built, h > 15 m)', z0: 1.0, zmin: 10 }];
+EC.wind = {
+  qp(z, vb, cat, co, rho) {
+    const T = EC.TERRAIN.find(t => t.v === String(cat)) || EC.TERRAIN[2];
+    const zz = Math.max(z, T.zmin);
+    const kr = 0.19 * Math.pow(T.z0 / 0.05, 0.07);
+    const cr = kr * Math.log(zz / T.z0);
+    const vm = cr * (co || 1) * vb;
+    const Iv = 1 / ((co || 1) * Math.log(zz / T.z0));
+    const qp = (1 + 7 * Iv) * 0.5 * (rho || 1.25) * vm * vm / 1000;
+    return { kr, cr, vm, Iv, qp, z0: T.z0, zmin: T.zmin };
+  },
+  qpLines(c, z, vb, cat, co) {
+    const w = EC.wind.qp(z, vb, cat, co);
+    c.v({ l: 'Terrain factor', s: 'k_r', f: '0.19 (z_0/z_0;II)^0.07', n: `z_0 = ${w.z0} m, z_min = ${w.zmin} m`, v: w.kr, u: '', r: '4.3.2' });
+    c.v({ l: 'Roughness factor', s: 'c_r(z)', f: 'k_r ln(z/z_0)', v: w.cr, u: '', r: '4.3.2' });
+    c.v({ l: 'Mean wind velocity', s: 'v_m(z)', f: 'c_r c_o v_b', v: w.vm, u: 'm/s', r: '4.3.1' });
+    c.v({ l: 'Turbulence intensity', s: 'I_v(z)', f: '1/(c_o ln(z/z_0))', v: w.Iv, u: '', r: '4.4' });
+    c.v({ l: 'Peak velocity pressure', s: 'q_p(z)', f: '[1 + 7 I_v] ½ ρ v_m²', n: `z = ${EC.fmt(z)} m`, v: w.qp, u: 'kPa', r: '4.5', key: true });
+    return w;
+  }
+};
+
+/* ---------- creep & shrinkage, EN 1992-1-1 Annex B (2004 form) ---------- */
+EC.creep = {
+  phi(fcm, RH, h0, t0, t) {
+    const a1 = Math.pow(35 / fcm, 0.7), a2 = Math.pow(35 / fcm, 0.2), a3 = Math.pow(35 / fcm, 0.5);
+    const phiRH = fcm <= 35 ? 1 + (1 - RH / 100) / (0.1 * Math.pow(h0, 1 / 3)) : (1 + (1 - RH / 100) / (0.1 * Math.pow(h0, 1 / 3)) * a1) * a2;
+    const bf = 16.8 / Math.sqrt(fcm), bt0 = 1 / (0.1 + Math.pow(t0, 0.2));
+    const bH = fcm <= 35 ? Math.min(1.5 * (1 + Math.pow(0.012 * RH, 18)) * h0 + 250, 1500) : Math.min(1.5 * (1 + Math.pow(0.012 * RH, 18)) * h0 + 250 * a3, 1500 * a3);
+    const bc = Math.pow((t - t0) / (bH + t - t0), 0.3);
+    return { phiRH, bf, bt0, bH, bc, phi0: phiRH * bf * bt0, phi: phiRH * bf * bt0 * bc };
+  },
+  shrink(fck, RH, h0, ts, t, cls) {
+    const fcm = fck + 8, a = { S: [3, 0.13], N: [4, 0.12], R: [6, 0.11] }[cls || 'N'];
+    const bRH = 1.55 * (1 - Math.pow(RH / 100, 3));
+    const ecd0 = 0.85 * ((220 + 110 * a[0]) * Math.exp(-a[1] * fcm / 10)) * 1e-6 * bRH;
+    const kh = EC.interp([100, 200, 300, 500], [1, 0.85, 0.75, 0.7], h0);
+    const bds = (t - ts) / ((t - ts) + 0.04 * Math.sqrt(Math.pow(h0, 3)));
+    const ecd = bds * kh * ecd0;
+    const eca = (1 - Math.exp(-0.2 * Math.sqrt(t))) * 2.5 * (fck - 10) * 1e-6;
+    return { ecd0, kh, bds, ecd, eca, ecs: ecd + eca };
+  }
+};
+
+/* rectangle stress-block section with compression steel ignored; returns M_Rd for given As at depth d */
+EC.MRdRect = (As, b, d, m) => { const y = As * m.fyd / (m.fcd * b); return As * m.fyd * (d - y / 2) / 1e6; };
+EC.AsReq = (M, b, d, m) => { const disc = d * d - 2 * Math.abs(M) * 1e6 / (m.fcd * b); return disc < 0 ? Infinity : m.fcd * b * (d - Math.sqrt(disc)) / m.fyd; };
+/* generic sketch: rectangles + lines from a list (used by several modules) */
+EC.sketch = function (w, h, title, items) {
+  let s = EC.svg.open(w, h) + (title ? EC.svg.label(14, 18, title, 'ttl') : '');
+  items.forEach(it => {
+    if (it.r) s += `<rect class="${it.c || 'conc'}" x="${it.r[0]}" y="${it.r[1]}" width="${Math.max(0, it.r[2])}" height="${Math.max(0, it.r[3])}"/>`;
+    if (it.p) s += `<polygon class="${it.c || 'conc'}" points="${it.p.map(p => p.join(',')).join(' ')}"/>`;
+    if (it.l) s += `<polyline class="${it.c || 'rebarline'}" points="${it.l.map(p => p.join(',')).join(' ')}" fill="none"/>`;
+    if (it.o) s += `<circle class="${it.c || 'rebar'}" cx="${it.o[0]}" cy="${it.o[1]}" r="${it.o[2]}"/>`;
+    if (it.t) s += EC.svg.label(it.t[0], it.t[1], it.t[2], it.c || 'lbl', it.a);
+    if (it.dh) s += EC.svg.dimH(it.dh[0], it.dh[1], it.dh[2], it.dh[3]);
+    if (it.dv) s += EC.svg.dimV(it.dv[0], it.dv[1], it.dv[2], it.dv[3]);
+  });
+  return s + '</svg>';
+};

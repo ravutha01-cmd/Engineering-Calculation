@@ -23,22 +23,28 @@
     back: 'M19 12H5M12 19l-7-7 7-7', menu: 'M3 6h18M3 12h18M3 18h18', check: 'M20 6 9 17l-5-5', x: 'M18 6 6 18M6 6l12 12', alert: 'M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
     beam: 'M2 9h20v6H2zM5 9v6M19 9v6', column: 'M8 2h8v20H8zM6 2h12M6 22h12', slab: 'M2 10l6-4h14l-6 4zM2 10v4h14v-4M16 14l6-4v-4',
     footing: 'M10 2h4v8h-4zM3 10h18v6H3zM2 20h20', pilecap: 'M3 6h18v6H3zM6 12v10M18 12v10M12 12v10', steel: 'M4 3h16M4 21h16M12 3v18M4 3v3M20 3v3M4 21v-3M20 21v-3', punch: 'M3 3h18v18H3zM9 9h6v6H9zM6 6h12v12H6z',
+    detail: 'M4 4h10v6h6v10H4zM14 4l6 6', drop: 'M12 2.7 6.3 9.6a7 7 0 1 0 11.4 0z', geo: 'M2 20h20M2 15c3-2 5-2 8 0s5 2 8 0 3-1 4-1M2 10c3-2 5-2 8 0s5 2 8 0', wind: 'M3 8h11a3 3 0 1 0-3-3M3 12h16a3 3 0 1 1-3 3M3 16h8',
     search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3', gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z'
   };
   const ic = n => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[n] || P.layers}"/></svg>`;
 
   /* ---------------- domain ---------------- */
   const CATS = [
-    { k: 'foundations', l: 'Foundations', icon: 'footing', types: ['footing', 'pilecap'] },
-    { k: 'columns', l: 'Columns', icon: 'column', types: ['column'] },
-    { k: 'beams', l: 'Beams', icon: 'beam', types: ['beam'] },
-    { k: 'slabs', l: 'Slabs', icon: 'slab', types: ['slab', 'punching'] },
-    { k: 'steel', l: 'Steelwork', icon: 'steel', types: ['steel'] }
+    { k: 'foundations', l: 'Foundations', icon: 'footing' },
+    { k: 'columns', l: 'Columns & walls', icon: 'column' },
+    { k: 'beams', l: 'Beams', icon: 'beam' },
+    { k: 'slabs', l: 'Slabs & stairs', icon: 'slab' },
+    { k: 'details', l: 'Connections & details', icon: 'detail' },
+    { k: 'sls', l: 'Durability & SLS', icon: 'drop' },
+    { k: 'geo', l: 'Geotechnical', icon: 'geo' },
+    { k: 'actions', l: 'Actions & loads', icon: 'wind' },
+    { k: 'steel', l: 'Steel & composite', icon: 'steel' }
   ];
+  CATS.forEach(c => { c.types = Object.keys(EC.modules).filter(t => EC.modules[t].cat === c.k); });
   const STATUS = ['Not started', 'In design', 'Checked', 'Approved', 'IFC'];
   const STATUS_VAR = ['--st0', '--st1', '--st2', '--st3', '--st4'];
   const MOD = EC.modules;
-  const defaults = type => { const o = {}; MOD[type].groups.forEach(g => g.f.forEach(f => { o[f.k] = f.d; })); return o; };
+  const defaults = type => { const o = {}; MOD[type].groups.forEach(g => g.f.forEach(f => { o[f.k] = f.cols ? JSON.parse(JSON.stringify(f.d)) : f.d; })); return o; };
   const uid = () => Math.random().toString(36).slice(2, 10);
   const today = () => new Date().toISOString().slice(0, 10);
   const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
@@ -228,6 +234,7 @@
     const mod = MOD[e.type];
     const inputs = mod.groups.map(g => `<div class="grp"><h4>${esc(g.t)}</h4>${g.f.map(f => {
       const v = e.inputs[f.k] !== undefined ? e.inputs[f.k] : f.d;
+      if (f.cols) return `<div class="tblin"><div class="fl">${EC.sym(f.l)}</div><div class="tbl-wrap"><table><thead><tr>${f.cols.map(c => `<th>${EC.sym(c)}</th>`).join('')}<th></th></tr></thead><tbody>${(v || []).map((r, ri) => `<tr>${f.cols.map((c, ci) => `<td><input data-t="${f.k}" data-r="${ri}" data-c="${ci}" type="number" step="any" value="${esc(r[ci] === undefined ? '' : r[ci])}"></td>`).join('')}<td><button class="btn sm" data-trdel="${f.k}" data-r="${ri}" title="Delete row">${ic('x')}</button></td></tr>`).join('')}</tbody></table></div><button class="btn sm" data-tradd="${f.k}">${ic('plus')}Row</button></div>`;
       const ctl = f.opts ? `<select data-k="${f.k}">${f.opts.map(o => `<option value="${esc(o.v)}" ${String(o.v) === String(v) ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}</select>`
         : `<input data-k="${f.k}" type="${typeof f.d === 'number' ? 'number' : 'text'}" step="any" value="${esc(v)}" inputmode="decimal">`;
       return f.opts && !f.u ? `<div class="field wide"><span class="fl">${EC.sym(f.l)}</span>${ctl}</div>` : `<div class="field"><span class="fl">${EC.sym(f.l)}</span>${ctl}<span class="fu">${esc(f.u || '')}</span></div>`;
@@ -264,7 +271,7 @@
     const bars = r.bars && r.bars.length ? `<h3 style="font-size:14px;margin:18px 0 8px">Bar schedule (indicative, per element)</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Mark</th><th>Type &amp; size</th><th class="num">No.</th><th class="num">Length (mm)</th><th>Shape</th><th class="num">Mass (kg)</th></tr></thead><tbody>
       ${r.bars.map(b => `<tr><td>${b.mark}</td><td>H${b.dia}</td><td class="num">${b.n}</td><td class="num">${fmt(b.len, 0)}</td><td>${esc(b.shape)}</td><td class="num">${fmt(b.n * b.len / 1000 * EC.kgm(b.dia), 1)}</td></tr>`).join('')}
       <tr><td colspan="5" style="text-align:right;font-weight:600">Total per element / × ${e.qty || 1} no.</td><td class="num"><b>${fmt(r.rebarKg, 1)}</b> / ${fmt(r.rebarKg * (e.qty || 1), 0)}</td></tr></tbody></table></div>` : (r.steelMass ? `<p>Steel mass: <b>${fmt(r.steelMass, 0)} kg</b> per member, ${fmt(r.steelMass * (e.qty || 1), 0)} kg total.</p>` : '');
-    const detail = `<div class="drawings">${r.svg || ''}</div>${bars}`;
+    const detail = `<div class="drawings">${(r.svg || '').replace(/(width|height|r)="-[\d.e-]+"/g, '$1="0"').replace(/="NaN"/g, '="0"')}</div>${bars}`;
     const head = `<div class="print-head"><div><b>CAMBO STRUCT</b> · ${esc(p.name)} (${esc(p.number)})<br>${esc(mod.name)} <b style="font-size:12px;color:inherit">${esc(e.mark)}</b> · ${esc(e.level || '')} ${esc(e.grid || '')}</div><div style="text-align:right">Cal. by ${esc(e.assignee || p.engineer)} · Checked ${esc(p.checker || '…')}<br>${today()} · ${esc(mod.code)}</div></div>`;
     return `${head}<div class="card"><div class="tabs no-print" style="padding:0 10px;margin:0">${tabs.map(t => `<button data-tab="${t[0]}" class="${activeTab === t[0] ? 'active' : ''}">${t[1]}${t[0] === 'summary' ? ` <span class="res ${r.ok ? 'ok' : 'bad'}" style="padding:0 6px">${fmt(r.Umax, 2)}</span>` : ''}</button>`).join('')}</div>
       <div class="body">${[['summary', summary], ['calc', calc], ['spec', spec], ['detail', detail]].map(([k, h]) => `<div class="tab-pane" data-pane="${k}" style="${activeTab === k ? '' : 'display:none'}">${h}</div>`).join('')}</div></div>`;
@@ -285,6 +292,7 @@
       return `<div class="row chk">${lab}<div class="math">${x.f ? `<span class="f">${EC.sym(x.f)}</span><br>` : ''}${fmt(Math.abs(x.Ed), x.dp)} ${x.U <= 1 + 1e-6 ? '≤' : '>'} ${fmt(x.Rd, x.dp)} ${esc(x.u || '')} → <span class="val">${EC.sym(x.s || 'η')} = ${fmt(x.U, 3)}</span>
         <span class="verdict res ${x.ok ? 'ok' : 'bad'}">${x.ok ? 'OK' : 'NOT OK'}</span></div></div>`;
     }
+    if (x.k === 'tbl') return `<div class="tbl-wrap" style="margin:6px 0 10px"><table class="tbl"><thead><tr>${x.head.map(h => `<th class="num">${EC.sym(h)}</th>`).join('')}</tr></thead><tbody>${x.rows.map(r => `<tr>${r.map((v, j) => `<td class="num">${typeof v === 'number' ? fmt(v, Array.isArray(x.dp) ? x.dp[j] : x.dp) : EC.sym(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
     if (x.k === 'ok') return `<div class="row okrow">${lab}<div class="math">${EC.sym(x.txt || '')}<span class="verdict res ${x.ok ? 'ok' : 'bad'}">${x.ok ? 'OK' : 'NOT OK'}</span></div></div>`;
     return '';
   }
@@ -303,7 +311,7 @@
     return `<div class="page-head"><div><h1>Element schedules</h1><div class="sub">One schedule per element type - as issued on the drawings</div></div>
       <div class="actions"><select class="ctl" id="schedFilter"><option value="">All statuses</option>${STATUS.map(s => `<option ${s === schedFilter ? 'selected' : ''}>${s}</option>`).join('')}</select>
       <button class="btn" data-csv>${ic('download')}CSV</button><button class="btn" data-printpage>${ic('print')}Print</button></div></div>
-      <div class="tabs">${types.map(t => `<button class="${t === schedType ? 'active' : ''}" data-stype="${t}">${esc(MOD[t].name)}<span class="badge">${p.elements.filter(e => e.type === t).length}</span></button>`).join('')}</div>
+      <div style="margin-bottom:14px" class="no-print"><select class="ctl" id="schedType" style="min-width:260px;max-width:100%">${CATS.map(c => { const ts = types.filter(t => MOD[t].cat === c.k); return ts.length ? `<optgroup label="${esc(c.l)}">${ts.map(t => `<option value="${t}" ${t === schedType ? 'selected' : ''}>${esc(MOD[t].name)} (${p.elements.filter(e => e.type === t).length})</option>`).join('')}</optgroup>` : ''; }).join('')}</select></div>
       <div class="print-head"><div><b>CAMBO STRUCT</b> · ${esc(p.name)} (${esc(p.number)})<br>${esc(mod.name)} schedule</div><div>${today()}</div></div>
       <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr>${head.map((h, k) => `<th class="${k === 3 ? 'num' : ''}">${EC.sym(h)}</th>`).join('')}</tr></thead><tbody>
       ${rows.map(x => `<tr class="click" data-open="${x.e.id}">${x.cells.map((c, k) => `<td class="${k === 0 ? 'mark' : ''} ${k === 3 ? 'num' : ''}">${esc(c === undefined ? '' : c)}</td>`).join('')}<td>${ubar(x.r.Umax)}</td><td>${resTag(x.r)}</td><td>${pill(x.e.status)}</td></tr>`).join('') || `<tr><td colspan="${head.length}" class="empty">No elements match</td></tr>`}
@@ -366,8 +374,10 @@
     return `<div class="page-head"><div><h1>Mathcad calculation library</h1><div class="sub">math.Claude · ${EC.library.length} worksheets indexed from README.md - the detailed Mathcad Prime 12 calculations behind this web app</div></div></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px"><input class="ctl" id="libQ" placeholder="Search worksheets, clauses, methods…" value="${esc(libQ)}" style="min-width:280px;flex:1;max-width:460px">
       <div class="chips">${[''].concat(groups).map(g => `<button class="chip ${g === libG ? 'active' : ''}" data-lg="${esc(g)}">${g ? esc(g.replace('_', ' ')) : 'All'}</button>`).join('')}</div></div>
-      <div class="grid g2">${L.map(x => `<div class="card lib-card"><h3>${ic('folder')}${esc(x.folder)} <span class="badge">${esc(x.type)}</span></h3><p>${esc(x.desc)}</p>${x.files.map(f => `<code>${esc(f)}</code>`).join('')}</div>`).join('') || '<div class="empty">No match</div>'}</div>`;
+      <div class="grid g2">${L.map(x => `<div class="card lib-card"><h3>${ic('folder')}${esc(x.folder)} <span class="badge">${esc(x.type)}</span></h3><p>${esc(x.desc)}</p>${x.files.map(f => `<code>${esc(f)}</code>`).join('')}${libMods(x).length ? `<div class="chips" style="margin-top:10px">${libMods(x).map(t => `<button class="btn sm primary" data-newtype="${t}">${ic('plus')}Design ${esc(MOD[t].name)}</button>`).join('')}</div>` : ''}</div>`).join('') || '<div class="empty">No match</div>'}</div>`;
   }
+
+  const libMods = x => Object.keys(MOD).filter(t => (MOD[t].lib || []).concat([MOD[t].mathcad]).some(f => f && (f === x.folder || (MOD[t].libFile && x.files.includes(MOD[t].libFile)))));
 
   /* ---------------- project settings ---------------- */
   function vProject() {
@@ -403,13 +413,19 @@
   window.addEventListener('hashchange', render);
 
   /* ---------------- actions ---------------- */
-  function addElement(catKey) {
+  function addElement(catKey, onlyType) {
+    if (onlyType) return createEl(onlyType);
     const cats = catKey ? CATS.filter(c => c.k === catKey) : CATS;
-    const bg = modal('New element', `<div class="type-pick">${cats.flatMap(c => c.types).map(t => `<button data-type="${t}">${ic(MOD[t].icon === 'punch' ? 'punch' : MOD[t].icon)}<span><b>${esc(MOD[t].name)}</b><small>${esc(MOD[t].code)}</small></span></button>`).join('')}</div>`);
-    $$('[data-type]', bg).forEach(b => b.onclick = () => {
-      const t = b.dataset.type, e = { id: uid(), type: t, mark: nextMark(t), level: '', grid: '', qty: 1, status: 'Not started', start: today(), due: addDays(today(), 14), assignee: proj().engineer || '', inputs: defaults(t) };
-      proj().elements.push(e); save(); bg.remove(); activeTab = 'summary'; location.hash = '#/el/' + e.id;
-    });
+    const bg = modal('New element', `<input class="ctl" id="typeQ" placeholder="Search element types…" style="width:100%;margin-bottom:12px">${cats.filter(c => c.types.length).map(c => `<div class="tp-grp"><h4 class="tp-h">${esc(c.l)}</h4><div class="type-pick">${c.types.map(t => `<button data-type="${t}" data-q="${esc((MOD[t].name + ' ' + MOD[t].code + ' ' + c.l).toLowerCase())}">${ic(MOD[t].icon || c.icon)}<span><b>${esc(MOD[t].name)}</b><small>${esc(MOD[t].code)}</small></span></button>`).join('')}</div></div>`).join('')}`);
+    const q = $('#typeQ', bg); q.focus();
+    q.oninput = () => { const s = q.value.toLowerCase(); $$('[data-type]', bg).forEach(b => { b.hidden = s && !b.dataset.q.includes(s); }); $$('.tp-grp', bg).forEach(g => { g.hidden = !$$('[data-type]', g).some(b => !b.hidden); }); };
+    $$('[data-type]', bg).forEach(b => b.onclick = () => { bg.remove(); createEl(b.dataset.type); });
+  }
+  function createEl(t) {
+    {
+      const e = { id: uid(), type: t, mark: nextMark(t), level: '', grid: '', qty: 1, status: 'Not started', start: today(), due: addDays(today(), 14), assignee: proj().engineer || '', inputs: defaults(t) };
+      proj().elements.push(e); save(); activeTab = 'summary'; location.hash = '#/el/' + e.id;
+    }
   }
   function dupElement(id) {
     const p = proj(), e = p.elements.find(x => x.id === id); if (!e) return;
@@ -431,6 +447,15 @@
   }
 
   document.addEventListener('click', ev => {
+    const tr = ev.target.closest('[data-tradd],[data-trdel]');
+    if (tr) {
+      const e = proj().elements.find(x => x.id === route()[1]); if (!e) return;
+      const k = tr.dataset.tradd || tr.dataset.trdel, tb = e.inputs[k];
+      if (tr.dataset.tradd) tb.push(tb.length ? tb[tb.length - 1].slice() : MOD[e.type].groups.flatMap(g => g.f).find(f => f.k === k).cols.map(() => 0));
+      else if (tb.length > 1) tb.splice(+tr.dataset.r, 1);
+      save(); const y = $('.inputs') ? $('.inputs').scrollTop : 0; render(); if ($('.inputs')) $('.inputs').scrollTop = y; return;
+    }
+    const nt = ev.target.closest('[data-newtype]'); if (nt) return addElement(null, nt.dataset.newtype);
     const t = ev.target.closest('[data-open],[data-go],[data-add],[data-dup],[data-del],[data-tab],[data-print],[data-printpage],[data-csv],[data-stype],[data-lg],[data-reset],[data-newproj],[data-useproj],[data-delproj],[data-demo]');
     if (!t) return;
     const d = t.dataset;
@@ -480,6 +505,12 @@
       e.inputs[f.k] = v; save(); refreshOutput(e);
       return;
     }
+    if (t.dataset.t) {
+      const e = proj().elements.find(x => x.id === route()[1]); if (!e) return;
+      const v = parseFloat(t.value); if (!Number.isFinite(v)) return;
+      const tb = e.inputs[t.dataset.t]; tb[+t.dataset.r][+t.dataset.c] = v; save(); refreshOutput(e);
+      return;
+    }
     if (t.dataset.m) {
       const e = proj().elements.find(x => x.id === route()[1]); if (!e) return;
       e[t.dataset.m] = t.dataset.m === 'qty' ? Math.max(1, parseInt(t.value, 10) || 1) : t.value; save();
@@ -492,6 +523,7 @@
   });
   document.addEventListener('change', ev => {
     if (ev.target.id === 'schedFilter') { schedFilter = ev.target.value; render(); }
+    if (ev.target.id === 'schedType') { schedType = ev.target.value; render(); }
     if (ev.target.id === 'projSel') { DB.current = ev.target.value; save(); cache.clear(); location.hash = '#/dashboard'; render(); }
   });
 

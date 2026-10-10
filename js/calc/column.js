@@ -89,6 +89,7 @@
     return { MEd, MRd: R.M, lam, lamLim, curve: curve(H, W, Ls, m) };
   }
 
+  EC.sec = { layers, forces, MRd, curve };
   EC.modules.column = {
     type: 'column', name: 'RC Column', cat: 'columns', prefix: 'C', icon: 'column',
     code: 'EN 1992-1-1:2023', mathcad: 'EC2_Concrete\\Column_Design',

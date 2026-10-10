@@ -326,3 +326,73 @@ svg .ppt.bad { fill: var(--critical); }
 .tblin .btn.sm { padding: 2px 5px; }
 .tblin > .btn { margin-top: 4px; }
 .tp-h { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 12px 0 6px; }
+
+/* ---------- sync / autosave indicator ---------- */
+.sync { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; white-space: nowrap; cursor: default; }
+.sync i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.sync.ok i { background: var(--good); } .sync.err i { background: var(--critical); } .sync.err { color: var(--critical); }
+.sync.busy i { background: var(--warn); animation: pulse 1s infinite; }
+.sync.local i { background: var(--st2); }
+@keyframes pulse { 50% { opacity: .3; } }
+@media (max-width: 760px) { .sync span { display: none; } .sync { padding: 6px; } }
+
+/* ---------- Mathcad worksheet view ---------- */
+.inp-head { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.inputs .field.edited input, .inputs .field.edited select, .tblin.edited table { box-shadow: 0 0 0 2px var(--accent) inset; }
+.inputs .fl math.isym { font-size: 13px; color: var(--muted); margin-left: 2px; }
+.tblin td.rn { color: var(--muted); font-size: 11px; text-align: center; }
+.tblin th small { color: var(--muted); font-weight: 400; }
+.wtools { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 8px 10px; margin: -4px 0 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; font-size: 12.5px; }
+.wtools label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.wtools .hint { color: var(--muted); margin-left: auto; }
+.ws { font-size: 13.5px; line-height: 1.45; }
+.ws .wt h2 { font-size: 18px; margin: 18px 0 6px; color: var(--brand); }
+.ws .wt h3 { font-size: 15.5px; margin: 22px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border); color: var(--accent); }
+.ws .wt h4 { font-size: 13.5px; margin: 14px 0 4px; color: var(--h2); }
+.ws .wt h2 span, .ws .wt h3 span, .ws .wt h4 span { color: inherit !important; font-size: inherit !important; }
+.ws .wt p { margin: 4px 0; color: var(--ink-2); }
+.wrow { display: grid; grid-template-columns: minmax(0, 38%) minmax(0, 1fr); gap: 14px; align-items: start; padding: 2px 0; border-bottom: 1px dashed transparent; }
+.wrow:hover { border-bottom-color: var(--border); }
+.wrow .wl p { margin: 5px 0 0; color: var(--ink-2); font-size: 12.5px; }
+.wm { padding: 3px 8px; margin: 2px 0; border-radius: 6px; overflow-x: auto; max-width: 100%; }
+.wm.cin { background: var(--input-bg); }
+.wm.cchk { background: var(--ok-bg); }
+.wm.ckey { background: var(--key-bg); }
+.wm.wov { box-shadow: inset 3px 0 0 var(--accent); }
+.wm.werr { background: var(--bad-bg); }
+.errmsg { color: var(--bad-ink); font-size: 12px; margin-top: 2px; }
+math.mcm { display: block; text-align: left; font-size: 15px; math-style: normal; }
+math.mcm mfrac { font-size: 100%; }
+.mu { color: #2e3192; } :root[data-theme="dark"] .mu { color: #9aa2ff; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .mu { color: #9aa2ff; } }
+.mf, .mk { color: var(--accent); }
+.mkw { color: var(--accent); }
+.mstr { color: var(--ink); } .mstr.sok { color: var(--ok-ink); font-weight: 600; } .mstr.sbad { color: var(--bad-ink); font-weight: 600; }
+.res.faint, mrow.faint { opacity: .55; }
+mtable.mprog { border-left: 2px solid var(--ink-2); padding-left: 6px; margin-left: 4px; }
+mtable.mprog mtd { padding: 1px 0; text-align: left; }
+mtable.mmat mtd { padding: 1px 6px; }
+.ph { color: var(--critical); }
+.cb { background: var(--surface); border: 1px solid var(--input-border); padding: 0 6px; border-radius: 4px; }
+details.warea { margin: 6px 0; border: 1px dashed var(--border-strong); border-radius: 8px; padding: 4px 10px; }
+details.warea > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.wp, .dcard { margin: 8px 0; }
+svg.mplot { width: 100%; max-width: 560px; height: auto; display: block; font-size: 10px; }
+svg.mplot .pf { fill: var(--surface); stroke: var(--border-strong); }
+svg.mplot .pg { stroke: var(--grid); stroke-width: .7; }
+svg.mplot .pt { fill: var(--muted); }
+.dgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 14px; }
+.dcard { border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: var(--surface-2); margin: 0; }
+.dcard figcaption { font-size: 12.5px; margin-bottom: 6px; } .dcard figcaption small { display: block; color: var(--muted); }
+.ksub { font-size: 14px; margin: 18px 0 8px; }
+.ktbl td:first-child { color: var(--ink-2); } .ktbl tr.edited td:last-child { color: var(--accent); font-weight: 600; }
+.callouts { margin: 0; padding-left: 18px; } .callouts li { margin: 4px 0; } .callouts span { font-weight: 600; }
+.calcbusy { display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: 12.5px; color: var(--muted); border-bottom: 1px solid var(--border); }
+.spin { width: 12px; height: 12px; border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.rec-head { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 12px; }
+.rec-head p { margin: 0; color: var(--ink-2); max-width: 640px; }
+@media (max-width: 760px) { .wrow { grid-template-columns: 1fr; gap: 2px; } .wtools .hint { margin-left: 0; } }
+@media print { .ws { font-size: 11px; } details.warea { border: 0; } .wm { break-inside: avoid; } }
+.mres { font-weight: 600; }
+.inputs .field.wide input:not([type="number"]) { text-align: left; }

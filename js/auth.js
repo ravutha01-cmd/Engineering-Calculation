@@ -49,6 +49,11 @@
       client.requestAccessToken({ prompt: '' });
     });
     const info = await (await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: 'Bearer ' + tok.access_token } })).json();
+    const allowed = (CFG.adminEmails || []).map(x => x.toLowerCase());
+    if (allowed.length && !allowed.includes(String(info.email || '').toLowerCase())) {
+      try { google.accounts.oauth2.revoke(tok.access_token, () => {}); } catch (e) { /* ignore */ }
+      throw new Error('This Google account (' + (info.email || 'unknown') + ') is not allowed to use the Admin account.');
+    }
     const t = { token: tok.access_token, exp: Date.now() + (tok.expires_in || 3600) * 1000 - 60000, email: info.email || '' };
     ss.set(TKEY, t);
     return t;
@@ -66,11 +71,11 @@
     const L = lock();
     if (L) {
       if (L.user.toLowerCase() !== user.toLowerCase() || (await check(user, password, ub64(L.salt), L.iter)) !== L.check) throw new Error('Wrong username or password');
-      const t = await googleToken(L.email);
+      const t = await googleToken(L.email || (CFG.adminEmails || [])[0]);
       if (L.email && t.email && t.email.toLowerCase() !== L.email.toLowerCase()) { ss.del(TKEY); throw new Error('This device is set up for ' + L.email + ' - sign in with that Google account'); }
     } else {
       // first Admin sign-in on this device: Google proves who you are, then the username / password are set
-      const t = await googleToken();
+      const t = await googleToken((CFG.adminEmails || [])[0]);
       const salt = crypto.getRandomValues(new Uint8Array(16));
       ls.set(LKEY, { user, salt: b64(salt), iter: ITER, check: await check(user, password, salt, ITER), email: t.email, set: new Date().toISOString() });
     }

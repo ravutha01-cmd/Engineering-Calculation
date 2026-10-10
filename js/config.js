@@ -4,6 +4,8 @@ EC.CONFIG = {
   /* Google Drive database: OAuth 2.0 "Web application" client ID from console.cloud.google.com
      (authorised JavaScript origin https://ravutha01-cmd.github.io). A client ID is public by design. */
   googleClientId: '572369688392-334m482hoqqr6hu054htqiud19vbsp55.apps.googleusercontent.com',
+  /* Only this Google account may use the Admin account (owner's request) */
+  adminEmails: ['ravutha.me@gmail.com'],
   /* Drive location of the database (created by the app on the first Admin sign-in, in the
      signed-in Google account's own Drive) */
   driveFolder: 'CAMBO STRUCT',

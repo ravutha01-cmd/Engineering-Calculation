@@ -38,7 +38,8 @@ browser; the password is never stored, sent or published.
    scope `.../auth/drive.file`; under *Test users* add your Google account.
 4. *Credentials → Create credentials → OAuth client ID* → **Web application**; *Authorised JavaScript
    origins*: `https://ravutha01-cmd.github.io`.
-5. Put the client ID (`….apps.googleusercontent.com`, not secret) in `js/config.js` → `googleClientId`.
+5. Put the client ID (`….apps.googleusercontent.com`, not secret) in `js/config.js` → `googleClientId`, and the
+   owner's Google account in `adminEmails` (only that account can use Admin).
 
 A Google sign-in lasts about an hour; after that the badge in the top bar shows *Connect Google Drive*
 (one click). In the Claude artifact version the Claude login is the account (private Claude storage).

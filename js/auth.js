@@ -48,6 +48,9 @@
       });
       client.requestAccessToken({ prompt: choose ? 'select_account' : '', hint: hint || undefined, login_hint: hint || undefined });
     });
+    if (google.accounts.oauth2.hasGrantedAllScopes && !google.accounts.oauth2.hasGrantedAllScopes(tok, 'https://www.googleapis.com/auth/drive.file')) {
+      throw new Error('Google Drive permission was not ticked. Sign in again and tick “See, edit, create and delete only the specific Google Drive files you use with this app”.');
+    }
     const info = await (await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: 'Bearer ' + tok.access_token } })).json();
     const allowed = (CFG.adminEmails || []).map(x => x.toLowerCase());
     if (allowed.length && !allowed.includes(String(info.email || '').toLowerCase())) {

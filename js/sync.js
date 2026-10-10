@@ -114,9 +114,17 @@
       opt = opt || {}; opt.headers = Object.assign({ Authorization: 'Bearer ' + tok() }, opt.headers || {});
       const r = await fetch(url, opt);
       if (r.status === 401) { const e = new Error('Google sign-in expired'); e.code = 'auth'; throw e; }
-      if (!r.ok) throw new Error('Google Drive error ' + r.status);
+      if (!r.ok) {
+        let g = {}; try { g = (await r.json()).error || {}; } catch (e) { /* not JSON */ }
+        const why = ((g.errors && g.errors[0] && g.errors[0].reason) || g.status || '') + ' ' + (g.message || '');
+        let m = 'Google Drive error ' + r.status + (g.message ? ': ' + g.message : '');
+        if (/accessNotConfigured|SERVICE_DISABLED|has not been used|is disabled/i.test(why)) m = 'Google Drive API is not enabled for this app. In Google Cloud console (project ' + (C.googleProject || 'of the OAuth client') + ') open APIs & Services → Library → Google Drive API → Enable, wait 2 minutes, then retry.';
+        else if (/insufficient|scope|PERMISSION_DENIED/i.test(why)) { m = 'Google Drive permission was not given. Click the sync badge, sign in again and tick “See, edit, create and delete … Google Drive files … this app”.'; ss_del(); const e = new Error(m); e.code = 'auth'; throw e; }
+        throw new Error(m);
+      }
       return r;
     }
+    const ss_del = () => { try { sessionStorage.removeItem('cambo.gtoken'); } catch (e) { /* ignore */ } };
     const q = s => s.replace(/'/g, "\\'");
     async function find(name, mime, parent) {
       let qs = `name='${q(name)}' and trashed=false` + (mime ? ` and mimeType='${mime}'` : '') + (parent ? ` and '${parent}' in parents` : '');

@@ -80,9 +80,9 @@
     const el = document.getElementById('syncState'); if (!el) return;
     if (DEMO) { el.className = 'sync err'; el.innerHTML = '<i></i><span>Demo · not saved</span>'; el.title = 'Demo account: calculations work, but nothing is saved. Sign in as Admin to save.'; return; }
     const s = EC.sync.status();
-    const cloud = s.backend ? (s.state === 'syncing' ? 'Syncing…' : s.state === 'signin' ? 'Connect Google Drive' : s.state === 'error' ? 'Sync error' : s.at ? 'Saved to Drive ' + s.at.toTimeString().slice(0, 5) : 'Cloud') : 'Saved in this browser';
-    el.dataset.gconnect = s.state === 'signin' ? '1' : '';
-    el.style.cursor = s.state === 'signin' ? 'pointer' : '';
+    const cloud = s.backend ? (s.state === 'syncing' ? 'Syncing…' : s.state === 'signin' ? 'Connect Google Drive' : s.state === 'error' ? 'Sync error · tap' : s.at ? 'Saved to Drive ' + s.at.toTimeString().slice(0, 5) : 'Cloud') : 'Saved in this browser';
+    el.dataset.gconnect = s.state === 'signin' || s.state === 'error' ? '1' : '';
+    el.style.cursor = el.dataset.gconnect ? 'pointer' : '';
     const txt = local === 'saving' ? 'Saving…' : cloud;
     el.className = 'sync ' + (local === 'saving' || s.state === 'syncing' ? 'busy' : s.state === 'error' ? 'err' : s.backend ? 'ok' : 'local');
     el.innerHTML = `<i></i><span>${esc(txt)}</span>`;
@@ -143,7 +143,7 @@
   }
 
   /* ---------------- small UI helpers ---------------- */
-  function toast(msg) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2200); }
+  function toast(msg) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), Math.max(2200, String(msg).length * 60)); }
   const pill = s => `<span class="pill"><span class="dot" style="background:var(${STATUS_VAR[STATUS.indexOf(s)] || '--muted'})"></span>${esc(s)}</span>`;
   const resTag = r => r.pending ? `<span class="res">…</span>` : r.error ? `<span class="res bad">${ic('alert')}Error</span>` : r.ok ? `<span class="res ok">${ic('check')}OK</span>` : `<span class="res bad">${ic('x')}Revise</span>`;
   function ubar(U) {
@@ -558,7 +558,7 @@
     }
     if (d.signout !== undefined) { EC.auth.signOut(); location.hash = ''; location.reload(); return; }
     if (d.syncnow !== undefined) { EC.sync.now().then(() => { toast('Synced'); render(); }); return; }
-    if (d.gconnect !== undefined && d.gconnect !== '') { EC.sync.connectGoogle().then(() => { toast('Google Drive connected'); render(); }).catch(e => toast(e.message)); return; }
+    if (d.gconnect !== undefined && d.gconnect !== '') { const s0 = EC.sync.status(); if (s0.state === 'error') { toast(s0.err + ' - retrying…'); EC.sync.now().then(() => { const s1 = EC.sync.status(); toast(s1.state === 'synced' ? 'Google Drive synced' : s1.err); render(); }); return; } EC.sync.connectGoogle().then(() => { toast('Google Drive connected'); render(); }).catch(e => toast(e.message)); return; }
     if (d.demo !== undefined) { const s = seed(); DB.projects.push(s.projects[0]); DB.current = s.current; save(); toast('Demo project added'); location.hash = '#/dashboard'; render(); }
   });
 

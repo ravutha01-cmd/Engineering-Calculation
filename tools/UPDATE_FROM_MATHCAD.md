@@ -25,6 +25,11 @@ the last sync (`lastSync`).
    This regenerates `sheets/<name>.js`, updates `js/mcad/catalog.js` (new worksheets are
    classified automatically; add a proper name / group / mark prefix to the table `C` in
    `tools/catalog.py` and run the script again) and updates `tools/drive_index.json`.
+   **Worksheets that read Excel** (`READEXCEL`, e.g. `Beam_EC2-2023.mcdx` with `Beam_Input.xlsx`): also export the
+   workbook from the same Drive folder to `tools/excel/<file>.xlsx.json` (`{"source": ..., "rows": [[...], ...]}`,
+   first sheet, header row included) and record it under `excel` in `tools/drive_index.json`. The converter embeds
+   the table; `READEXCEL` returns it and each `info("key", default)` region becomes an editable input.
+   When the workbook changes on Drive, update the JSON and regenerate.
 5. Test: `node tools/test_sheets.js` (all ok, except the ETABS / HandInput sheets that need
    Excel data). Load the app in a browser and open the new / changed element types.
 6. Commit to `master` and push. Republish the Claude artifact

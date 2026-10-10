@@ -24,6 +24,7 @@ C = {
  'EffectiveLength_EC2-2023_Standalone': ('columns', 'Column effective length', 'C'),
  'Beam_EC2-2023_Standalone': ('beams', 'RC beam', 'B'),
  'Beam_2004_EC2-2023_Standalone': ('beams', 'RC beam (2004 method)', 'B'),
+ 'Beam_EC2-2023': ('beams', 'RC beam - Excel / JSON input (type B)', 'B'),
  'Torsion_EC2-2023_Standalone': ('beams', 'Beam torsion + shear', 'B'),
  'LTB_EC2-2023_Standalone': ('beams', 'RC beam lateral-torsional buckling', 'B'),
  'DeepBeam_EC2-2023_Standalone': ('beams', 'Deep / transfer beam (STM)', 'TB'),

@@ -10,7 +10,7 @@ EC.sheetCatalog = [
 "prefix": "GA",
 "title": "GROUTED GROUND ANCHOR - EN 1997-3:2025 CLAUSE 8 / EN 1997-1:2024 / EN ISO 22477-5",
 "code": "EN 1997-3:2025, EN 1997-1:2024",
-"nin": 34,
+"nin": 37,
 "kb": 36
 },
 {
@@ -34,7 +34,7 @@ EC.sheetCatalog = [
 "prefix": "J",
 "title": "EXTERIOR BEAM-COLUMN JOINT (NON-SEISMIC) TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 28,
+"nin": 29,
 "kb": 30
 },
 {
@@ -46,8 +46,20 @@ EC.sheetCatalog = [
 "prefix": "B",
 "title": "RC BEAM SECTION DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 38,
+"nin": 42,
 "kb": 72
+},
+{
+"id": "Beam_EC2-2023",
+"file": "Beam_EC2-2023.mcdx",
+"folder": "EC2_Concrete\\Beam_Design",
+"cat": "beams",
+"name": "RC beam - Excel / JSON input (type B)",
+"prefix": "B",
+"title": "RC BEAM SECTION DESIGN TO EN 1992-1-1:2023",
+"code": "EN 1992-1-1:2023",
+"nin": 41,
+"kb": 76
 },
 {
 "id": "Beam_EC2-2023_Standalone",
@@ -58,8 +70,8 @@ EC.sheetCatalog = [
 "prefix": "B",
 "title": "RC BEAM SECTION DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 36,
-"kb": 82
+"nin": 41,
+"kb": 83
 },
 {
 "id": "BracketConnection_EC3-EC2-4_Standalone",
@@ -82,8 +94,8 @@ EC.sheetCatalog = [
 "prefix": "C",
 "title": "RC COLUMN DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 35,
-"kb": 108
+"nin": 39,
+"kb": 109
 },
 {
 "id": "CombinedFooting_EC2-2023_Standalone",
@@ -94,8 +106,8 @@ EC.sheetCatalog = [
 "prefix": "CF",
 "title": "RC COMBINED FOOTING UNDER TWO COLUMNS TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 31,
-"kb": 57
+"nin": 33,
+"kb": 58
 },
 {
 "id": "CompositeBridge_EC4-2005_Standalone",
@@ -106,8 +118,8 @@ EC.sheetCatalog = [
 "prefix": "BG",
 "title": "COMPOSITE STEEL-CONCRETE ROAD BRIDGE - SIMPLY SUPPORTED I-GIRDERS + DECK SLAB (EN 1994-2)",
 "code": "EN 1994-2",
-"nin": 75,
-"kb": 121
+"nin": 82,
+"kb": 122
 },
 {
 "id": "CompositeBridge_SlabBelow_EC4-2005_Standalone",
@@ -118,8 +130,8 @@ EC.sheetCatalog = [
 "prefix": "BG",
 "title": "COMPOSITE ROAD BRIDGE WITH THE CONCRETE SLAB BELOW THE STEEL I GIRDERS (EN 1994-2)",
 "code": "EN 1994-2",
-"nin": 79,
-"kb": 142
+"nin": 86,
+"kb": 143
 },
 {
 "id": "Corbel_EC2-2023_Standalone",
@@ -154,8 +166,8 @@ EC.sheetCatalog = [
 "prefix": "CR",
 "title": "CRACK CONTROL BY CALCULATION TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 21,
-"kb": 34
+"nin": 23,
+"kb": 35
 },
 {
 "id": "CreepShrinkage_EC2-2023_Standalone",
@@ -190,7 +202,7 @@ EC.sheetCatalog = [
 "prefix": "TB",
 "title": "RC DEEP / TRANSFER BEAM - STRUT-AND-TIE DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 31,
+"nin": 34,
 "kb": 57
 },
 {
@@ -202,8 +214,8 @@ EC.sheetCatalog = [
 "prefix": "DF",
 "title": "DEFLECTION BY CALCULATION - RC BEAM / ONE-WAY SLAB TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 18,
-"kb": 34
+"nin": 21,
+"kb": 35
 },
 {
 "id": "EffectiveLength_EC2-2023_Standalone",
@@ -214,8 +226,8 @@ EC.sheetCatalog = [
 "prefix": "C",
 "title": "EFFECTIVE LENGTH FACTOR AND BUCKLING SLENDERNESS OF A COLUMN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 25,
-"kb": 31
+"nin": 27,
+"kb": 32
 },
 {
 "id": "EightPileCap_EC2-2023_Standalone",
@@ -226,7 +238,7 @@ EC.sheetCatalog = [
 "prefix": "PC",
 "title": "CAP ON EIGHT PILES TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 53,
+"nin": 57,
 "kb": 83
 },
 {
@@ -238,8 +250,8 @@ EC.sheetCatalog = [
 "prefix": "EM",
 "title": "STAGED EMBANKMENT ON SOFT CLAY WITH VERTICAL DRAINS - EN 1997-3:2025 / EN 1997-1:2024",
 "code": "EN 1997-3:2025, EN 1997-1:2024",
-"nin": 27,
-"kb": 35
+"nin": 32,
+"kb": 36
 },
 {
 "id": "Execution_Loads_EC1-2023_Standalone",
@@ -250,8 +262,8 @@ EC.sheetCatalog = [
 "prefix": "EX",
 "title": "ACTIONS DURING EXECUTION - SLAB CASTING & BACK-PROPPING TO EN 1991-1-6:2023",
 "code": "EN 1991-1-6:2023",
-"nin": 27,
-"kb": 27
+"nin": 32,
+"kb": 28
 },
 {
 "id": "Fatigue_EC2-2023_Standalone",
@@ -262,7 +274,7 @@ EC.sheetCatalog = [
 "prefix": "B",
 "title": "FATIGUE OF AN RC BEAM TO EN 1992-1-1:2023 SECTION 10",
 "code": "EN 1992-1-1:2023",
-"nin": 32,
+"nin": 34,
 "kb": 44
 },
 {
@@ -298,8 +310,8 @@ EC.sheetCatalog = [
 "prefix": "PC",
 "title": "CAP ON FIVE PILES TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 50,
-"kb": 78
+"nin": 54,
+"kb": 79
 },
 {
 "id": "Footing_EC7_Standalone",
@@ -310,8 +322,8 @@ EC.sheetCatalog = [
 "prefix": "GF",
 "title": "SPREAD FOOTING - GEOTECHNICAL DESIGN TO EUROCODE 7",
 "code": "EUROCODE 7",
-"nin": 32,
-"kb": 99
+"nin": 39,
+"kb": 101
 },
 {
 "id": "FourPileCap_EC2-2023_Standalone",
@@ -322,8 +334,8 @@ EC.sheetCatalog = [
 "prefix": "PC",
 "title": "CAP ON FOUR PILES TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 48,
-"kb": 69
+"nin": 52,
+"kb": 70
 },
 {
 "id": "FrameCorner_EC2-2023_Standalone",
@@ -334,7 +346,7 @@ EC.sheetCatalog = [
 "prefix": "FC",
 "title": "RC FRAME CORNER (KNEE JOINT) TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 23,
+"nin": 24,
 "kb": 33
 },
 {
@@ -346,8 +358,8 @@ EC.sheetCatalog = [
 "prefix": "GW",
 "title": "GRAVITY / GABION RETAINING WALL - EN 1997-3:2025 / EN 1997-1:2024 / EN 1990:2023",
 "code": "EN 1997-3:2025, EN 1997-1:2024, EN 1990:2023",
-"nin": 31,
-"kb": 46
+"nin": 34,
+"kb": 47
 },
 {
 "id": "Imposed_Loads_EC1-2023_Standalone",
@@ -358,8 +370,8 @@ EC.sheetCatalog = [
 "prefix": "LD",
 "title": "IMPOSED LOADS ON BUILDINGS TO EN 1991-1-1:2023",
 "code": "EN 1991-1-1:2023",
-"nin": 19,
-"kb": 27
+"nin": 21,
+"kb": 28
 },
 {
 "id": "Interface_EC2-2023_Standalone",
@@ -370,7 +382,7 @@ EC.sheetCatalog = [
 "prefix": "IS",
 "title": "SHEAR AT THE INTERFACE BETWEEN CONCRETE CAST AT DIFFERENT TIMES - EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 29,
+"nin": 30,
 "kb": 29
 },
 {
@@ -382,8 +394,8 @@ EC.sheetCatalog = [
 "prefix": "B",
 "title": "RC BEAM - LATERAL-TORSIONAL BUCKLING CHECK TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 21,
-"kb": 22
+"nin": 22,
+"kb": 23
 },
 {
 "id": "Liquefaction_EC8-EC7_Standalone",
@@ -394,7 +406,7 @@ EC.sheetCatalog = [
 "prefix": "LQ",
 "title": "LIQUEFACTION ASSESSMENT FROM SPT - EN 1998-5 4.1.4 AND ANNEX B / EN 1997-2",
 "code": "EN 1998-5, EN 1997-2",
-"nin": 16,
+"nin": 18,
 "kb": 31
 },
 {
@@ -406,8 +418,8 @@ EC.sheetCatalog = [
 "prefix": "PC",
 "title": "CAP ON NINE PILES TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 52,
-"kb": 102
+"nin": 56,
+"kb": 103
 },
 {
 "id": "Outrigger_TallBuilding_EC1-2023_Standalone",
@@ -418,8 +430,8 @@ EC.sheetCatalog = [
 "prefix": "OR",
 "title": "OUTRIGGER AND TRANSFER FLOOR LOADS OF A TALL BUILDING  (EN 1991-1-4:2024, prEN 1991-1-1:2023)",
 "code": "EN 1991-1-4:2024, EN 1991-1-1:2023",
-"nin": 34,
-"kb": 34
+"nin": 38,
+"kb": 35
 },
 {
 "id": "PTSlab_EC2-2023_Standalone",
@@ -430,7 +442,7 @@ EC.sheetCatalog = [
 "prefix": "PT",
 "title": "POST-TENSIONED SLAB DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 53,
+"nin": 56,
 "kb": 99
 },
 {
@@ -442,8 +454,8 @@ EC.sheetCatalog = [
 "prefix": "F",
 "title": "ISOLATED RC PAD FOOTING - STRUCTURAL DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 24,
-"kb": 60
+"nin": 28,
+"kb": 61
 },
 {
 "id": "PileAxial_EC7_Standalone",
@@ -454,7 +466,7 @@ EC.sheetCatalog = [
 "prefix": "PA",
 "title": "SINGLE PILE - AXIAL RESISTANCE - EN 1997-3:2025 (EUROPEAN METHODS)",
 "code": "EN 1997-3:2025",
-"nin": 53,
+"nin": 55,
 "kb": 92
 },
 {
@@ -466,8 +478,8 @@ EC.sheetCatalog = [
 "prefix": "PC",
 "title": "PILE CAP DESIGN FROM ETABS SHELL FORCES (FEM) TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 38,
-"kb": 118
+"nin": 51,
+"kb": 120
 },
 {
 "id": "PileCap_Multi_EC2-2023_Standalone",
@@ -478,7 +490,7 @@ EC.sheetCatalog = [
 "prefix": "PC",
 "title": "PILE CAP UNDER SEVERAL COLUMNS / WALLS TO EN 1992-1-1:2023 - LOADS BY NODES",
 "code": "EN 1992-1-1:2023",
-"nin": 68,
+"nin": 69,
 "kb": 216
 },
 {
@@ -490,7 +502,7 @@ EC.sheetCatalog = [
 "prefix": "ND",
 "title": "NEGATIVE SKIN FRICTION (DOWNDRAG) ON A PILE - EN 1997-3:2025 CLAUSE 6 / EN 1992-1-1:2023",
 "code": "EN 1997-3:2025, EN 1992-1-1:2023",
-"nin": 34,
+"nin": 35,
 "kb": 37
 },
 {
@@ -502,7 +514,7 @@ EC.sheetCatalog = [
 "prefix": "PD",
 "title": "DRIVEN PRECAST PILE 300 x 300 - SPT BLOW COUNT N, STATIC AND DYNAMIC CAPACITY - EN 1997-3:2025 / EN 1992-1-1:2023",
 "code": "EN 1997-3:2025, EN 1992-1-1:2023",
-"nin": 67,
+"nin": 68,
 "kb": 89
 },
 {
@@ -514,7 +526,7 @@ EC.sheetCatalog = [
 "prefix": "PG",
 "title": "PILE GROUP SETTLEMENT AND GROUP CAPACITY - EN 1997-3:2025 CLAUSE 6 / EN 1997-1:2024",
 "code": "EN 1997-3:2025, EN 1997-1:2024",
-"nin": 32,
+"nin": 33,
 "kb": 39
 },
 {
@@ -526,8 +538,8 @@ EC.sheetCatalog = [
 "prefix": "PL",
 "title": "SINGLE PILE UNDER TRANSVERSE LOAD - EN 1997-3:2025 / EN 1997-1:2024 / EN 1992-1-1:2023",
 "code": "EN 1997-3:2025, EN 1997-1:2024, EN 1992-1-1:2023",
-"nin": 31,
-"kb": 53
+"nin": 33,
+"kb": 54
 },
 {
 "id": "PileLoadTest_EC7-2024_Standalone",
@@ -550,7 +562,7 @@ EC.sheetCatalog = [
 "prefix": "PS",
 "title": "PILE SOIL SPRINGS AT THE NODES (MESH Δz) FOR A FRAME MODEL - EN 1997-3:2025 CLAUSE 6",
 "code": "EN 1997-3:2025",
-"nin": 21,
+"nin": 22,
 "kb": 37
 },
 {
@@ -574,7 +586,7 @@ EC.sheetCatalog = [
 "prefix": "PC",
 "title": "PILE CAP DESIGN TO EN 1992-1-1:2023 - HAND INPUT",
 "code": "EN 1992-1-1:2023",
-"nin": 91,
+"nin": 94,
 "kb": 224
 },
 {
@@ -586,8 +598,8 @@ EC.sheetCatalog = [
 "prefix": "P",
 "title": "PUNCHING SHEAR OF FLAT SLABS TO EN 1992-1-1:2023 (8.4)",
 "code": "EN 1992-1-1:2023",
-"nin": 33,
-"kb": 41
+"nin": 35,
+"kb": 42
 },
 {
 "id": "Raft_EC7-2024_Standalone",
@@ -598,8 +610,8 @@ EC.sheetCatalog = [
 "prefix": "RF",
 "title": "RAFT FOUNDATION ON SOIL - EN 1997-1:2024 / EN 1997-3:2025 / EN 1992-1-1:2023",
 "code": "EN 1997-1:2024, EN 1997-3:2025, EN 1992-1-1:2023",
-"nin": 50,
-"kb": 76
+"nin": 55,
+"kb": 77
 },
 {
 "id": "RestraintCracking_EC2-2023_Standalone",
@@ -622,7 +634,7 @@ EC.sheetCatalog = [
 "prefix": "RW",
 "title": "RC CANTILEVER RETAINING WALL DESIGN TO EUROCODES (2nd GENERATION)",
 "code": "EUROCODES",
-"nin": 60,
+"nin": 63,
 "kb": 127
 },
 {
@@ -634,7 +646,7 @@ EC.sheetCatalog = [
 "prefix": "RS",
 "title": "ONE-WAY RC RIBBED SLAB TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 32,
+"nin": 35,
 "kb": 44
 },
 {
@@ -646,7 +658,7 @@ EC.sheetCatalog = [
 "prefix": "BH",
 "title": "SOIL PARAMETERS FROM SPT - CORRELATIONS AND CHARACTERISTIC VALUES - EN 1997-2 / EN ISO 22476-3 / EN 1997-1:2024",
 "code": "EN 1997-2, EN 1997-1:2024",
-"nin": 20,
+"nin": 22,
 "kb": 40
 },
 {
@@ -658,8 +670,8 @@ EC.sheetCatalog = [
 "prefix": "RW",
 "title": "CANTILEVER RETAINING WALL - SEISMIC DESIGN SITUATION - EN 1998-5 ANNEX E / EN 1997-3:2025 / EN 1990:2023",
 "code": "EN 1998-5, EN 1997-3:2025, EN 1990:2023",
-"nin": 38,
-"kb": 51
+"nin": 41,
+"kb": 52
 },
 {
 "id": "SelfWeight_EC1-2023_Standalone",
@@ -670,8 +682,8 @@ EC.sheetCatalog = [
 "prefix": "LD",
 "title": "SELF-WEIGHT AND DENSITIES TO EN 1991-1-1:2023",
 "code": "EN 1991-1-1:2023",
-"nin": 25,
-"kb": 35
+"nin": 27,
+"kb": 36
 },
 {
 "id": "Settlement_EC7_Standalone",
@@ -682,8 +694,8 @@ EC.sheetCatalog = [
 "prefix": "SE",
 "title": "SETTLEMENT AND CONSOLIDATION OF LAYERED GROUND - EUROCODE 7 (SLS)",
 "code": "EUROCODE 7",
-"nin": 27,
-"kb": 37
+"nin": 32,
+"kb": 39
 },
 {
 "id": "SevenPileCap_EC2-2023_Standalone",
@@ -694,8 +706,8 @@ EC.sheetCatalog = [
 "prefix": "PC",
 "title": "CAP ON SEVEN PILES TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 45,
-"kb": 73
+"nin": 49,
+"kb": 74
 },
 {
 "id": "ShearWall_EC2-2023_Standalone",
@@ -706,7 +718,7 @@ EC.sheetCatalog = [
 "prefix": "W",
 "title": "RC SHEAR WALL DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 27,
+"nin": 29,
 "kb": 71
 },
 {
@@ -718,8 +730,8 @@ EC.sheetCatalog = [
 "prefix": "SP",
 "title": "EMBEDDED RETAINING WALL (SHEET PILE) - ULS DESIGN TO EUROCODE 7",
 "code": "EUROCODE 7",
-"nin": 35,
-"kb": 64
+"nin": 39,
+"kb": 65
 },
 {
 "id": "Shortening_TallBuilding_EC1-2023_Standalone",
@@ -730,7 +742,7 @@ EC.sheetCatalog = [
 "prefix": "SH",
 "title": "GRAVITY TAKE-DOWN AND AXIAL SHORTENING OF A TALL BUILDING - COLUMN vs CORE",
 "code": "Eurocodes",
-"nin": 31,
+"nin": 32,
 "kb": 35
 },
 {
@@ -742,8 +754,8 @@ EC.sheetCatalog = [
 "prefix": "PC",
 "title": "CAP ON A SINGLE PILE TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 45,
-"kb": 70
+"nin": 49,
+"kb": 71
 },
 {
 "id": "SixPileCap_EC2-2023_Standalone",
@@ -754,7 +766,7 @@ EC.sheetCatalog = [
 "prefix": "PC",
 "title": "CAP ON SIX PILES TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 52,
+"nin": 56,
 "kb": 109
 },
 {
@@ -766,8 +778,8 @@ EC.sheetCatalog = [
 "prefix": "FS",
 "title": "RC FLAT SLAB DESIGN TO EN 1992-1-1:2023  -  HAND CALCULATION AND FEM",
 "code": "EN 1992-1-1:2023",
-"nin": 54,
-"kb": 106
+"nin": 65,
+"kb": 108
 },
 {
 "id": "Slab_OneWay_EC2-2023_Standalone",
@@ -778,8 +790,8 @@ EC.sheetCatalog = [
 "prefix": "S",
 "title": "RC ONE-WAY SLAB DESIGN TO EN 1992-1-1:2023  -  HAND CALCULATION AND FEM",
 "code": "EN 1992-1-1:2023",
-"nin": 30,
-"kb": 61
+"nin": 36,
+"kb": 62
 },
 {
 "id": "Slab_TwoWay_EC2-2023_Standalone",
@@ -790,8 +802,8 @@ EC.sheetCatalog = [
 "prefix": "S",
 "title": "RC TWO-WAY SLAB DESIGN TO EN 1992-1-1:2023  -  HAND CALCULATION AND FEM",
 "code": "EN 1992-1-1:2023",
-"nin": 33,
-"kb": 82
+"nin": 46,
+"kb": 84
 },
 {
 "id": "SlenderWall_EC2-2023_Standalone",
@@ -802,8 +814,8 @@ EC.sheetCatalog = [
 "prefix": "W",
 "title": "SLENDER LOAD-BEARING RC WALL - OUT-OF-PLANE BUCKLING TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 20,
-"kb": 42
+"nin": 24,
+"kb": 43
 },
 {
 "id": "Slope_EC7-2024_Standalone",
@@ -814,8 +826,8 @@ EC.sheetCatalog = [
 "prefix": "SL",
 "title": "EMBANKMENT ON SOFT CLAY - OVERALL SLOPE STABILITY TO EUROCODE 7 (2nd GENERATION)",
 "code": "EUROCODE 7",
-"nin": 37,
-"kb": 54
+"nin": 42,
+"kb": 55
 },
 {
 "id": "SpiralStair_EC2-2023_Standalone",
@@ -826,8 +838,8 @@ EC.sheetCatalog = [
 "prefix": "ST",
 "title": "RC HELICAL & SPIRAL STAIRCASE DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 35,
-"kb": 63
+"nin": 42,
+"kb": 64
 },
 {
 "id": "Staircase_EC2-2023_Standalone",
@@ -838,8 +850,8 @@ EC.sheetCatalog = [
 "prefix": "ST",
 "title": "STRAIGHT RC STAIRCASE FLIGHT WITH LANDINGS TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 29,
-"kb": 43
+"nin": 33,
+"kb": 44
 },
 {
 "id": "SteelColumn_EC3-2022_Standalone",
@@ -850,7 +862,7 @@ EC.sheetCatalog = [
 "prefix": "SC",
 "title": "STEEL COLUMN - I / H SECTION UNDER COMPRESSION AND BENDING (EN 1993-1-1:2022)",
 "code": "EN 1993-1-1:2022",
-"nin": 35,
+"nin": 37,
 "kb": 56
 },
 {
@@ -862,7 +874,7 @@ EC.sheetCatalog = [
 "prefix": "SC",
 "title": "GROUND IMPROVEMENT - STONE COLUMNS UNDER A WIDE LOAD - EN 1997-3:2025 / EN 1997-1:2024",
 "code": "EN 1997-3:2025, EN 1997-1:2024",
-"nin": 28,
+"nin": 30,
 "kb": 40
 },
 {
@@ -874,8 +886,8 @@ EC.sheetCatalog = [
 "prefix": "TB",
 "title": "TALL BUILDING - WIND DYNAMICS, COMFORT AND IMPOSED LOAD TAKE-DOWN TO EN 1991 (2023)",
 "code": "EN 1991",
-"nin": 28,
-"kb": 47
+"nin": 32,
+"kb": 48
 },
 {
 "id": "TankPanel_EC2-2023_Standalone",
@@ -886,7 +898,7 @@ EC.sheetCatalog = [
 "prefix": "TP",
 "title": "TWO-WAY RC TANK WALL PANEL - PLATE COEFFICIENTS - EN 1992-1-1:2023 / EN 1992-3",
 "code": "EN 1992-1-1:2023, EN 1992-3",
-"nin": 25,
+"nin": 26,
 "kb": 48
 },
 {
@@ -898,8 +910,8 @@ EC.sheetCatalog = [
 "prefix": "TW",
 "title": "RC LIQUID-RETAINING WALL UNDER HYDROSTATIC PRESSURE - EN 1992-1-1:2023 / EN 1992-3",
 "code": "EN 1992-1-1:2023, EN 1992-3",
-"nin": 24,
-"kb": 39
+"nin": 25,
+"kb": 40
 },
 {
 "id": "Thermal_Actions_EC1-2023_Standalone",
@@ -910,8 +922,8 @@ EC.sheetCatalog = [
 "prefix": "TH",
 "title": "THERMAL ACTIONS ON A ROOF SLAB AND FRAME TO EN 1991-1-5:2023",
 "code": "EN 1991-1-5:2023",
-"nin": 30,
-"kb": 39
+"nin": 31,
+"kb": 40
 },
 {
 "id": "Thermal_TallBuilding_EC1-2023_Standalone",
@@ -922,7 +934,7 @@ EC.sheetCatalog = [
 "prefix": "TT",
 "title": "THERMAL ACTIONS ON A TALL BUILDING - EXPOSED vs INTERNAL COLUMNS  (prEN 1991-1-5:2023)",
 "code": "EN 1991-1-5:2023",
-"nin": 23,
+"nin": 24,
 "kb": 24
 },
 {
@@ -934,8 +946,8 @@ EC.sheetCatalog = [
 "prefix": "PC",
 "title": "CAP ON THREE PILES TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 45,
-"kb": 63
+"nin": 49,
+"kb": 64
 },
 {
 "id": "Torsion_EC2-2023_Standalone",
@@ -946,8 +958,8 @@ EC.sheetCatalog = [
 "prefix": "B",
 "title": "RC BEAM UNDER TORSION, SHEAR AND BENDING TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 23,
-"kb": 34
+"nin": 25,
+"kb": 35
 },
 {
 "id": "TwoPileCap_EC2-2023_Standalone",
@@ -958,8 +970,8 @@ EC.sheetCatalog = [
 "prefix": "PC",
 "title": "CAP ON TWO PILES TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 47,
-"kb": 73
+"nin": 51,
+"kb": 74
 },
 {
 "id": "Uplift_EC7-2024_Standalone",
@@ -970,8 +982,8 @@ EC.sheetCatalog = [
 "prefix": "UP",
 "title": "BASEMENT UPLIFT (UPL), HYDRAULIC HEAVE (HYD) AND BASE HEAVE - EN 1997-1:2024 / EN 1997-3:2025",
 "code": "EN 1997-1:2024, EN 1997-3:2025",
-"nin": 50,
-"kb": 65
+"nin": 54,
+"kb": 66
 },
 {
 "id": "Vehicle_Impact_EC1-2023_Standalone",
@@ -982,8 +994,8 @@ EC.sheetCatalog = [
 "prefix": "VI",
 "title": "VEHICLE IMPACT ON COLUMNS AND CAR PARK BARRIERS TO EN 1991-1-7:2023",
 "code": "EN 1991-1-7:2023",
-"nin": 22,
-"kb": 31
+"nin": 29,
+"kb": 32
 },
 {
 "id": "Vortex_Shedding_EC1-2023_Standalone",
@@ -994,8 +1006,8 @@ EC.sheetCatalog = [
 "prefix": "VS",
 "title": "VORTEX SHEDDING ON A STEEL CHIMNEY TO EN 1991-1-4:2024 ANNEX E",
 "code": "EN 1991-1-4:2024",
-"nin": 22,
-"kb": 30
+"nin": 26,
+"kb": 31
 },
 {
 "id": "WaterTank_EC1-2023_Standalone",
@@ -1006,7 +1018,7 @@ EC.sheetCatalog = [
 "prefix": "WT",
 "title": "CIRCULAR RC WATER TANK - LIQUID ACTIONS TO EN 1991-4:2023",
 "code": "EN 1991-4:2023",
-"nin": 19,
+"nin": 20,
 "kb": 26
 },
 {
@@ -1018,8 +1030,8 @@ EC.sheetCatalog = [
 "prefix": "B",
 "title": "RC BEAM WITH A WEB OPENING TO EN 1992-1-1:2023 - VIERENDEEL CHORDS",
 "code": "EN 1992-1-1:2023",
-"nin": 35,
-"kb": 66
+"nin": 37,
+"kb": 67
 },
 {
 "id": "WindComb_TallBuilding_EC1-2023_Standalone",
@@ -1030,8 +1042,8 @@ EC.sheetCatalog = [
 "prefix": "TC",
 "title": "WIND LOAD CASES AND COMBINATIONS FOR A TALL BUILDING  (EN 1990:2023, EN 1991-1-4:2024)",
 "code": "EN 1990:2023, EN 1991-1-4:2024",
-"nin": 23,
-"kb": 30
+"nin": 27,
+"kb": 31
 },
 {
 "id": "Wind_AcrossTorsion_EC1-2023_Standalone",
@@ -1042,8 +1054,8 @@ EC.sheetCatalog = [
 "prefix": "TA",
 "title": "ACROSS-WIND AND TORSIONAL WIND EFFECTS ON A TALL BUILDING  (EN 1991-1-4:2024)",
 "code": "EN 1991-1-4:2024",
-"nin": 24,
-"kb": 30
+"nin": 29,
+"kb": 31
 },
 {
 "id": "Wind_Building_EC1-2023_Standalone",
@@ -1054,7 +1066,7 @@ EC.sheetCatalog = [
 "prefix": "WL",
 "title": "WIND ACTIONS ON RECTANGULAR BUILDINGS TO EN 1991-1-4:2024",
 "code": "EN 1991-1-4:2024",
-"nin": 16,
+"nin": 18,
 "kb": 36
 },
 {
@@ -1066,7 +1078,7 @@ EC.sheetCatalog = [
 "prefix": "WL",
 "title": "WIND ACTIONS ON CANOPY ROOFS AND SIGNBOARDS TO EN 1991-1-4:2024",
 "code": "EN 1991-1-4:2024",
-"nin": 30,
+"nin": 34,
 "kb": 44
 },
 {
@@ -1078,7 +1090,7 @@ EC.sheetCatalog = [
 "prefix": "TD",
 "title": "WIND DRIFT AND STOREY DEFLECTION OF A TALL BUILDING  (EN 1991-1-4:2024, SLS)",
 "code": "EN 1991-1-4:2024",
-"nin": 21,
+"nin": 24,
 "kb": 33
 },
 {
@@ -1090,7 +1102,7 @@ EC.sheetCatalog = [
 "prefix": "WL",
 "title": "WIND ON A DUOPITCH PORTAL FRAME BUILDING TO EN 1991-1-4:2024",
 "code": "EN 1991-1-4:2024",
-"nin": 20,
+"nin": 22,
 "kb": 31
 },
 {
@@ -1102,7 +1114,7 @@ EC.sheetCatalog = [
 "prefix": "TW",
 "title": "WIND ON A TALL BUILDING - DYNAMIC RESPONSE TO EN 1991-1-4:2024",
 "code": "EN 1991-1-4:2024",
-"nin": 16,
-"kb": 31
+"nin": 21,
+"kb": 32
 }
 ];

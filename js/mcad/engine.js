@@ -831,7 +831,12 @@
     sort: new Builtin(v => new Mat(v.r, 1, v.a.slice().sort((x, y) => valOf(x) - valOf(y)))),
     reverse: new Builtin(v => new Mat(v.r, v.c, v.a.slice().reverse())),
     csort: new Builtin((m, j) => { j = num(j) - 1; const rows = []; for (let i = 0; i < m.r; i++) rows.push(m.a.slice(i * m.c, i * m.c + m.c)); rows.sort((a, b) => valOf(a[j]) - valOf(b[j])); return new Mat(m.r, m.c, [].concat(...rows)); }),
-    READEXCEL: new Builtin(() => err('READEXCEL: paste the exported table into the input table instead')),
+    READEXCEL: new Builtin(name => {
+      const t = CUR && CUR.xl && CUR.xl[name];
+      if (!t) err('READEXCEL: the Excel file "' + name + '" is not available in the browser');
+      const c = Math.max(...t.map(r => r.length));
+      return new Mat(t.length, c, [].concat(...t.map(r => Array.from({ length: c }, (_, j) => (r[j] === undefined || r[j] === null ? NaN : r[j])))));
+    }),
     error: new Builtin(s => err(String(s))),
   };
   // functions that need the evaluator (`this`)
@@ -853,7 +858,7 @@
    * @returns {{sheet: Sheet, out: Array}} out = flat list of {reg, val, err} in evaluation order
    */
   function run(doc, inputs) {
-    const S = new Sheet(); S.depth = 0; CUR = S;
+    const S = new Sheet(); S.depth = 0; CUR = S; S.xl = doc.xl || null;
     const out = [];
     const walk = regs => {
       for (const r of sortRegions(regs)) {

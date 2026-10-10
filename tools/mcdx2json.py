@@ -404,6 +404,13 @@ def literal_kind(e):
         return ('str', e[1], None)
     if e[0] == 'cb':
         return ('combo', e[3], None)
+    # (n * u1) * u2 ... / u3  ->  n with unit u1*u2/u3  (Mathcad stores 250 kN*m as (250*kN)*m)
+    if e[0] == 'o' and e[1] in ('*', '/') and len(e) == 4 and is_unit(e[3]):
+        inner = e[2]
+        if isinstance(inner, list) and inner[0] == 'o' and inner[1] in ('*', '/') and len(inner) == 4 and is_unit(inner[3]):
+            sub = literal_kind(inner)
+            if sub and sub[0] in ('num', 'mat') and sub[2] is not None:
+                return (sub[0], sub[1], ['o', e[1], sub[2], e[3]])
     if e[0] == 'o' and e[1] == '*' and len(e) == 4:
         a, u = e[2], e[3]
         if isinstance(a, list) and a[0] == 'o' and a[1] in ('neg', '-') and len(a) == 3 and isinstance(a[2], (int, float)):
@@ -431,6 +438,62 @@ def all_lit(m):
         if isinstance(x, list) and x[0] == 'o' and x[1] in ('neg', '-') and len(x) == 3 and isinstance(x[2], (int, float)): continue
         return False
     return True
+
+EXCEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'excel')
+
+def walk_ast(e, fn):
+    if isinstance(e, list):
+        fn(e)
+        for x in e: walk_ast(x, fn)
+    elif isinstance(e, dict):
+        for x in e.values(): walk_ast(x, fn)
+
+def embed_excel(doc):
+    """READEXCEL("file") reads a workbook next to the .mcdx. The browser cannot, so the table is embedded
+    from tools/excel/<file>.json (exported from the Drive folder) and returned by READEXCEL."""
+    strs = {}
+    calls = []
+    def fn(e):
+        if len(e) >= 3 and e[0] == 'def' and isinstance(e[1], list) and e[1] and e[1][0] == 'v':
+            rhs = e[2][1] if isinstance(e[2], list) and e[2] and e[2][0] == 'ev' else e[2]
+            if isinstance(rhs, list) and rhs and rhs[0] == 's': strs[e[1][1]] = rhs[1]
+        if len(e) == 3 and e[0] == 'c' and e[1] == ['f', 'READEXCEL'] and isinstance(e[2], list):
+            calls.append(e[2])
+    walk_ast(doc['regions'], fn)
+    xl = {}
+    for args in calls:
+        if not args: continue
+        a = args[0]
+        name = a[1] if a and a[0] == 's' else strs.get(a[1]) if a and a[0] == 'v' else None
+        if not name: continue
+        fp = os.path.join(EXCEL_DIR, os.path.basename(name.replace('\\', '/')) + '.json')
+        if os.path.exists(fp):
+            xl[name] = json.load(open(fp, encoding='utf-8'))['rows']
+    if xl: doc['xl'] = xl
+
+def info_input(rhs, doc):
+    """info("key", default) [* unit]: a value read from the embedded Excel table -> editable input"""
+    unit = None
+    e = rhs
+    if isinstance(e, list) and e[0] == 'o' and e[1] == '*' and len(e) == 4 and is_unit(e[3]):
+        inner, unit = e[2], e[3]
+        while isinstance(inner, list) and inner[0] == 'o' and inner[1] == '*' and len(inner) == 4 and is_unit(inner[3]):
+            unit = ['o', '*', inner[3], unit]; inner = inner[2]
+        e = inner
+    if not (isinstance(e, list) and e[0] == 'c' and e[1] == ['v', 'info'] and len(e[2]) == 2 and e[2][0] and e[2][0][0] == 's'):
+        return None
+    key = e[2][0][1]; dflt = e[2][1]
+    val = None
+    for rows in (doc.get('xl') or {}).values():
+        for r in rows:
+            if r and r[0] == key: val = r[1]
+    if val is None:
+        val = dflt[1] if isinstance(dflt, list) and dflt[0] == 's' else dflt
+    if isinstance(val, str):
+        return ('str', val, None)
+    if isinstance(val, (int, float)):
+        return ('num', val, unit)
+    return None
 
 def add_meta(doc):
     flat = []
@@ -463,6 +526,8 @@ def add_meta(doc):
         if e[0] != 'def' or e[1][0] != 'v':
             continue
         lk = literal_kind(e[2])
+        if not lk:
+            lk = info_input(e[2][1] if isinstance(e[2], list) and e[2][0] == 'ev' else e[2], doc)
         if not lk:
             continue
         # label = text on the same row to the left
@@ -498,6 +563,7 @@ if __name__ == '__main__':
     for f in sorted(os.listdir(src)):
         if not f.endswith('.mcdx'): continue
         d, errs = convert(os.path.join(src, f))
+        embed_excel(d)
         add_meta(d)
         name = f[:-5]
         js = json.dumps(d, ensure_ascii=False, separators=(',', ':'))

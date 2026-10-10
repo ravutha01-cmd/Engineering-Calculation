@@ -1,6 +1,6 @@
 {
  "driveFolder": "1PGJ8CupzPT4WeUDw9IWqoeEbJ036-RgF",
- "lastSync": "2026-10-10T00:00:00Z",
+ "lastSync": "2026-10-10T06:00:00Z",
  "files": {
   "Anchor_EC7-2024_Standalone.mcdx": {
    "id": "1bSdOHiJdQkDWwiLk75ZVWzHhxGz3UVC3",
@@ -21,6 +21,11 @@
    "id": "1z1sburNiTJZ7mpCC59qJSvbtapEowChE",
    "folder": "EC2_Concrete\\Beam_Design",
    "modifiedTime": "2026-10-02T07:04:45.779Z"
+  },
+  "Beam_EC2-2023.mcdx": {
+   "id": "1UH1CcFC9wQv5Ybc3taXtdxEPrfmpA82-",
+   "folder": "EC2_Concrete\\Beam_Design",
+   "modifiedTime": "2026-10-02T04:45:05.776Z"
   },
   "Beam_EC2-2023_Standalone.mcdx": {
    "id": "1dys3SqQUbPEiSw5bRRWwFAH5QUOTiNq7",
@@ -461,6 +466,13 @@
    "id": "1h1LD2cqced_8Gq-5u56ytBruS9382dS_",
    "folder": "EC1_Actions\\Wind_TallBuilding_Design",
    "modifiedTime": "2026-10-07T13:59:16.758Z"
+  }
+ },
+ "excel": {
+  "Beam_Input.xlsx": {
+   "id": "16O95CuMo3nfJ7h7x-7THb57tP0veopWL",
+   "folder": "EC2_Concrete\\Beam_Design",
+   "modifiedTime": "2026-10-02T03:46:34.257Z"
   }
  }
 }

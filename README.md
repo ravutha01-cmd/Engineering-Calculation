@@ -18,7 +18,9 @@ A browser app for structural design to the Eurocodes. It runs as plain static fi
 
 ## Run
 
-Open `index.html` in a browser, or serve the folder:
+Online (GitHub Pages): https://ravutha01-cmd.github.io/Engineering-Calculation/
+
+Locally: open `index.html` in a browser, or serve the folder:
 
 ```
 python -m http.server 8000   # then open http://localhost:8000

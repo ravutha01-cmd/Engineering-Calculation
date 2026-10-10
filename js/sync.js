@@ -157,9 +157,10 @@
       } catch (e) { st.err = e.message || String(e); }
     }
     // 2) GitHub Gist (when configured on this device)
-    const c = cfg();
+    const a = EC.auth && EC.auth.gist && EC.auth.gist();
+    const c = a && a.token ? { token: a.token, gistId: a.gistId } : cfg();
     if (c.token) {
-      st.backend = gistBackend(c.token, c.gistId); st.label = 'GitHub Gist';
+      st.backend = gistBackend(c.token, c.gistId); st.label = 'Admin database (GitHub Gist)';
       await cycle(true);
       st.backend.watch(() => { if (!busy && !st.pending) cycle(true); });
       return;

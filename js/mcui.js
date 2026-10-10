@@ -533,7 +533,7 @@
   /* ---------- refresh ---------- */
   function refresh(e, err) {
     const out = document.getElementById('out');
-    if (!out || api.route()[1] !== e.id) return;
+    if (!out || !api || api.route()[1] !== e.id) return;
     const main = document.getElementById('main'); const y = main.scrollTop;
     out.innerHTML = vOutput(e);
     if (err) out.insertAdjacentHTML('afterbegin', `<div class="errmsg">⚠ ${esc(err.message)}</div>`);
@@ -541,7 +541,7 @@
   }
   let rt = null;
   function changed(e) { e.u = Date.now(); api.save(); clearTimeout(rt); rt = setTimeout(() => refresh(e), 350); }
-  const curEl = () => { const r = api.route(); if (r[0] !== 'el') return null; const e = api.proj().elements.find(x => x.id === r[1]); return e && api.MOD[e.type] && api.MOD[e.type].mc ? e : null; };
+  const curEl = () => { if (!api) return null; const r = api.route(); if (r[0] !== 'el') return null; const e = api.proj().elements.find(x => x.id === r[1]); return e && api.MOD[e.type] && api.MOD[e.type].mc ? e : null; };
   const inputDef = (e, n) => (docs[api.MOD[e.type].mc].inputs || []).find(i => i.n === n);
 
   document.addEventListener('input', ev => {
@@ -599,6 +599,7 @@
       api.modal('Restore worksheet values', `<p>Replace all inputs of <b>${esc(e.mark)}</b> with the values saved in the Mathcad worksheet? Save a record first if you want to keep the current set.</p>`, () => { e.inputs = {}; e.u = Date.now(); api.save(); api.render(); }, 'Restore');
       return;
     }
+    if (d.mrec !== undefined && EC.auth && EC.auth.isDemo()) { api.toast('Demo account: records are not saved - sign in as Admin'); return; }
     if (d.mrec !== undefined) {
       const bg = api.modal('Save record', `<div class="form"><label>Note (optional)</label><input id="recNote" placeholder="e.g. Issued for checking, rev A"></div>`, () => {
         const res = e.res || {};

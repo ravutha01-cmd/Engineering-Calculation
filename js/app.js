@@ -67,6 +67,7 @@
   }
   function primeSeen() { seen.clear(); DB.projects.forEach(p => { seen.set('p_' + p.id, itemSig(p)); p.elements.forEach(e => seen.set('e_' + e.id, itemSig(e))); }); seen.set('meta', DB.current); }
   function save() {
+    if (DEMO) { stamp(); return; } /* demo: kept in memory only */
     clearTimeout(saveT); setSync('saving');
     saveT = setTimeout(() => {
       stamp();
@@ -77,6 +78,7 @@
   let syncSt = { state: 'local' };
   function setSync(local) {
     const el = document.getElementById('syncState'); if (!el) return;
+    if (DEMO) { el.className = 'sync err'; el.innerHTML = '<i></i><span>Demo · not saved</span>'; el.title = 'Demo account: calculations work, but nothing is saved. Sign in as Admin to save.'; return; }
     const s = EC.sync.status();
     const cloud = s.backend ? (s.state === 'syncing' ? 'Syncing…' : s.state === 'error' ? 'Sync error' : s.at ? 'Synced ' + s.at.toTimeString().slice(0, 5) : 'Cloud') : 'Saved in this browser';
     const txt = local === 'saving' ? 'Saving…' : cloud;
@@ -113,7 +115,12 @@
     };
     return { projects: [p], current: p.id };
   }
-  DB = load() || seed();
+  /* accounts: Demo = calculate only (nothing saved), Admin = saved + synced database */
+  const ROLE = EC.auth.role();
+  if (!ROLE) { document.getElementById('app').style.display = 'none'; EC.auth.screen(); return; }
+  const DEMO = ROLE === 'demo';
+  if (DEMO) document.documentElement.classList.add('demo');
+  DB = DEMO ? seed() : (load() || seed());
   DB.tomb = DB.tomb || {};
   primeSeen();
   const proj = () => DB.projects.find(p => p.id === DB.current) || DB.projects[0];
@@ -440,15 +447,16 @@
       ${syncCard()}`;
   }
   function syncCard() {
-    const s = EC.sync.status(), g = EC.sync.gist.get();
-    const inArtifact = s.backend && s.label === 'Your Claude account';
-    return `<div class="card" style="margin-top:16px"><header><h3>Autosave &amp; sync between devices</h3><span class="hint">${esc(s.backend ? 'Connected: ' + s.label : 'Not connected')}</span></header><div class="body form">
-      <p style="margin-top:0">Every change is saved automatically, about a quarter of a second after you type: the inputs, the computed results and your saved records. ${inArtifact ? 'This copy runs inside Claude, so your data is also stored in <b>your Claude account</b> and opens the same on any device where you sign in.' : 'To open the same data on another device, connect a private <b>GitHub Gist</b> below. Use a GitHub token with only the <code>gist</code> permission. On the other device, enter the same token and Gist ID.'}</p>
-      <p>Status: <b>${esc(s.state === 'synced' ? 'synced ' + (s.at ? s.at.toLocaleTimeString() : '') : s.state)}</b>${s.err ? ` · <span style="color:var(--critical)">${esc(s.err)}</span>` : ''}</p>
-      ${inArtifact ? `<button class="btn" data-syncnow>Sync now</button>` : `<div class="row2"><div><label>GitHub token (gist scope)</label><input id="gTok" type="password" placeholder="${esc(g.token || 'ghp_…')}" autocomplete="off"></div><div><label>Gist ID (leave empty to create one)</label><input id="gId" value="${esc(g.gistId)}"></div></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-gist>Connect &amp; sync</button>${s.backend ? '<button class="btn" data-syncnow>Sync now</button><button class="btn danger" data-gistoff>Disconnect</button>' : ''}</div>`}
+    if (DEMO) return `<div class="card" style="margin-top:16px"><header><h3>Account &amp; saving</h3><span class="hint">Demo account</span></header><div class="body"><p style="margin-top:0">You are using the <b>Demo account</b>: all calculations work, but nothing is saved - the data is lost when the page is closed or reloaded.</p><button class="btn primary" data-signout>Sign in as Admin</button></div></div>`;
+    const s = EC.sync.status();
+    return `<div class="card" style="margin-top:16px"><header><h3>Account &amp; saving</h3><span class="hint">${esc(s.backend ? 'Database: ' + s.label : 'Not connected')}</span></header><div class="body form">
+      <p style="margin-top:0">Signed in as <b>${esc(EC.auth.user())}</b> (Admin). Every change is saved automatically - inputs, results and records - ${window.EC_EMBED ? 'in your Claude account.' : 'in your private database (GitHub Gist) and in this browser.'}</p>
+      <p>Status: <b>${esc(s.state === 'synced' ? 'saved ' + (s.at ? s.at.toLocaleTimeString() : '') : s.state)}</b>${s.err ? ` · <span style="color:var(--critical)">${esc(s.err)}</span>` : ''}</p>
+      ${window.EC_EMBED ? '' : `<p>Account ID for a new device: <code>${esc(EC.auth.accountId())}</code></p>`}
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-syncnow>Save &amp; sync now</button>${window.EC_EMBED ? '' : '<button class="btn danger" data-signout>Sign out</button>'}</div>
     </div></div>`;
   }
+
 
   /* ---------------- router ---------------- */
   function route() { return location.hash.replace(/^#\/?/, '').split('/').filter(Boolean); }
@@ -510,7 +518,7 @@
       save(); const y = $('.inputs') ? $('.inputs').scrollTop : 0; render(); if ($('.inputs')) $('.inputs').scrollTop = y; return;
     }
     const nt = ev.target.closest('[data-newtype]'); if (nt) return addElement(null, nt.dataset.newtype);
-    const t = ev.target.closest('[data-open],[data-go],[data-add],[data-dup],[data-del],[data-tab],[data-print],[data-printpage],[data-csv],[data-stype],[data-lg],[data-reset],[data-newproj],[data-useproj],[data-delproj],[data-demo],[data-syncnow],[data-gistoff],[data-gist]');
+    const t = ev.target.closest('[data-open],[data-go],[data-add],[data-dup],[data-del],[data-tab],[data-print],[data-printpage],[data-csv],[data-stype],[data-lg],[data-reset],[data-newproj],[data-useproj],[data-delproj],[data-demo],[data-syncnow],[data-gistoff],[data-gist],[data-signout]');
     if (!t) return;
     const d = t.dataset;
     if (d.dup !== undefined) { ev.stopPropagation(); return dupElement(d.dup); }
@@ -546,6 +554,7 @@
       }, 'Delete');
       return;
     }
+    if (d.signout !== undefined) { EC.auth.signOut(); location.hash = ''; location.reload(); return; }
     if (d.syncnow !== undefined) { EC.sync.now().then(() => { toast('Synced'); render(); }); return; }
     if (d.gistoff !== undefined) { EC.sync.gist.disconnect(); render(); return; }
     if (d.gist !== undefined) {
@@ -607,6 +616,17 @@
     }).catch(err => toast('Import failed: ' + err.message));
     ev.target.value = '';
   };
+  const acct = $('#acctBtn');
+  if (acct) {
+    acct.innerHTML = `<span class="av">${esc((EC.auth.user() || '?').slice(0, 1).toUpperCase())}</span><span class="who"><b>${esc(EC.auth.user())}</b><small>${DEMO ? 'Demo account' : 'Admin'}</small></span>`;
+    acct.onclick = () => {
+      if (window.EC_EMBED) return toast('Signed in with your Claude account');
+      modal(DEMO ? 'Demo account' : 'Admin account', DEMO
+        ? '<p>You are using the <b>Demo account</b>: every calculation works, but nothing is saved. Sign in as Admin to keep your projects, calculations and records.</p>'
+        : `<p>Signed in as <b>${esc(EC.auth.user())}</b> (Admin). Your data is saved in your database and synced to every device where you sign in.</p><p class="hint">Account ID (enter it once on a new device): <code>${esc(EC.auth.accountId())}</code></p>`,
+        () => { EC.auth.signOut(); location.hash = ''; location.reload(); }, DEMO ? 'Sign in as Admin' : 'Sign out');
+    };
+  }
   $('#themeBtn').onclick = () => {
     const root = document.documentElement;
     const cur = root.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
@@ -625,7 +645,7 @@
     }
   });
   let resT = null;
-  EC.sync.start({
+  if (!DEMO) EC.sync.start({
     get: () => DB,
     set: nd => {
       const keepCur = DB.current;

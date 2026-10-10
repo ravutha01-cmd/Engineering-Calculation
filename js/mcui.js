@@ -207,20 +207,60 @@
     const u = v.uA ? unitStr(v.uA) : v.us ? unitStr(v.us) : '';
     return fnum(v.n) + (u ? ' ' + esc(u) : '');
   }
-  function valH(v) {
+  /* ---------- values: scalars inline, vectors / matrices as readable tables ---------- */
+  const isStr = c => c && c.s !== undefined;
+  function cellH(c) {
+    if (!c) return '';
+    if (isStr(c)) {
+      if (STOK.test(c.s) && !STBAD.test(c.s)) return `<span class="res ok">${esc(c.s)}</span>`;
+      if (STBAD.test(c.s)) return `<span class="res bad">${esc(c.s)}</span>`;
+      return esc(c.s);
+    }
+    if (c.m) return valH(c);
+    return numH(c);
+  }
+  const colUnit = cells => { const c = cells.find(x => x && (x.uA || x.us)); return c ? unitStr(c.uA || c.us) : ''; };
+  const plainNum = c => (!c ? '' : isStr(c) ? cellH(c) : c.m ? valH(c) : fnum(c.n));
+  function vtable(head, rows, cls) {
+    return `<div class="vtab ${cls || ''}"><table><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map((c, k) => `<td${k === 0 ? ' class="rn"' : /^\s*$|^[-−+]?[\d.,]+(?:·10|e|\s|$)|^NaN|^<span class="res|^<math/.test(String(c)) ? '' : ' class="tx"'}>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  }
+  function valH(v, names) {
     if (!v) return '';
     if (v.s !== undefined) return `“${esc(v.s)}”`;
     if (v.f !== undefined) return 'f(…)';
-    if (v.m) {
-      const [r, c] = v.m;
-      if (c === 1 && r <= 8) return '[' + v.cells.map(x => valH(x)).join(', ') + ']ᵀ';
-      if (r === 1 && c <= 8) return '[' + v.cells.map(x => valH(x)).join(', ') + ']';
-      const rr = Math.min(r, 60), cc = Math.min(c, 16);
-      let t = '<table class="rmat"><tbody>';
-      for (let a = 0; a < rr; a++) { t += '<tr>'; for (let b = 0; b < cc; b++) t += `<td>${valH(v.cells[a * cc + b])}</td>`; t += '</tr>'; }
-      return t + `</tbody></table>${v.cut ? `<small class="ref">${r} × ${c}, first rows shown</small>` : ''}`;
+    if (!v.m) return numH(v);
+    const [r, c] = v.m;
+    const cc = Math.min(c, 16), rr = Math.min(r, 60);
+    const cut = v.cut ? `<small class="ref">${r} × ${c} – first ${rr} rows shown</small>` : '';
+    const vec = c === 1 || r === 1;
+    const items = vec ? v.cells : null;
+    // short vector of scalars: inline
+    if (vec && items.length <= 4 && items.every(x => x && !x.m)) return '[' + items.map(cellH).join(', ') + ']' + (c === 1 && r > 1 ? 'ᵀ' : '');
+    // vector of vectors -> one table, one column per sub-vector
+    if (vec && items.length <= 16 && items.every(x => x && x.m && (x.m[1] === 1 || x.m[0] === 1))) {
+      const n = Math.max(...items.map(x => x.cells.length));
+      const head = ['#'].concat(items.map((x, k) => { const u = colUnit(x.cells); return (names && names[k] ? symH(names[k]) : 'col ' + (k + 1)) + (u ? ` <small>(${esc(u)})</small>` : ''); }));
+      const rows = []; for (let a = 0; a < n; a++) rows.push([a + 1].concat(items.map(x => plainNum(x.cells[a]))));
+      return vtable(head, rows) + cut;
     }
-    return numH(v);
+    // long vector -> numbered list table
+    if (vec) {
+      const u = colUnit(items);
+      return vtable(['#', 'value' + (u ? ` <small>(${esc(u)})</small>` : '')], items.map((x, k) => [k + 1, plainNum(x)]), 'narrow') + cut;
+    }
+    // matrix -> grid with row / column numbers, unit per column
+    const head = ['#'];
+    for (let b = 0; b < cc; b++) { const col = []; for (let a = 0; a < rr; a++) col.push(v.cells[a * cc + b]); const u = colUnit(col); head.push((names && names[b] ? symH(names[b]) : String(b + 1)) + (u ? ` <small>(${esc(u)})</small>` : '')); }
+    const rows = []; for (let a = 0; a < rr; a++) { const row = [a + 1]; for (let b = 0; b < cc; b++) row.push(plainNum(v.cells[a * cc + b])); rows.push(row); }
+    return vtable(head, rows) + cut;
+  }
+  /* column names of a program / matrix literal result, e.g. {X_v, P_v, S_v} */
+  function resultNames(rhs) {
+    let x = rhs;
+    if (Array.isArray(x) && x[0] === 'P') { const st = x[1][x[1].length - 1]; x = st && (st[0] === 'ex' || st[0] === 'ret') ? st[1] : null; }
+    if (Array.isArray(x) && x[0] === 'c' && x[1][1] === 'augment') return x[2].map(a => (Array.isArray(a) && a[0] === 'v' ? a[1] : null));
+    if (Array.isArray(x) && x[0] === 'M' && x[3].every(a => Array.isArray(a) && a[0] === 'v')) return x[3].map(a => a[1]);
+    return null;
   }
   const plainText = h => h.replace(/<br>/g, ' ').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
   function splitLabel(t) {
@@ -255,14 +295,18 @@
     const lhsH = lhs ? symH(lhs) : (e[0] === 'def' ? fm(R.mm(e[1])) : fm(R.mm(rhs)));
     const ovr = lhs && ov[lhs] !== undefined;
     let fLine = '';
-    let resH = v && v.v ? valH(v.v) : '';
+    let resH = v && v.v ? valH(v.v, resultNames(rhs)) : '';
+    const pairs = Array.isArray(rhs) && rhs[0] === 'M' && rhs[3].length > 4 && !isLiteral(rhs) && v && v.v && v.v.m && v.v.cells.length === rhs[3].length && (rhs[1] === 1 || rhs[2] === 1);
+    if (pairs) {
+      resH = vtable(['#', 'expression', (lhs ? symH(lhs) : 'value')], rhs[3].map((x, k) => [k + 1, fm(R.mm(x)), cellH(v.v.cells[k])]));
+    }
     if (Array.isArray(rhs) && rhs[0] === 'cb') {
       const k = v && v.sel != null ? v.sel : rhs[3];
       const name = rhs[1][k] || '';
       const n = v && v.v ? valH(v.v) : '';
       resH = esc(name) + (n && n !== esc(name) && n !== `“${esc(name)}”` ? ` → ${n}` : '');
       cls = cls || 'inp';
-    } else if (rhs && !isLiteral(rhs) && e[0] === 'def') {
+    } else if (rhs && !isLiteral(rhs) && e[0] === 'def' && !pairs) {
       fLine = `<span class="f">${fm((lhs ? R.ident(lhs) : R.mm(e[1])) + '<mo>=</mo>' + R.mm(rhs))}</span>`;
       if (opts.sub && v && v.sub) fLine += `<span class="n">${fm('<mo>=</mo>' + R.mm(v.sub))}</span>`;
     } else if (ovr) cls = 'inp';
@@ -271,7 +315,7 @@
       verdict = `<span class="verdict res ${STOK.test(v.v.s) && !STBAD.test(v.v.s) ? 'ok' : 'bad'}">${esc(v.v.s)}</span>`;
       resH = '';
     }
-    const valLine = resH ? `<span class="val${v && v.v && v.v.m && !(v.v.m[0] <= 8 && (v.v.m[1] === 1 || v.v.m[0] === 1)) ? ' blk' : ''}${ovr ? ' edited' : ''}">${lhs ? lhsH + ' = ' : ''}${resH}</span>` : (verdict && lhs ? `<span class="vname">${lhsH}</span>` : '');
+    const valLine = resH ? `<span class="val${v && v.v && v.v.m && !(v.v.cells.length <= 4 && v.v.cells.every(x => x && !x.m)) ? ' blk' : ''}${ovr ? ' edited' : ''}">${lhs ? lhsH + ' = ' : ''}${resH}</span>` : (verdict && lhs ? `<span class="vname">${lhsH}</span>` : '');
     const html = `${fLine}${fLine ? '<br>' : ''}${valLine}${verdict}${err}`;
     return { cls: (v && v.err ? 'bad ' : '') + cls, html: html || `<span class="f">${fm(R.mm(e))}</span>` };
   }
@@ -304,7 +348,7 @@
       }
       if (best >= 0) { labelOf[i] = best; isLabel[best] = true; }
     });
-    let out = '', first = true, row = null;
+    let out = '', first = true, row = null; const skip = new Set();
     const flush = () => { if (!row) return; const sp = splitLabel(row.lab); out += `<div class="row ${row.cls}"><div class="lab">${esc(sp.lab)}${sp.ref ? `<span class="ref">${esc(sp.ref)}</span>` : ''}</div><div class="math">${row.lines.join('<div class="sep"></div>')}</div></div>`; row = null; };
     for (let i = 0; i < flat.length; i++) {
       const reg = flat[i];
@@ -335,6 +379,33 @@
       }
       if (reg.k === 'p') { flush(); out += `<figure class="rplot">${R.plot(reg, r.vals[i])}</figure>`; continue; }
       if (reg.k !== 'm') continue;
+      if (skip.has(i)) continue;
+      const nm = reg.e[0] === 'def' && reg.e[1][0] === 'v' ? reg.e[1][1] : null;
+      if (nm === 'Item' && r.vals[i] && r.vals[i].v && r.vals[i].v.m) {
+        // Item, U, Status written as three vectors -> one summary table
+        const find = n => { for (let k = i + 1; k < Math.min(flat.length, i + 14); k++) { const g = flat[k]; if (g.k === 'm' && g.e[0] === 'def' && g.e[1][0] === 'v' && g.e[1][1] === n) return k; } return -1; };
+        const iu = find('U'), is = find('Status');
+        const items = r.vals[i].v.cells;
+        const uv = iu >= 0 && r.vals[iu] && r.vals[iu].v && r.vals[iu].v.m ? r.vals[iu].v.cells : null;
+        const sv = is >= 0 && r.vals[is] && r.vals[is].v && r.vals[is].v.m ? r.vals[is].v.cells : null;
+        if (uv && uv.length === items.length) {
+          flush();
+          const ue = iu >= 0 ? flat[iu].e[2] : null; const uexp = Array.isArray(ue) && ue[0] === 'ev' ? ue[1] : ue;
+          const se = is >= 0 ? flat[is].e[2] : null; const sexp = Array.isArray(se) && se[0] === 'ev' ? se[1] : se;
+          const rows = items.map((it, k) => {
+            const u = uv[k] && uv[k].n;
+            const st = sv && sv[k] && sv[k].s !== undefined ? sv[k].s : '';
+            const ok = !st || (STOK.test(st) && !STBAD.test(st));
+            const ex = Array.isArray(uexp) && uexp[0] === 'M' && uexp[3][k] ? fm(R.mm(uexp[3][k])) : '';
+            const cx = Array.isArray(sexp) && sexp[0] === 'M' && sexp[3][k] && sexp[3][k][0] === 'v' ? `<small class="ref">${symH(sexp[3][k][1])}</small>` : '';
+            return `<tr><td class="rn">${k + 1}</td><td>${esc(it && it.s !== undefined ? it.s : '')}</td><td class="ex">${ex}</td><td class="ub">${Number.isFinite(u) ? api.ubar(u) : ''}</td><td>${st ? `<span class="res ${ok ? 'ok' : 'bad'}">${esc(st)}</span>` : ''}${cx}</td></tr>`;
+          }).join('');
+          out += `<div class="sumblock"><div class="h2">Summary of checks <small>(Item / U / Status)</small></div><div class="vtab sumv"><table><thead><tr><th>#</th><th>Item</th><th>Check</th><th>Utilisation U</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+          skip.add(iu); if (is >= 0) skip.add(is);
+          if (labelOf[iu] != null) isLabel[labelOf[iu]] = true; if (is >= 0 && labelOf[is] != null) isLabel[labelOf[is]] = true;
+          continue;
+        }
+      }
       let line;
       try { line = mathLine(reg, r.vals[i], ov); } catch (er) { line = { cls: '', html: `<code>${esc(R.text(reg.e))}</code>` }; }
       const lab = labelOf[i] != null ? plainText(flat[labelOf[i]].h) : '';

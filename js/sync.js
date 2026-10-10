@@ -103,6 +103,54 @@
     };
   }
 
+  /* Google Drive: one JSON file in the folder EC.CONFIG.driveFolder of the signed-in account's Drive.
+     Scope drive.file: the app only sees files it created. */
+  function driveBackend() {
+    const C = EC.CONFIG || {};
+    const API = 'https://www.googleapis.com/drive/v3/files', UP = 'https://www.googleapis.com/upload/drive/v3/files';
+    let fileId = null;
+    const tok = () => { const t = EC.auth && EC.auth.token(); if (!t) { const e = new Error('Google sign-in needed'); e.code = 'auth'; throw e; } return t.token; };
+    async function req(url, opt) {
+      opt = opt || {}; opt.headers = Object.assign({ Authorization: 'Bearer ' + tok() }, opt.headers || {});
+      const r = await fetch(url, opt);
+      if (r.status === 401) { const e = new Error('Google sign-in expired'); e.code = 'auth'; throw e; }
+      if (!r.ok) throw new Error('Google Drive error ' + r.status);
+      return r;
+    }
+    const q = s => s.replace(/'/g, "\\'");
+    async function find(name, mime, parent) {
+      let qs = `name='${q(name)}' and trashed=false` + (mime ? ` and mimeType='${mime}'` : '') + (parent ? ` and '${parent}' in parents` : '');
+      const j = await (await req(API + '?spaces=drive&fields=files(id,name)&q=' + encodeURIComponent(qs))).json();
+      return j.files && j.files[0] ? j.files[0].id : null;
+    }
+    async function ensure() {
+      if (fileId) return fileId;
+      const FOLDER = 'application/vnd.google-apps.folder';
+      let folder = await find(C.driveFolder || 'CAMBO STRUCT', FOLDER);
+      if (!folder) folder = (await (await req(API + '?fields=id', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: C.driveFolder || 'CAMBO STRUCT', mimeType: FOLDER }) })).json()).id;
+      fileId = await find(C.driveFile || 'CAMBO STRUCT database.json', null, folder);
+      if (!fileId) {
+        const bd = 'cambo' + Math.random().toString(36).slice(2);
+        const body = `--${bd}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` + JSON.stringify({ name: C.driveFile || 'CAMBO STRUCT database.json', parents: [folder], mimeType: 'application/json' }) + `\r\n--${bd}\r\nContent-Type: application/json\r\n\r\n{}\r\n--${bd}--`;
+        fileId = (await (await req(UP + '?uploadType=multipart&fields=id', { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + bd }, body })).json()).id;
+      }
+      return fileId;
+    }
+    return {
+      label: 'Google Drive', kind: 'cloud',
+      async pull() { const id = await ensure(); const t = await (await req(API + '/' + id + '?alt=media', { cache: 'no-store' })).text(); return t ? JSON.parse(t) : {}; },
+      async push(items) {
+        // read-merge-write so two devices do not overwrite each other
+        const id = await ensure();
+        let remote = {}; try { const t = await (await req(API + '/' + id + '?alt=media', { cache: 'no-store' })).text(); remote = t ? JSON.parse(t) : {}; } catch (e) { if (e.code === 'auth') throw e; }
+        const merged = merge(remote, items).items;
+        await req(UP + '/' + id + '?uploadType=media', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(merged) });
+      },
+      watch(cb) { const t = setInterval(cb, 60000); window.addEventListener('focus', cb); return () => { clearInterval(t); window.removeEventListener('focus', cb); }; },
+      wholeFile: true
+    };
+  }
+
   /* ---------- sync loop ---------- */
   function emit() { if (hooks && hooks.status) hooks.status(Object.assign({}, st)); }
   async function pullMerge() {
@@ -132,7 +180,7 @@
       await pushChanges();
       st.state = 'synced'; st.at = new Date(); st.err = '';
     } catch (e) {
-      st.state = 'error'; st.err = (e && (e.message || e.code)) || String(e);
+      st.state = e && e.code === 'auth' ? 'signin' : 'error'; st.err = (e && (e.message || e.code)) || String(e);
     }
     busy = false; emit();
     if (again) { again = false; schedule(); }
@@ -156,13 +204,11 @@
         }
       } catch (e) { st.err = e.message || String(e); }
     }
-    // 2) GitHub Gist (when configured on this device)
-    const a = EC.auth && EC.auth.gist && EC.auth.gist();
-    const c = a && a.token ? { token: a.token, gistId: a.gistId } : cfg();
-    if (c.token) {
-      st.backend = gistBackend(c.token, c.gistId); st.label = 'Admin database (GitHub Gist)';
-      await cycle(true);
-      st.backend.watch(() => { if (!busy && !st.pending) cycle(true); });
+    // 2) Admin: Google Drive database
+    if (EC.auth && EC.auth.role() === 'admin') {
+      st.backend = driveBackend(); st.label = 'Google Drive';
+      if (EC.auth.token()) await cycle(true); else { st.state = 'signin'; st.err = 'Google sign-in needed to sync'; emit(); }
+      st.backend.watch(() => { if (!busy && !st.pending && EC.auth.token()) cycle(true); });
       return;
     }
     st.state = 'local'; emit();
@@ -170,6 +216,7 @@
 
   EC.sync = {
     start,
+    async connectGoogle() { await EC.auth.googleToken(EC.auth.email()); return cycle(true); },
     changed() { if (st.backend) schedule(); },
     now() { return cycle(true); },
     status: () => Object.assign({}, st),

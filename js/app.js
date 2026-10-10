@@ -80,7 +80,9 @@
     const el = document.getElementById('syncState'); if (!el) return;
     if (DEMO) { el.className = 'sync err'; el.innerHTML = '<i></i><span>Demo · not saved</span>'; el.title = 'Demo account: calculations work, but nothing is saved. Sign in as Admin to save.'; return; }
     const s = EC.sync.status();
-    const cloud = s.backend ? (s.state === 'syncing' ? 'Syncing…' : s.state === 'error' ? 'Sync error' : s.at ? 'Synced ' + s.at.toTimeString().slice(0, 5) : 'Cloud') : 'Saved in this browser';
+    const cloud = s.backend ? (s.state === 'syncing' ? 'Syncing…' : s.state === 'signin' ? 'Connect Google Drive' : s.state === 'error' ? 'Sync error' : s.at ? 'Saved to Drive ' + s.at.toTimeString().slice(0, 5) : 'Cloud') : 'Saved in this browser';
+    el.dataset.gconnect = s.state === 'signin' ? '1' : '';
+    el.style.cursor = s.state === 'signin' ? 'pointer' : '';
     const txt = local === 'saving' ? 'Saving…' : cloud;
     el.className = 'sync ' + (local === 'saving' || s.state === 'syncing' ? 'busy' : s.state === 'error' ? 'err' : s.backend ? 'ok' : 'local');
     el.innerHTML = `<i></i><span>${esc(txt)}</span>`;
@@ -450,9 +452,9 @@
     if (DEMO) return `<div class="card" style="margin-top:16px"><header><h3>Account &amp; saving</h3><span class="hint">Demo account</span></header><div class="body"><p style="margin-top:0">You are using the <b>Demo account</b>: all calculations work, but nothing is saved - the data is lost when the page is closed or reloaded.</p><button class="btn primary" data-signout>Sign in as Admin</button></div></div>`;
     const s = EC.sync.status();
     return `<div class="card" style="margin-top:16px"><header><h3>Account &amp; saving</h3><span class="hint">${esc(s.backend ? 'Database: ' + s.label : 'Not connected')}</span></header><div class="body form">
-      <p style="margin-top:0">Signed in as <b>${esc(EC.auth.user())}</b> (Admin). Every change is saved automatically - inputs, results and records - ${window.EC_EMBED ? 'in your Claude account.' : 'in your private database (GitHub Gist) and in this browser.'}</p>
+      <p style="margin-top:0">Signed in as <b>${esc(EC.auth.user())}</b> (Admin). Every change is saved automatically - inputs, results and records - ${window.EC_EMBED ? 'in your Claude account.' : `in your Google Drive (folder “${esc((EC.CONFIG || {}).driveFolder || 'CAMBO STRUCT')}”${EC.auth.email() ? ' of ' + esc(EC.auth.email()) : ''}) and in this browser.`}</p>
       <p>Status: <b>${esc(s.state === 'synced' ? 'saved ' + (s.at ? s.at.toLocaleTimeString() : '') : s.state)}</b>${s.err ? ` · <span style="color:var(--critical)">${esc(s.err)}</span>` : ''}</p>
-      ${window.EC_EMBED ? '' : `<p>Account ID for a new device: <code>${esc(EC.auth.accountId())}</code></p>`}
+      ${!window.EC_EMBED && s.state === 'signin' ? '<p><button class="btn primary" data-gconnect>Sign in with Google to sync</button></p>' : ''}
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-syncnow>Save &amp; sync now</button>${window.EC_EMBED ? '' : '<button class="btn danger" data-signout>Sign out</button>'}</div>
     </div></div>`;
   }
@@ -518,7 +520,7 @@
       save(); const y = $('.inputs') ? $('.inputs').scrollTop : 0; render(); if ($('.inputs')) $('.inputs').scrollTop = y; return;
     }
     const nt = ev.target.closest('[data-newtype]'); if (nt) return addElement(null, nt.dataset.newtype);
-    const t = ev.target.closest('[data-open],[data-go],[data-add],[data-dup],[data-del],[data-tab],[data-print],[data-printpage],[data-csv],[data-stype],[data-lg],[data-reset],[data-newproj],[data-useproj],[data-delproj],[data-demo],[data-syncnow],[data-gistoff],[data-gist],[data-signout]');
+    const t = ev.target.closest('[data-open],[data-go],[data-add],[data-dup],[data-del],[data-tab],[data-print],[data-printpage],[data-csv],[data-stype],[data-lg],[data-reset],[data-newproj],[data-useproj],[data-delproj],[data-demo],[data-syncnow],[data-gconnect],[data-signout]');
     if (!t) return;
     const d = t.dataset;
     if (d.dup !== undefined) { ev.stopPropagation(); return dupElement(d.dup); }
@@ -556,13 +558,7 @@
     }
     if (d.signout !== undefined) { EC.auth.signOut(); location.hash = ''; location.reload(); return; }
     if (d.syncnow !== undefined) { EC.sync.now().then(() => { toast('Synced'); render(); }); return; }
-    if (d.gistoff !== undefined) { EC.sync.gist.disconnect(); render(); return; }
-    if (d.gist !== undefined) {
-      const tok = $('#gTok').value.trim(), gid = $('#gId').value.trim();
-      if (!tok) { toast('Enter a GitHub token'); return; }
-      EC.sync.gist.connect(tok, gid).then(st => { toast(st.state === 'error' ? 'Sync failed: ' + st.err : 'Connected - data synced'); render(); });
-      return;
-    }
+    if (d.gconnect !== undefined && d.gconnect !== '') { EC.sync.connectGoogle().then(() => { toast('Google Drive connected'); render(); }).catch(e => toast(e.message)); return; }
     if (d.demo !== undefined) { const s = seed(); DB.projects.push(s.projects[0]); DB.current = s.current; save(); toast('Demo project added'); location.hash = '#/dashboard'; render(); }
   });
 
@@ -623,7 +619,7 @@
       if (window.EC_EMBED) return toast('Signed in with your Claude account');
       modal(DEMO ? 'Demo account' : 'Admin account', DEMO
         ? '<p>You are using the <b>Demo account</b>: every calculation works, but nothing is saved. Sign in as Admin to keep your projects, calculations and records.</p>'
-        : `<p>Signed in as <b>${esc(EC.auth.user())}</b> (Admin). Your data is saved in your database and synced to every device where you sign in.</p><p class="hint">Account ID (enter it once on a new device): <code>${esc(EC.auth.accountId())}</code></p>`,
+        : `<p>Signed in as <b>${esc(EC.auth.user())}</b> (Admin). Your data is saved in your Google Drive and synced to every device where you sign in.</p><p class="hint">Database: Google Drive${EC.auth.email() ? ' · ' + esc(EC.auth.email()) : ''}</p>`,
         () => { EC.auth.signOut(); location.hash = ''; location.reload(); }, DEMO ? 'Sign in as Admin' : 'Sign out');
     };
   }

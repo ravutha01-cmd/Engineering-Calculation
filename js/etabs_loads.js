@@ -20,7 +20,7 @@
   const KIND = { G: 'Permanent G', Q: 'Imposed Q', S: 'Snow S', W: 'Wind W', E: 'Seismic E', T: 'Temperature T', off: 'Not used' };
   const PT = { 1: 'Dead', 2: 'Super dead', 3: 'Live', 4: 'Reducible live', 5: 'Quake', 6: 'Wind', 7: 'Snow', 8: 'Other', 10: 'Temperature', 11: 'Roof live', 12: 'Notional' };
   const CT = { 1: 'Linear static', 3: 'Modal', 4: 'Response spectrum', 10: 'Buckling' };
-  const DEF = { expr: '6.10', gG: 1.35, gGinf: 1.0, gQ: 1.5, xi: 0.85, cat: 'B', windBoth: true, e30: true, equ: true, slsW: true, prefix: 'CS-', auto: false, sdl: 1.5 };
+  const DEF = { expr: '6.10', gG: 1.35, gGinf: 1.0, gQ: 1.5, xi: 0.85, cat: 'B', windBoth: true, e30: true, equ: true, slsW: true, prefix: 'CS-', auto: false, sdl: 1.5, std: true };
 
   const P = () => { const p = api.proj(); p.loads = p.loads || {}; const L = p.loads; L.set = Object.assign({}, DEF, L.set || {}); L.act = L.act || {}; L.qk = Object.assign({}, QK, L.qk || {}); return L; };
 
@@ -116,36 +116,63 @@
   const expr = c => c.items.map(([n, f, isC], i) => `${f < 0 ? '− ' : i ? '+ ' : ''}${Math.abs(f) === 1 ? '' : api.fmt(Math.abs(f), 3).replace(/\.?0+$/, '') + '·'}${esc(n)}${isC ? '' : ''}`).join(' ');
 
   /* ---------- state of the link ---------- */
-  const S = { model: null, busy: '', err: '', locked: false, last: '', sig: '' };
+  const STD = [['Dead', 1, 1], ['SDL', 2, 0], ['Live', 3, 0], ['Roof Live', 11, 0], ['Wind X', 6, 0], ['Wind Y', 6, 0]];
+  /* demo model for the preview without ETABS: one managed combination out of date and one no longer generated */
+  const DEMO_MODEL = {
+    patterns: [{ name: 'Dead', type: 1, sw: 1 }, { name: 'SDL', type: 2, sw: 0 }, { name: 'Live', type: 3, sw: 0 }, { name: 'Wind X', type: 6, sw: 0 }, { name: 'Wind Y', type: 6, sw: 0 }],
+    cases: [{ name: 'Dead', type: 1 }, { name: 'SDL', type: 1 }, { name: 'Live', type: 1 }, { name: 'Wind X', type: 1 }, { name: 'Wind Y', type: 1 }, { name: 'Modal', type: 3 }, { name: 'EQX RS', type: 4 }, { name: 'EQY RS', type: 4 }, { name: 'Buckling', type: 10 }],
+    combos: [{ name: 'ULS1 1.35G+1.5Q', type: 0, items: [['Dead', 1.35, false], ['Live', 1.5, false]] }, { name: 'SLS-QP G+0.3Q', type: 0, items: [['Dead', 1, false], ['Live', 0.3, false]] },
+      { name: 'CS-ULS 01', type: 0, items: [['Dead', 1.35, false], ['Live', 1.5, false]] }, { name: 'CS-OLD 01', type: 0, items: [['Dead', 1, false], ['Wind X', 1.5, false]] }],
+    locked: true
+  };
+  const S = { model: null, busy: '', err: '', locked: false, last: '', sig: '', tab: 'combos', filter: 'all', demo: false };
   let pollT = null;
   const live = () => EC.etabs.live;
+  const defaults = m => { const L = P(); units(m).forEach(u => { if (!L.act[u.name]) L.act[u.name] = guess(u, L.set); }); };
   async function readModel() {
     const m = await live().get('/loads');
-    S.model = m; S.locked = m.locked;
-    const L = P();
-    units(m).forEach(u => { if (!L.act[u.name]) L.act[u.name] = guess(u, L.set); });
+    S.model = m; S.locked = m.locked; S.demo = false;
+    defaults(m);
     return m;
   }
   const sigOf = m => JSON.stringify([m.patterns.map(p => [p.name, p.type]), m.cases.map(c => [c.name, c.type])]);
   const managed = () => (S.model ? S.model.combos.filter(c => c.name.startsWith(P().set.prefix)) : []);
-  const sameAsModel = gen => { const a = managed().map(c => c.name + JSON.stringify(c.items.map(i => [i[0], Math.round(i[1] * 1000) / 1000, !!i[2]]))).sort().join(), b = gen.map(c => c.name + JSON.stringify(c.items.map(i => [i[0], i[1], !!i[2]]))).sort().join(); return a === b; };
-  async function apply(unlock) {
-    const L = P(), gen = generate(units(S.model), L.act, L.set);
-    const r = await live().post('/loads/apply', { prefix: L.set.prefix, patterns: [], combos: gen.map(c => ({ name: c.name, type: c.type, items: c.items })), unlock: !!unlock });
-    await readModel(); S.sig = sigOf(S.model); S.last = new Date().toLocaleTimeString();
-    return `${r.combos} combination(s) written to ETABS`;
+  /* the plan: missing standard patterns (when asked) and the model as it will be after writing */
+  const planned = () => (P().set.std && S.model ? STD.filter(([n]) => !S.model.patterns.some(p => p.name === n)).map(([name, type, sw]) => ({ name, type, sw, planned: true })) : []);
+  function plan() {
+    const pl = planned(), m = S.model;
+    const after = { patterns: m.patterns.concat(pl), cases: m.cases.concat(pl.map(p => ({ name: p.name, type: 1, planned: true }))), combos: m.combos };
+    defaults(after);
+    const L = P(), gen = generate(units(after), L.act, L.set);
+    return { pl, after, gen, diff: diff(gen) };
   }
-  /* auto-update: watch the ETABS model; regenerate when the load patterns / cases change */
+  const norm = items => JSON.stringify(items.map(i => [i[0], Math.round(i[1] * 1000) / 1000, !!i[2]]).sort((a, b) => (a[0] + a[2]).localeCompare(b[0] + b[2])));
+  /* combination by combination: what writing will do to ETABS */
+  function diff(gen) {
+    const pre = P().set.prefix, old = new Map(managed().map(c => [c.name, c])), rows = [];
+    gen.forEach(c => { const o = old.get(c.name); rows.push({ st: !o ? 'new' : norm(o.items) === norm(c.items) && (o.type || 0) === c.type ? 'same' : 'changed', c, o }); });
+    managed().filter(o => !gen.some(c => c.name === o.name)).forEach(o => rows.push({ st: 'removed', c: o, o }));
+    S.model.combos.filter(o => !o.name.startsWith(pre)).forEach(o => rows.push({ st: 'kept', c: o, o }));
+    const n = rows.reduce((a, r) => (a[r.st] = (a[r.st] || 0) + 1, a), {});
+    return { rows, n, upToDate: !n.new && !n.changed && !n.removed };
+  }
+  async function apply(unlock, withPatterns) {
+    const L = P(), p = plan();
+    const r = await live().post('/loads/apply', { prefix: L.set.prefix, patterns: withPatterns ? p.pl.map(({ name, type, sw }) => ({ name, type, sw })) : [], combos: p.gen.map(c => ({ name: c.name, type: c.type, items: c.items })), unlock: !!unlock });
+    await readModel(); S.sig = sigOf(S.model); S.last = new Date().toLocaleTimeString();
+    return (r.patterns_created.length ? `${r.patterns_created.length} load pattern(s) created · ` : '') + `${r.combos} combination(s) written to ETABS`;
+  }
+  /* auto-update: watch the ETABS model; regenerate when the load patterns / cases change (never creates patterns) */
   async function poll() {
     clearTimeout(pollT); pollT = null;
-    if (!live().L.st || !/^#\/?loads\b/.test(location.hash)) return;
+    if (!live().L.st || S.demo || !/^#\/?loads\b/.test(location.hash)) return;
     if (!S.busy) {
       try {
         const before = S.sig; await readModel(); const now = sigOf(S.model);
         if (P().set.auto && before && now !== before) {
           S.sig = now;
-          const gen = generate(units(S.model), P().act, P().set);
-          if (!sameAsModel(gen) && !S.locked) { S.busy = 'auto'; try { const m = await apply(false); api.toast('Building modified in ETABS · ' + m); } finally { S.busy = ''; } }
+          const L = P(), gen = generate(units(S.model), L.act, L.set);
+          if (!diff(gen).upToDate && !S.locked) { S.busy = 'auto'; try { const m = await apply(false, false); api.toast('Building modified in ETABS · ' + m); } finally { S.busy = ''; } }
           api.save(); api.render();
         } else if (!before) { S.sig = now; }
       } catch (e) { /* link down: the page shows it on the next action */ }
@@ -154,38 +181,65 @@
   }
 
   /* ---------- page ---------- */
+  const STL = { new: 'New', changed: 'Changed', removed: 'Removed', same: 'Unchanged', kept: 'Yours · kept', exist: 'In ETABS' };
+  const pill = st => `<span class="ld-st ${st}">${STL[st]}</span>`;
   function view() {
     const ic = api.ic, L = P(), s = L.set, ln = live().L;
-    const head = `<div class="page-head"><div><div class="tool-tag">${ic('upload')}Design with ETABS link</div><h1>Loads &amp; combinations</h1><div class="sub">Create load patterns, assign slab loads and generate the EN 1990 load combinations in ETABS · rebuilt automatically when the building changes</div></div></div>`;
-    if (!ln.st) return head + `<div class="card etabs-live"><div class="etabs-hero">${ic('upload')}<div><b>Connect to ETABS</b><small>The load patterns of the open model are read, and the combinations are written back through the ETABS API.</small></div><button class="btn primary" data-ld="connect">${ic('check')}Connect to ETABS…</button></div></div>`;
+    const head = `<div class="page-head"><div><div class="tool-tag">${ic('upload')}Design with ETABS link</div><h1>Loads &amp; combinations</h1><div class="sub">Create load patterns, assign slab loads and generate the EN 1990 load combinations in ETABS · preview every change before it is written · rebuilt automatically when the building changes</div></div></div>`;
+    if (!ln.st && !S.demo) return head + `<div class="card etabs-live"><div class="etabs-hero">${ic('upload')}<div><b>Connect to ETABS</b><small>The load patterns and cases of the open model are read; the preview shows every pattern and combination before anything is written. No ETABS at hand? Preview with a demo model.</small></div><span class="etabs-hbtn"><button class="btn" data-ld="demo">${ic('layers')}Preview with demo model</button><button class="btn primary" data-ld="connect">${ic('check')}Connect to ETABS…</button></span></div></div>`;
     if (!S.model) return head + `<div class="card"><div class="empty">${S.err ? esc(S.err) : 'Reading the load patterns from ETABS…'}</div></div>`;
-    const us = units(S.model), gen = generate(us, L.act, L.set), same = sameAsModel(gen), mine = managed();
-    const kinds = gen.reduce((a, c) => (a[c.kind] = (a[c.kind] || 0) + 1, a), {});
-    const lockMsg = S.locked ? `<div class="etabs-msg info" style="margin:0 16px 12px">The ETABS model is analysed (locked). Writing loads or combinations unlocks it and <b>deletes the analysis results</b> - run the analysis again afterwards.</div>` : '';
-    const sel = (k, opts, v, extra) => `<select class="ctl" data-ldset="${k}" ${extra || ''}>${opts.map(([val, l]) => `<option value="${val}" ${String(v) === String(val) ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+    const P0 = plan(), D = P0.diff, us = units(P0.after), gen = P0.gen, nPl = P0.pl.length, pre = s.prefix;
+    const writeN = (D.n.new || 0) + (D.n.changed || 0) + (D.n.removed || 0);
+    const sel = (k, opts, v) => `<select class="ctl" data-ldset="${k}">${opts.map(([val, l]) => `<option value="${val}" ${String(v) === String(val) ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
     const chk = (k, l) => `<label class="ld-chk"><input type="checkbox" data-ldset="${k}" ${s[k] ? 'checked' : ''}>${l}</label>`;
     const num = (k, l, step) => `<label class="bc-in"><span>${l}</span><input class="ctl" type="number" step="${step}" data-ldset="${k}" value="${esc(s[k])}"></label>`;
+    const upToDate = D.upToDate && !nPl;
+    const lockMsg = S.locked && !S.demo ? `<div class="etabs-msg info" style="margin:0 16px 12px">The ETABS model is analysed (locked). Writing unlocks it and <b>deletes the analysis results</b> - run the analysis again afterwards.</div>` : '';
+    const summary = [nPl ? `${nPl} load pattern${nPl > 1 ? 's' : ''} new` : '', D.n.new ? `${D.n.new} combination${D.n.new > 1 ? 's' : ''} new` : '', D.n.changed ? `${D.n.changed} changed` : '', D.n.removed ? `${D.n.removed} removed` : '', D.n.same ? `${D.n.same} unchanged` : ''].filter(Boolean).join(' · ');
 
-    const status = `<div class="card etabs-live on"><div class="card-h"><b><i class="dot"></i>${esc(String(ln.st.file).split(/[\\/]/).pop())}</b><small>${S.model.patterns.length} load patterns · ${S.model.cases.length} load cases · ${S.model.combos.length} combinations (${mine.length} managed “${esc(s.prefix)}”)${S.last ? ' · last written ' + S.last : ''}</small></div>
+    const status = `<div class="card etabs-live ${S.demo ? '' : 'on'}"><div class="card-h"><b>${S.demo ? `${ic('layers')}Demo model (preview only)` : `<i class="dot"></i>${esc(String(ln.st.file).split(/[\\/]/).pop())}`}</b><small>${S.model.patterns.length} load patterns · ${S.model.cases.length} load cases · ${S.model.combos.length} combinations (${managed().length} managed “${esc(pre)}”)${S.last ? ' · last written ' + S.last : ''}</small>${S.demo ? `<span class="etabs-hbtn"><button class="btn sm primary" data-ld="connect">Connect to ETABS…</button></span>` : ''}</div>
       ${lockMsg}${S.err ? `<div class="etabs-msg" style="margin:0 16px 12px">${esc(S.err)}</div>` : ''}
-      <div class="etabs-btns" style="padding:0 16px 14px"><button class="btn primary" data-ld="apply" ${S.busy ? 'disabled' : ''}>${ic('check')}${S.busy === 'apply' ? 'Writing to ETABS…' : same ? `Combinations up to date (${gen.length})` : `${mine.length ? 'Update' : 'Create'} ${gen.length} combinations in ETABS`}</button>
-        <label class="ld-chk ld-auto"><input type="checkbox" data-ldset="auto" ${s.auto ? 'checked' : ''}><span><b>Auto-update</b> · rebuild the combinations when the building's loads change in ETABS or a setting changes here</span></label>
-        ${same ? '<span class="res ok">✓ ETABS matches</span>' : `<span class="res bad">${mine.length ? 'ETABS differs from the generated set' : 'not created yet'}</span>`}</div></div>`;
+      <div class="ld-sum"><b>${upToDate ? '✓ ETABS is up to date' : 'Writing will:'}</b> ${upToDate ? `${gen.length} combinations match the rules` : esc(summary)}</div>
+      <div class="etabs-btns" style="padding:0 16px 14px"><button class="btn primary" data-ld="apply" ${S.busy || upToDate || S.demo ? 'disabled' : ''}>${ic('check')}${S.busy === 'apply' ? 'Writing to ETABS…' : upToDate ? 'Up to date' : S.demo ? 'Connect to ETABS to write' : `Write to ETABS (${[nPl ? nPl + (nPl > 1 ? ' patterns' : ' pattern') : '', writeN ? writeN + (writeN > 1 ? ' combination changes' : ' combination change') : ''].filter(Boolean).join(', ')})`}</button>
+        <label class="ld-chk ld-auto"><input type="checkbox" data-ldset="auto" ${s.auto ? 'checked' : ''} ${S.demo ? 'disabled' : ''}><span><b>Auto-update</b> · rebuild the combinations when the building's loads change in ETABS or a rule changes here (never creates or deletes load patterns)</span></label></div></div>`;
 
-    const tbl = `<div class="card"><div class="card-h"><b>Load patterns and cases</b><small>the action each one represents · read from ETABS, guessed from its type - change where needed</small></div>
-      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>ETABS name</th><th>ETABS type</th><th>Action</th><th>Category / direction</th><th class="num">ψ0 · ψ1 · ψ2</th></tr></thead><tbody>
-      ${us.map(u => { const a = L.act[u.name] || { k: 'off' }; const psi = a.k === 'Q' ? CATS[a.cat || s.cat].slice(1) : PSI[a.k];
-        return `<tr><td class="mark">${esc(u.name)}${u.sw ? ` <small class="muted">self-weight × ${u.sw}</small>` : ''}</td><td><small>${esc(u.src === 'case' ? (CT[u.type] || 'Load case') : (PT[u.type] || 'Pattern'))}</small></td>
-          <td><select class="ctl" data-ldk="${esc(u.name)}">${Object.keys(KIND).map(k => `<option value="${k}" ${a.k === k ? 'selected' : ''}>${KIND[k]}</option>`).join('')}</select></td>
-          <td>${a.k === 'Q' ? `<select class="ctl" data-ldcat="${esc(u.name)}">${Object.keys(CATS).map(c => `<option value="${c}" ${(a.cat || s.cat) === c ? 'selected' : ''}>${CATS[c][0]}</option>`).join('')}</select>` : a.k === 'W' || a.k === 'E' ? `<select class="ctl" data-lddir="${esc(u.name)}">${['X', 'Y'].map(d => `<option ${a.dir === d ? 'selected' : ''}>${d}</option>`).join('')}</select>${a.k === 'E' ? ` <small class="muted">${u.type === 4 ? 'response spectrum' : 'static ±'}</small>` : ''}` : ''}</td>
-          <td class="num">${psi ? psi.join(' · ') : '–'}</td></tr>`; }).join('')}</tbody></table></div>
-      <div class="etabs-btns" style="padding:12px 16px 14px"><button class="btn" data-ld="std" ${S.busy ? 'disabled' : ''}>${ic('plus')}Create missing standard patterns</button><small class="muted">Dead (self-weight 1.0), SDL, Live, Roof Live, Wind X, Wind Y - existing ones are kept. Define the wind loads themselves in ETABS (auto lateral loads, EN 1991-1-4).</small></div></div>`;
+    // preview tabs
+    const tabs = [['patterns', 'Load patterns', P0.after.patterns.length, nPl], ['cases', 'Load cases', P0.after.cases.length, nPl], ['combos', 'Load combinations', gen.length, writeN]];
+    const tabBar = `<div class="tabs ld-tabs">${tabs.map(([k, l, n, ch]) => `<button class="${S.tab === k ? 'active' : ''}" data-ldtab="${k}">${l}<span class="badge">${n}</span>${ch ? `<span class="badge ld-ch">${ch} to write</span>` : ''}</button>`).join('')}</div>`;
+    const actCell = u => { const a = L.act[u.name] || { k: 'off' };
+      return `<td><select class="ctl" data-ldk="${esc(u.name)}">${Object.keys(KIND).map(k => `<option value="${k}" ${a.k === k ? 'selected' : ''}>${KIND[k]}</option>`).join('')}</select></td>
+        <td>${a.k === 'Q' ? `<select class="ctl" data-ldcat="${esc(u.name)}">${Object.keys(CATS).map(c => `<option value="${c}" ${(a.cat || s.cat) === c ? 'selected' : ''}>${CATS[c][0]}</option>`).join('')}</select>` : a.k === 'W' || a.k === 'E' ? `<select class="ctl" data-lddir="${esc(u.name)}">${['X', 'Y'].map(d => `<option ${a.dir === d ? 'selected' : ''}>${d}</option>`).join('')}</select>${a.k === 'E' ? ` <small class="muted">${u.type === 4 ? 'response spectrum' : 'static ±'}</small>` : ''}` : ''}</td>`; };
+    const psiOf = u => { const a = L.act[u.name] || { k: 'off' }; const p = a.k === 'Q' ? CATS[a.cat || s.cat].slice(1) : PSI[a.k]; return p ? p.join(' · ') : '–'; };
+    let body = '';
+    if (S.tab === 'patterns') {
+      body = `<div class="ld-chks" style="padding-top:4px">${chk('std', 'Create the missing standard patterns: Dead (self-weight 1.0), SDL, Live, Roof Live, Wind X, Wind Y')}</div>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Status</th><th>Load pattern</th><th>ETABS type</th><th class="num">Self-weight</th><th>Action</th><th>Category / direction</th><th class="num">ψ0 · ψ1 · ψ2</th></tr></thead><tbody>
+        ${P0.after.patterns.map(p => { const u = us.find(x => x.name === p.name && x.src === 'pattern') || { name: p.name, type: p.type };
+          return `<tr class="${p.planned ? 'ld-new' : ''}"><td>${pill(p.planned ? 'new' : 'exist')}</td><td class="mark">${esc(p.name)}</td><td><small>${esc(PT[p.type] || 'Pattern')}</small></td><td class="num">${p.sw ? p.sw : '–'}</td>${actCell(u)}<td class="num">${psiOf(u)}</td></tr>`; }).join('')}</tbody></table></div>
+        <p class="muted bc-pad" style="padding-top:10px">A new pattern gets its linear static load case automatically. Define the wind loads of Wind X / Wind Y in ETABS (auto lateral loads, EN 1991-1-4).</p>`;
+    } else if (S.tab === 'cases') {
+      const pn = new Set(P0.after.patterns.map(p => p.name));
+      body = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Status</th><th>Load case</th><th>Case type</th><th>From</th><th>Action</th><th>Category / direction</th><th class="num">ψ0 · ψ1 · ψ2</th></tr></thead><tbody>
+        ${P0.after.cases.map(c => { const own = pn.has(c.name); const u = us.find(x => x.name === c.name) || { name: c.name, type: c.type };
+          return `<tr class="${c.planned ? 'ld-new' : ''}"><td>${pill(c.planned ? 'new' : 'exist')}</td><td class="mark">${esc(c.name)}</td><td><small>${esc(CT[c.type] || 'Load case')}</small></td><td><small>${own ? 'its load pattern' : 'load case'}</small></td>${own ? `<td colspan="2"><small class="muted">action set on its load pattern: ${esc(KIND[(L.act[c.name] || { k: 'off' }).k])}</small></td><td class="num">${psiOf(u)}</td>` : `${actCell(u)}<td class="num">${psiOf(u)}</td>`}</tr>`; }).join('')}</tbody></table></div>
+        <p class="muted bc-pad" style="padding-top:10px">Combinations use the load cases. Response-spectrum cases (EQX / EQY) enter the seismic combinations; modal and buckling cases are analysis cases and are not combined.</p>`;
+    } else {
+      const F = ['all', 'new', 'changed', 'removed', 'same', 'kept'];
+      const rows = D.rows.filter(r => S.filter === 'all' || r.st === S.filter);
+      const ex = (c) => c.type === 1 ? `<small>Envelope of ${c.items.length} combinations</small>` : expr(c);
+      body = `<div class="ld-filter etabs-combos">${F.map(f => `<button class="cmb ${S.filter === f ? 'uls' : 'off'}" data-ldf="${f}">${f === 'all' ? 'All' : STL[f]}<span>${f === 'all' ? D.rows.length : D.n[f] || 0}</span></button>`).join('')}</div>
+        <div class="tbl-wrap"><table class="tbl ld-tbl"><thead><tr><th>Status</th><th>Name</th><th>Combination</th><th>Rule</th></tr></thead><tbody>
+        ${rows.map(r => `<tr class="ld-${r.st}"><td>${pill(r.st)}</td><td class="mark" style="white-space:nowrap">${esc(r.c.name)}</td>
+          <td>${r.st === 'removed' ? `<s>${ex(r.o)}</s>` : ex(r.c)}${r.st === 'changed' ? `<div class="ld-was">was: ${ex(r.o)}</div>` : ''}</td>
+          <td><small>${r.st === 'kept' ? 'your own combination - not touched' : r.st === 'removed' ? 'no longer generated by the rules - will be deleted' : esc(r.c.note || '')}</small></td></tr>`).join('') || `<tr><td colspan="4" class="empty">No combination with this status</td></tr>`}</tbody></table></div>`;
+    }
+    const prev = `<div class="card"><div class="card-h"><b>Preview</b><small>what ETABS will contain after writing · actions are read from the ETABS types - change them here</small></div>${tabBar}${body}</div>`;
 
     const opts = `<div class="card"><div class="card-h"><b>Combination rules</b><small>EN 1990 Annex A1 · recommended values - check your National Annex</small></div><div class="bc-inputs">
       <label class="bc-in"><span>ULS expression</span>${sel('expr', [['6.10', '6.10 · γG·G + γQ·Q1 + γQ·ψ0·Qi'], ['6.10ab', '6.10a / 6.10b · ξ = ' + s.xi]], s.expr)}</label>
       ${num('gG', 'γ<sub>G,sup</sub>', '0.05')}${num('gGinf', 'γ<sub>G,inf</sub>', '0.05')}${num('gQ', 'γ<sub>Q</sub>', '0.05')}${s.expr !== '6.10' ? num('xi', 'ξ (6.10b)', '0.01') : ''}
       <label class="bc-in"><span>Default imposed-load category</span>${sel('cat', Object.keys(CATS).map(c => [c, CATS[c][0]]), s.cat)}</label>
-      <label class="bc-in"><span>Managed-combination prefix</span><input class="ctl" data-ldset="prefix" value="${esc(s.prefix)}"></label></div>
+      <label class="bc-in"><span>Managed-combination prefix</span><input class="ctl" data-ldset="prefix" value="${esc(pre)}"></label></div>
       <div class="ld-chks">${chk('windBoth', 'Wind in both senses (±)')}${chk('e30', 'Seismic 100 % + 30 % (EN 1998-1 4.3.3.5.2)')}${chk('equ', 'EQU combinations 0.9 G + 1.5 W (Table A1.2(A))')}${chk('slsW', 'Wind-only SLS combinations for drift')}</div></div>`;
 
     const loadsCard = `<div class="card"><div class="card-h"><b>Slab loads</b><small>uniform area loads (gravity) on the floor slabs selected in ETABS · imposed loads from EN 1991-1-1 Table 6.2</small></div><div class="bc-inputs">
@@ -193,19 +247,14 @@
       <label class="bc-in"><span>Imposed load q<sub>k</sub> (kN/m²) for category</span><select class="ctl" id="ldCat">${Object.keys(CATS).map(c => `<option value="${c}" ${s.cat === c ? 'selected' : ''}>${CATS[c][0]} · ${L.qk[c]} kN/m²</option>`).join('')}</select></label>
       <label class="bc-in"><span>SDL pattern</span><select class="ctl" id="ldSdlPat">${S.model.patterns.map(p => `<option ${/SDL|super/i.test(p.name) || p.type === 2 ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
       <label class="bc-in"><span>Imposed-load pattern</span><select class="ctl" id="ldQPat">${S.model.patterns.map(p => `<option ${p.type === 3 || p.type === 4 ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label></div>
-      <div class="etabs-btns" style="padding:0 16px 14px"><button class="btn" data-ld="assign" ${S.busy ? 'disabled' : ''}>${ic('download')}Assign to the slabs selected in ETABS</button><small class="muted">Select floor slabs in the ETABS window first (walls are skipped). Replaces the previous value of these two patterns on those slabs.</small></div></div>`;
-
-    const groups = ['ULS', 'EQU', 'SEIS', 'SLS-CHAR', 'SLS-FREQ', 'SLS-QP', 'SLS-W', 'ENV'];
-    const prev = `<div class="card"><div class="card-h"><b>Generated combinations</b><small>${gen.length} combinations · ${groups.filter(k => kinds[k]).map(k => `${k} ${kinds[k]}`).join(' · ')}</small></div>
-      <div class="tbl-wrap"><table class="tbl ld-tbl"><thead><tr><th>Name</th><th>Combination</th><th>Rule</th></tr></thead><tbody>
-      ${gen.map(c => `<tr><td class="mark" style="white-space:nowrap">${esc(c.name)}</td><td>${c.type === 1 ? `<small>Envelope of ${c.items.length} combinations</small>` : expr(c)}</td><td><small>${esc(c.note || '')}</small></td></tr>`).join('')}</tbody></table></div></div>`;
-    return head + status + tbl + opts + loadsCard + prev;
+      <div class="etabs-btns" style="padding:0 16px 14px"><button class="btn" data-ld="assign" ${S.busy || S.demo ? 'disabled' : ''}>${ic('download')}Assign to the slabs selected in ETABS</button><small class="muted">Select floor slabs in the ETABS window first (walls are skipped). Replaces the previous value of these two patterns on those slabs.</small></div></div>`;
+    return head + status + prev + opts + loadsCard;
   }
 
   function mount(root) {
     const rer = () => api.render();
-    if (live().L.st && !S.model && !S.busy) { S.busy = 'read'; readModel().then(() => { S.busy = ''; S.err = ''; S.sig = sigOf(S.model); api.save(); rer(); }, e => { S.busy = ''; S.err = e.message; rer(); }); }
-    if (live().L.st && !pollT) pollT = setTimeout(poll, 4000);
+    if (live().L.st && (!S.model || S.demo) && !S.busy) { S.busy = 'read'; readModel().then(() => { S.busy = ''; S.err = ''; S.sig = sigOf(S.model); api.save(); rer(); }, e => { S.busy = ''; S.err = e.message; rer(); }); }
+    if (live().L.st && !S.demo && !pollT) pollT = setTimeout(poll, 4000);
     const run = (k, f) => {
       if (S.busy) return; S.busy = k; S.err = ''; rer();
       f().then(m => { S.busy = ''; if (m) api.toast(m); api.save(); rer(); }, e => {
@@ -214,21 +263,15 @@
         S.err = e.message.replace(/^LOCKED: /, ''); rer();
       });
     };
-    const autoApply = () => { if (P().set.auto && S.model && !S.locked) run('apply', () => apply(false)); };
+    const autoApply = () => { if (P().set.auto && S.model && !S.locked && !S.demo) run('apply', () => apply(false, false)); };
     root.onclick = ev => {
+      const tb = ev.target.closest('[data-ldtab]'); if (tb) { S.tab = tb.dataset.ldtab; return rer(); }
+      const fb = ev.target.closest('[data-ldf]'); if (fb) { S.filter = fb.dataset.ldf; return rer(); }
       const t = ev.target.closest('[data-ld]'); if (!t) return;
       const d = t.dataset.ld;
-      if (d === 'connect') return live().connect(() => { S.model = null; rer(); });
-      if (d === 'apply') return run('apply', unlock => apply(unlock));
-      if (d === 'std') return run('std', async unlock => {
-        const want = [['Dead', 1, 1], ['SDL', 2, 0], ['Live', 3, 0], ['Roof Live', 11, 0], ['Wind X', 6, 0], ['Wind Y', 6, 0]];
-        const have = new Set(S.model.patterns.map(p => p.name)), add = want.filter(w => !have.has(w[0]));
-        if (!add.length) return 'All standard load patterns already exist';
-        const L = P(), r = await live().post('/loads/apply', { prefix: L.set.prefix, patterns: add.map(([name, type, sw]) => ({ name, type, sw })), combos: managed().map(c => ({ name: c.name, type: c.type, items: c.items })), unlock: !!unlock });
-        await readModel(); S.sig = sigOf(S.model);
-        if (L.set.auto) await apply(false);
-        return `${r.patterns_created.length} load pattern(s) created: ${r.patterns_created.join(', ')}`;
-      });
+      if (d === 'connect') return live().connect(() => { S.model = null; S.demo = false; rer(); });
+      if (d === 'demo') { S.model = JSON.parse(JSON.stringify(DEMO_MODEL)); S.locked = true; S.demo = true; defaults(S.model); return rer(); }
+      if (d === 'apply') return run('apply', unlock => apply(unlock, true));
       if (d === 'assign') {
         const L = P(), cat = root.querySelector('#ldCat').value, sp = root.querySelector('#ldSdlPat').value, qp = root.querySelector('#ldQPat').value;
         return run('assign', async unlock => { const r = await live().post('/loads/assign', { items: [{ pattern: sp, value: +L.set.sdl }, { pattern: qp, value: +L.qk[cat] }], unlock: !!unlock }); return `${sp} ${L.set.sdl} kN/m² and ${qp} ${L.qk[cat]} kN/m² assigned to ${r.slabs} slab(s)`; });
@@ -236,12 +279,12 @@
     };
     root.onchange = ev => {
       const t = ev.target, L = P();
-      if (t.dataset.ldset !== undefined) { const k = t.dataset.ldset; L.set[k] = t.type === 'checkbox' ? t.checked : t.type === 'number' ? +t.value : t.value; api.save(); rer(); if (k !== 'auto' || t.checked) autoApply(); return; }
+      if (t.dataset.ldset !== undefined) { const k = t.dataset.ldset; L.set[k] = t.type === 'checkbox' ? t.checked : t.type === 'number' ? +t.value : t.value; api.save(); rer(); if (k !== 'std' && (k !== 'auto' || t.checked)) autoApply(); return; }
       if (t.dataset.ldk !== undefined) { const a = L.act[t.dataset.ldk] = Object.assign({}, L.act[t.dataset.ldk], { k: t.value }); if (t.value === 'Q' && !a.cat) a.cat = L.set.cat; if ((t.value === 'W' || t.value === 'E') && !a.dir) a.dir = 'X'; api.save(); rer(); return autoApply(); }
       if (t.dataset.ldcat !== undefined) { L.act[t.dataset.ldcat].cat = t.value; api.save(); rer(); return autoApply(); }
       if (t.dataset.lddir !== undefined) { L.act[t.dataset.lddir].dir = t.value; api.save(); rer(); return autoApply(); }
     };
   }
 
-  EC.loads = { install(a) { api = a; }, view, mount, _generate: generate, _units: units, _guess: guess, CATS };
+  EC.loads = { install(a) { api = a; }, view, mount, _generate: generate, _diff: diff, _state: S, _units: units, _guess: guess, CATS };
 })();

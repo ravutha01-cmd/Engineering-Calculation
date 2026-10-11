@@ -182,47 +182,136 @@
     return `<math display="block" class="mcm">${body}</math>`;
   }
 
-  /* xy plot as SVG */
+  /* Plots in the app's own style (the data comes from the worksheet; Mathcad's colours, pens and
+   * symbols are NOT copied). Each trace gets a role from what it is:
+   *   drawing  (detailing: closed section outline, true scale) -> outline / links / bars / guide lines
+   *   chart    (diagram: x-y results)                          -> series 1..4 in fixed order, limits dashed */
+  const NAMES = { S: 'Section', o: 'Outline', f: 'Outline', c: 'Concrete', w: 'Links', lk: 'Links', st: 'Struts', bar: 'Bars', b: 'Bars', tb: 'Top bars', bb: 'Bottom bars',
+    na: 'Neutral axis', 0: 'Datum', ε: 'Strain ε', σ: 'Stress σ', R: 'Resistance', E: 'Action', T: 'Tie', p: 'Pile', k: 'Characteristic', g: 'Ground', a: 'Anchor', lp: 'Lap length', des: 'Design length', r: 'Reference' };
+  const plots = new Map(); let plotN = 0;
+  function trName(t, k) {
+    const e = t.ye;
+    if (Array.isArray(e) && e[0] === 'v') { const m = /^Y_(.+)$/.exec(e[1]); if (m) return NAMES[m[1]] || m[1].replace(/_/g, ' '); return e[1].replace(/_/g, ' '); }
+    if (Array.isArray(e) && e[0] === 'o' && e[1] === 'idx' && Array.isArray(e[2]) && e[2][0] === 'v') return e[2][1].replace(/^Y_/, '').replace(/_/g, ' ');
+    return 'Series ' + (k + 1);
+  }
   function plot(p, data, opts) {
     opts = opts || {};
-    const tr = (data && data.tr) || [];
+    const raw = (data && data.tr) || [];
+    const tr = raw.map((t, k) => Object.assign({}, t, { ye: p.tr && p.tr[k] ? p.tr[k].y : null }));
     const pts = [];
-    tr.forEach(t => t.x.forEach((x, i) => { if (x != null && t.y[i] != null) pts.push([x, t.y[i]]); }));
+    tr.forEach(t => (t.x || []).forEach((x, i) => { if (x != null && t.y[i] != null) pts.push([x, t.y[i]]); }));
     if (!pts.length) return '<div class="mplot empty">No plot data</div>';
     let x0 = Math.min(...pts.map(q => q[0])), x1 = Math.max(...pts.map(q => q[0]));
     let y0 = Math.min(...pts.map(q => q[1])), y1 = Math.max(...pts.map(q => q[1]));
     if (x1 === x0) { x0 -= 1; x1 += 1; } if (y1 === y0) { y0 -= 1; y1 += 1; }
-    // geometry plots (same unit on both axes) keep a true scale
-    const same = tr.length && tr.every(t => JSON.stringify(t.xu || null) === JSON.stringify(t.yu || null) && t.xu);
-    const W = 520, H = same ? Math.max(180, Math.min(520, 520 * (y1 - y0) / (x1 - x0))) : 300;
-    const pad = { l: 54, r: 14, t: 12, b: 34 };
-    const dx = (x1 - x0) * 0.05, dy = (y1 - y0) * 0.06;
+    const closed = t => { const P = t.x.map((x, i) => [x, t.y[i]]).filter(q => q[0] != null && q[1] != null); return P.length > 3 && Math.abs(P[0][0] - P[P.length - 1][0]) < 1e-9 && Math.abs(P[0][1] - P[P.length - 1][1]) < 1e-9; };
+    const sameU = tr.length && tr.every(t => JSON.stringify(t.xu || null) === JSON.stringify(t.yu || null) && t.xu);
+    const aspect = (y1 - y0) / (x1 - x0);
+    const drawing = sameU || (tr.length > 1 && closed(tr[0]) && aspect > 0.08 && aspect < 12);
+    // roles
+    let sn = 0;
+    tr.forEach((t, k) => {
+      const pointsOnly = t.ls === 'None' && t.sym && t.sym !== 'none';
+      const guide = t.ls && /Dash|Dot/.test(t.ls);
+      t.name = trName(t, k);
+      if (drawing) t.role = pointsOnly ? 'bar' : k === 0 && closed(t) ? 'outline' : guide || /neutral|datum/i.test(t.name) ? 'guide' : /link|strut|stirrup/i.test(t.name) ? 'link' : closed(t) ? 'outline2' : 'line';
+      else {
+        const xs = t.x.filter(v => v != null), ys = t.y.filter(v => v != null);
+        const flat = xs.length && (Math.max(...xs) - Math.min(...xs) < 1e-12 || Math.max(...ys) - Math.min(...ys) < 1e-12);   // vertical / horizontal reference line
+        t.role = guide || /datum|neutral|limit/i.test(t.name) || (flat && tr.length > 1) ? 'limit' : pointsOnly ? 'dots' : 'series';
+      }
+      if (t.role === 'series' || t.role === 'dots' || t.role === 'line') t.slot = (sn++ % 4) + 1;
+    });
+    const W = 560, H = drawing ? Math.max(200, Math.min(560, 520 * aspect + 40)) : 320;
+    const pad = drawing ? { l: 70, r: 16, t: 14, b: 58 } : { l: 58, r: 18, t: 14, b: 36 };
+    const dx = (x1 - x0) * (drawing ? 0.08 : 0.04), dy = (y1 - y0) * (drawing ? 0.08 : 0.07);
     x0 -= dx; x1 += dx; y0 -= dy; y1 += dy;
     let sx = (W - pad.l - pad.r) / (x1 - x0), sy = (H - pad.t - pad.b) / (y1 - y0);
-    if (same) { const s = Math.min(sx, sy); sx = sy = s; }
-    const X = x => pad.l + (x - x0) * sx, Y = y => H - pad.b - (y - y0) * sy;
+    if (drawing) { const q = Math.min(sx, sy); sx = sy = q; }
+    // drawings: true scale, centred in the frame
+    const ox = drawing ? ((W - pad.l - pad.r) - (x1 - x0) * sx) / 2 : 0, oy = drawing ? ((H - pad.t - pad.b) - (y1 - y0) * sy) / 2 : 0;
+    const X = x => pad.l + ox + (x - x0) * sx, Y = y => H - pad.b - oy - (y - y0) * sy;
     const ticks = (a, b, n) => { const st = Math.pow(10, Math.floor(Math.log10((b - a) / n))); const m = [1, 2, 5, 10].find(k => (b - a) / (k * st) <= n) * st; const out = []; for (let v = Math.ceil(a / m) * m; v <= b + 1e-9; v += m) out.push(+v.toPrecision(10)); return out; };
-    let s = `<svg viewBox="0 0 ${W} ${H}" class="mplot" role="img"><rect x="${pad.l}" y="${pad.t}" width="${W - pad.l - pad.r}" height="${H - pad.t - pad.b}" class="pf"/>`;
-    ticks(x0, x1, 7).forEach(v => { s += `<line x1="${X(v)}" x2="${X(v)}" y1="${pad.t}" y2="${H - pad.b}" class="pg"/><text x="${X(v)}" y="${H - pad.b + 14}" class="pt" text-anchor="middle">${fmtNum(v, 3)}</text>`; });
-    ticks(y0, y1, 6).forEach(v => { s += `<line x1="${pad.l}" x2="${W - pad.r}" y1="${Y(v)}" y2="${Y(v)}" class="pg"/><text x="${pad.l - 5}" y="${Y(v) + 3.5}" class="pt" text-anchor="end">${fmtNum(v, 3)}</text>`; });
-    const dash = { Dash: '7 4', Dot: '2 3', DashDot: '7 3 2 3', None: null };
-    tr.forEach((t, k) => {
-      const col = t.c && t.c !== '#000000' ? t.c : 'var(--ink)';
-      const P = t.x.map((x, i) => (x == null || t.y[i] == null ? null : [X(x), Y(t.y[i])]));
-      if (t.ls !== 'None') {
-        let d = ''; let pen = false;
-        P.forEach(q => { if (!q) { pen = false; return; } d += (pen ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1); pen = true; });
-        s += `<path d="${d}" fill="none" stroke="${col}" stroke-width="${Math.max(1, Math.min(4, t.w || 1))}" ${dash[t.ls] ? `stroke-dasharray="${dash[t.ls]}"` : ''} stroke-linejoin="round"/>`;
-      }
-      if (t.sym && t.sym !== 'none') P.forEach(q => { if (q) s += `<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${Math.max(2, Math.min(5, (t.w || 2) / 1.6))}" fill="${col}"/>`; });
+    const id = 'pl' + (++plotN);
+    const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+    let s = `<svg viewBox="0 0 ${W} ${H}" class="mplot ${drawing ? 'drawing' : 'chart'}" role="img" aria-label="${esc(tr.map(t => t.name).join(', '))}" data-pid="${id}">`;
+    // recessive grid + axes
+    const hasOl = drawing && tr.some(t => t.role === 'outline');
+    const xt = hasOl ? [] : ticks(x0, x1, drawing ? 6 : 7), yt = hasOl ? [] : ticks(y0, y1, drawing ? 6 : 5);
+    xt.forEach(v => { s += `<line x1="${X(v).toFixed(1)}" x2="${X(v).toFixed(1)}" y1="${pad.t}" y2="${(pad.t + ih).toFixed(1)}" class="pg"/><text x="${X(v).toFixed(1)}" y="${(H - pad.b + 15).toFixed(1)}" class="pt" text-anchor="middle">${fmtNum(v, 3)}</text>`; });
+    yt.forEach(v => { if (Y(v) < pad.t - 0.5 || Y(v) > pad.t + ih + 0.5) return; s += `<line x1="${pad.l}" x2="${(pad.l + iw).toFixed(1)}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" class="pg"/><text x="${pad.l - 7}" y="${(Y(v) + 3.5).toFixed(1)}" class="pt" text-anchor="end">${fmtNum(v, 3)}</text>`; });
+    if (!drawing && y0 < 0 && y1 > 0) s += `<line x1="${pad.l}" x2="${pad.l + iw}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" class="pz"/>`;
+    if (!hasOl) s += `<line x1="${pad.l}" x2="${pad.l + iw}" y1="${pad.t + ih}" y2="${pad.t + ih}" class="pa"/>`;
+    const path = t => { let d = '', pen = false; t.x.forEach((x, i) => { const y = t.y[i]; if (x == null || y == null) { pen = false; return; } d += (pen ? 'L' : 'M') + X(x).toFixed(1) + ' ' + Y(y).toFixed(1); pen = true; }); return d; };
+    const order = { outline: 0, outline2: 1, guide: 2, limit: 2, line: 3, series: 3, link: 4, dots: 5, bar: 6 };
+    tr.map((t, k) => [t, k]).sort((a, b) => order[a[0].role] - order[b[0].role]).forEach(([t]) => {
+      const cls = t.slot ? ` s${t.slot}` : '';
+      if (t.role === 'bar' || t.role === 'dots') {
+        t.x.forEach((x, i) => { const y = t.y[i]; if (x == null || y == null) return; s += `<circle cx="${X(x).toFixed(1)}" cy="${Y(y).toFixed(1)}" r="${t.role === 'bar' ? 5 : 4}" class="p-${t.role}${cls}"/>`; });
+      } else s += `<path d="${path(t)}" class="p-${t.role}${cls}"/>`;
     });
     const units = [tr[0] && tr[0].xu, tr[0] && tr[0].yu].map(u => (u ? unitText(u) : ''));
-    if (units[0]) s += `<text x="${W - pad.r}" y="${H - 4}" class="pt" text-anchor="end">${esc(units[0])}</text>`;
-    if (units[1]) s += `<text x="4" y="${pad.t + 8}" class="pt">${esc(units[1])}</text>`;
+    // dimension lines from the calculated outline (detailing drawings)
+    const ol = drawing && tr.find(t => t.role === 'outline');
+    if (ol) {
+      const xs = ol.x.filter(v => v != null), ys = ol.y.filter(v => v != null);
+      const a = Math.min(...xs), b = Math.max(...xs), c = Math.min(...ys), d = Math.max(...ys);
+      const yd = Y(c) + 30, xd = X(a) - 34, u = units[0] ? ' ' + esc(units[0]) : '';
+      const tick = (x, y) => `<line x1="${(x - 4).toFixed(1)}" y1="${(y + 4).toFixed(1)}" x2="${(x + 4).toFixed(1)}" y2="${(y - 4).toFixed(1)}" class="pdim"/>`;
+      s += `<g class="pdims"><line x1="${X(a).toFixed(1)}" x2="${X(b).toFixed(1)}" y1="${yd.toFixed(1)}" y2="${yd.toFixed(1)}" class="pdim"/>${tick(X(a), yd)}${tick(X(b), yd)}`
+        + `<line x1="${X(a).toFixed(1)}" x2="${X(a).toFixed(1)}" y1="${(Y(c) + 6).toFixed(1)}" y2="${(yd + 6).toFixed(1)}" class="pext"/><line x1="${X(b).toFixed(1)}" x2="${X(b).toFixed(1)}" y1="${(Y(c) + 6).toFixed(1)}" y2="${(yd + 6).toFixed(1)}" class="pext"/>`
+        + `<text x="${((X(a) + X(b)) / 2).toFixed(1)}" y="${(yd - 5).toFixed(1)}" text-anchor="middle" class="pdt">${fmtNum(b - a, 4)}${u}</text>`
+        + `<line y1="${Y(c).toFixed(1)}" y2="${Y(d).toFixed(1)}" x1="${xd.toFixed(1)}" x2="${xd.toFixed(1)}" class="pdim"/>${tick(xd, Y(c))}${tick(xd, Y(d))}`
+        + `<line y1="${Y(c).toFixed(1)}" y2="${Y(c).toFixed(1)}" x1="${(xd - 6).toFixed(1)}" x2="${(X(a) - 6).toFixed(1)}" class="pext"/><line y1="${Y(d).toFixed(1)}" y2="${Y(d).toFixed(1)}" x1="${(xd - 6).toFixed(1)}" x2="${(X(a) - 6).toFixed(1)}" class="pext"/>`
+        + `<text transform="translate(${(xd - 6).toFixed(1)} ${((Y(c) + Y(d)) / 2).toFixed(1)}) rotate(-90)" text-anchor="middle" class="pdt">${fmtNum(d - c, 4)}${u}</text></g>`;
+    }
+    if (units[0] && !hasOl) s += `<text x="${pad.l + iw}" y="${H - 3}" class="pu" text-anchor="end">${esc(units[0])}</text>`;
+    if (units[1] && !drawing) s += `<text x="${pad.l - 7}" y="${pad.t - 3}" class="pu" text-anchor="end">${esc(units[1])}</text>`;
+    if (!drawing) s += `<g class="phov" style="display:none"><line class="pxh" y1="${pad.t}" y2="${pad.t + ih}"/></g><rect class="phit" x="${pad.l}" y="${pad.t}" width="${iw}" height="${ih}"/>`;
     s += '</svg>';
-    const leg = (p.legend || []).filter(Boolean);
-    return s + (leg.length ? `<div class="legend">${leg.map((l, i) => `<span><i style="background:${(tr[i] && tr[i].c) || 'var(--ink)'}"></i>${esc(l)}</span>`).join('')}</div>` : '');
+    plots.set(id, { tr, X0: x0 - ox / sx, sx, pad, drawing, X, Y, units });
+    if (plots.size > 400) plots.delete(plots.keys().next().value);
+    // legend (always for >= 2 traces; identity never by colour alone) + data table
+    const sw = t => t.role === 'bar' || t.role === 'dots' ? `<i class="lg-dot p-${t.role}${t.slot ? ' s' + t.slot : ''}"></i>` : `<i class="lg-line p-${t.role}${t.slot ? ' s' + t.slot : ''}"></i>`;
+    const seen = new Set();
+    const leg = tr.length > 1 ? `<div class="plegend">${tr.filter(t => { const k = t.role + t.name; if (seen.has(k)) return false; seen.add(k); return true; }).map(t => `<span>${sw(t)}${esc(t.name)}${t.role === 'bar' ? ` <b>${tr.filter(q => q.role === 'bar').reduce((n, q) => n + q.x.filter((v, i) => v != null && q.y[i] != null).length, 0)} no.</b>` : ''}</span>`).join('')}</div>` : '';
+    const rows = []; tr.forEach(t => t.x.forEach((x, i) => { if (rows.length < 80 && x != null && t.y[i] != null) rows.push(`<tr><td>${esc(t.name)}</td><td>${fmtNum(x, 4)}</td><td>${fmtNum(t.y[i], 4)}</td></tr>`); }));
+    const table = `<details class="pdata no-print"><summary>Data</summary><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Series</th><th class="num">x${units[0] ? ' (' + esc(units[0]) + ')' : ''}</th><th class="num">y${units[1] ? ' (' + esc(units[1]) + ')' : ''}</th></tr></thead><tbody>${rows.join('')}</tbody></table></div></details>`;
+    return `<div class="pwrap">${s}<div class="ptip" hidden></div></div>${leg}${table}`;
   }
+  /* hover: crosshair + nearest value of each series (charts only) */
+  if (typeof document !== 'undefined') document.addEventListener('pointermove', ev => {
+    const svg = ev.target.closest && ev.target.closest('svg.mplot.chart');
+    document.querySelectorAll('.pwrap .ptip:not([hidden])').forEach(t => { if (!svg || t.parentNode !== svg.parentNode) { t.hidden = true; const g = t.parentNode.querySelector('.phov'); if (g) g.style.display = 'none'; } });
+    if (!svg) return;
+    const P = plots.get(svg.dataset.pid); if (!P) return;
+    const r = svg.getBoundingClientRect(), k = svg.viewBox.baseVal.width / r.width;
+    const vx = (ev.clientX - r.left) * k, x = P.X0 + (vx - P.pad.l) / P.sx;
+    const lines = [];
+    // value of each series at the cursor: linear interpolation on the segment that spans x, else the nearest point
+    P.tr.forEach(t => {
+      if (t.role === 'limit') return;
+      let v = null, bd = Infinity, nv = null, nx = null;
+      for (let i = 0; i < t.x.length; i++) {
+        const a = t.x[i], ya = t.y[i]; if (a == null || ya == null) continue;
+        const d = Math.abs(a - x); if (d < bd) { bd = d; nv = ya; nx = a; }
+        const b = t.x[i + 1], yb = t.y[i + 1];
+        if (v === null && b != null && yb != null && (x - a) * (x - b) <= 0 && a !== b) v = ya + (yb - ya) * (x - a) / (b - a);
+      }
+      if (t.role === 'dots' || v === null) { if (nv !== null && (t.role !== 'dots' || Math.abs(nx - x) * P.sx < 14)) lines.push([t, nv, nx]); }
+      else lines.push([t, v, x]);
+    });
+    if (!lines.length) return;
+    const tip = svg.parentNode.querySelector('.ptip'), g = svg.querySelector('.phov');
+    const cx = Math.max(P.pad.l, Math.min(P.X(lines[0][2]), svg.viewBox.baseVal.width - P.pad.r)), gx = cx;
+    g.style.display = ''; g.querySelector('.pxh').setAttribute('x1', gx); g.querySelector('.pxh').setAttribute('x2', gx);
+    tip.innerHTML = `<b>x = ${fmtNum(lines[0][2], 4)}${P.units[0] ? ' ' + esc(P.units[0]) : ''}</b>` + lines.slice(0, 6).map(([t, y]) => `<span><i class="lg-line p-${t.role}${t.slot ? ' s' + t.slot : ''}"></i>${esc(t.name)}<em>${fmtNum(y, 4)}${P.units[1] ? ' ' + esc(P.units[1]) : ''}</em></span>`).join('');
+    tip.hidden = false;
+    const left = (gx / k) + 12, w = tip.offsetWidth;
+    tip.style.left = (left + w > r.width ? (gx / k) - w - 12 : left) + 'px';
+    tip.style.top = Math.max(0, (ev.clientY - r.top) - 20) + 'px';
+  });
   function unitText(u) {
     if (!Array.isArray(u)) return String(u);
     if (u[0] === 'u') return u[1];

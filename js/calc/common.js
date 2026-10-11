@@ -100,7 +100,7 @@ EC.bending = function (c, o) {
     const y = d - Math.sqrt(disc);
     c.v({ l: 'Depth of stress block', s: 'y = λx', f: 'd − √(d² − 2 M_Ed/(f_cd b))', n: `${EC.fmt(d)} − √(${EC.fmt(d)}² − 2·${EC.fmt(Mn / 1e6)}·10⁶/(${EC.fmt(m.fcd)}·${EC.fmt(b)}))`, v: y, u: 'mm', r: '8.1.2 (λ = 0.8)' });
     const x = y / 0.8;
-    c.chk({ l: 'Neutral axis depth (ductility)', s: 'x/d', Ed: x / d, Rd: 0.45, u: '', f: 'x/d ≤ 0.45', r: '[practice] 7.3 linear analysis', item: `Bending${tag} - ductility x/d` });
+    c.chk({ l: 'Neutral axis depth (ductility)', s: 'η', Ed: x / d, Rd: 0.45, u: '', f: 'x/d ≤ 0.45', r: '[practice] 7.3 linear analysis', item: `Bending${tag} - ductility x/d` });
     AsReq = m.fcd * b * y / m.fyd;
     c.v({ l: 'Required tension steel', s: `A_s;req${tag}`, f: 'f_cd b y / f_yd', n: `${EC.fmt(m.fcd)}·${EC.fmt(b)}·${EC.fmt(y)}/${EC.fmt(m.fyd)}`, v: AsReq, u: o.au || 'mm²', key: true });
   }

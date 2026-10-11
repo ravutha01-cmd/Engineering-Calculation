@@ -290,7 +290,7 @@
     }).join('')}</div>`).join('');
     const opt = (arr, v) => arr.map(s => `<option ${s === v ? 'selected' : ''}>${esc(s)}</option>`).join('');
     return `<div class="page-head no-print"><div><a href="#/elements/${mod.cat}" class="btn sm" style="margin-bottom:8px">${ic('back')}${esc(CATS.find(c => c.k === mod.cat).l)}</a>
-        <h1><span style="color:var(--accent)">${esc(e.mark)}</span> · ${esc(mod.name)}</h1><div class="sub">${esc(mod.code)} · Mathcad reference: ${esc(mod.mathcad)}</div></div>
+        <h1><span style="color:var(--accent)">${esc(e.mark)}</span> · ${esc(mod.name)}</h1><div class="sub">${esc(mod.code)} · ${e.etabs ? `Designed from ETABS results (${esc(e.etabs.label)}, ${esc(e.etabs.story)})` : 'Mathcad reference: ' + esc(mod.mathcad)}</div></div>
       <div class="actions"><button class="btn" data-print>${ic('print')}Print calculation</button><button class="btn" data-dup="${e.id}">${ic('copy')}Duplicate</button><button class="btn danger" data-del="${e.id}">${ic('trash')}Delete</button></div></div>
       <div class="card no-print"><div class="el-head" id="elHead">
         <div><label>Mark</label><input data-m="mark" value="${esc(e.mark)}"></div>

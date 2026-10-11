@@ -73,15 +73,18 @@
   const KIND = { len: ['station'], mom: ['T', 'M2', 'M3', 'MX', 'MY', 'MZ'] };
   function parseTable(b) {
     const rows = b.rows;
-    const hi = rows.findIndex(r => r.map(norm).includes('story') && r.map(norm).some(c => COLS.combo.includes(c)));
+    // header cells may carry their unit: "M3 (kN-m)", "Station [mm]"
+    const hn = c => norm(String(c == null ? '' : c).replace(/\s*[([][^)\]]*[)\]]\s*$/, ''));
+    const hi = rows.findIndex(r => r.map(hn).includes('story') && r.map(hn).some(c => COLS.combo.includes(c)));
     if (hi < 0) return null;
-    const head = rows[hi].map(norm);
+    const head = rows[hi].map(hn), hu = rows[hi].map(c => (String(c == null ? '' : c).match(/[([]([^)\]]+)[)\]]\s*$/) || [])[1] || '');
     const col = {};
     Object.keys(COLS).forEach(k => { const i = head.findIndex(h => COLS[k].includes(h)); if (i >= 0) col[k] = i; });
     // ETABS writes the units in the row under the header (kN, kN-m, m)
     let start = hi + 1, units = {};
     const ur = rows[hi + 1] || [];
     if (ur.some(c => /^(k?n|mn|kgf|tonf|tf|kips?|lbf?)([-·*.]?(m|mm|cm|in|ft))?$|^(m|mm|cm|in|ft)$/i.test(String(c || '').trim())) && !ur.some(c => typeof c === 'number' || /^-?\d+(\.\d+)?(e-?\d+)?$/.test(String(c || '').trim()))) { start++; Object.keys(col).forEach(k => { units[k] = String(ur[col[k]] || '').trim(); }); }
+    Object.keys(col).forEach(k => { if (!units[k] && hu[col[k]]) units[k] = hu[col[k]].trim(); });
     const labelHead = head[col.label] || '';
     const isFrame = col.P !== undefined && col.M3 !== undefined;
     const isReac = col.FZ !== undefined;
@@ -89,13 +92,15 @@
     const nm = (b.name || '').toLowerCase();
     const kind = isReac ? 'reactions' : labelHead === 'pier' || /pier/.test(nm) ? 'piers' : labelHead === 'column' || /column/.test(nm) ? 'columns' : labelHead === 'brace' || /brace/.test(nm) ? 'braces' : 'beams';
     const fac = k => unitFactor(units[k], KIND.len.includes(k) ? 'len' : KIND.mom.includes(k) ? 'mom' : 'f');
-    const num = v => { const x = typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g, '')); return Number.isFinite(x) ? x : 0; };
+    const num = v => { const x = typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g, '')); return Number.isFinite(x) ? x : NaN; };
+    const FK = ['P', 'V2', 'V3', 'T', 'M2', 'M3', 'FX', 'FY', 'FZ', 'MX', 'MY', 'MZ'].filter(k => col[k] !== undefined);
     const data = [];
     for (let i = start; i < rows.length; i++) {
       const r = rows[i]; if (!r || r[col.story] == null || String(r[col.story]).trim() === '') continue;
       const o = { story: String(r[col.story]).trim(), label: String(col.label !== undefined ? r[col.label] : r[col.uname] || '').trim(), uname: col.uname !== undefined ? String(r[col.uname] || '') : '',
         combo: String(r[col.combo] || '').trim(), ctype: col.ctype !== undefined ? String(r[col.ctype] || '') : '', step: col.step !== undefined ? String(r[col.step] || '') : '', loc: col.loc !== undefined ? String(r[col.loc] || '') : '' };
-      ['station', 'P', 'V2', 'V3', 'T', 'M2', 'M3', 'FX', 'FY', 'FZ', 'MX', 'MY', 'MZ'].forEach(k => { if (col[k] !== undefined) o[k] = num(r[col[k]]) * fac(k); });
+      if (FK.every(k => Number.isNaN(num(r[col[k]])))) continue;   // text / sub-header rows: no forces
+      ['station'].concat(FK).forEach(k => { if (col[k] !== undefined) { const x = num(r[col[k]]); o[k] = Number.isFinite(x) ? x * fac(k) : 0; } });
       data.push(o);
     }
     if (!data.length) return null;
@@ -190,7 +195,10 @@
       const u = rs.filter(r => S.combos[r.combo] === 'uls'), s = rs.filter(r => S.combos[r.combo] === 'sls');
       if (!u.length) return;
       const cs = tg.cases(u, s);
-      cs.forEach(c => { try { const r = EC.modules[tg.t].calc(Object.assign({}, base, c.inputs)); c.U = r.Umax; c.ok = r.ok; c.sum = (r.summary || []).reduce((t, x) => t + (Number.isFinite(x.U) ? x.U : 0), 0); } catch (e) { c.U = Infinity; c.ok = false; } });
+      // an element already linked to this member is designed with its own (possibly edited) section, as apply() keeps it
+      const ex = api.proj().elements.find(x => x.type === tg.t && x.etabs && x.etabs.story === rs[0].story && x.etabs.label === rs[0].label);
+      const b0 = ex ? Object.assign(defaults(tg.t), JSON.parse(JSON.stringify(ex.inputs || {}))) : base;
+      cs.forEach(c => { try { const r = EC.modules[tg.t].calc(Object.assign({}, b0, c.inputs)); c.U = r.Umax; c.ok = r.ok; c.sum = (r.summary || []).reduce((t, x) => t + (Number.isFinite(x.U) ? x.U : 0), 0); } catch (e) { c.U = Infinity; c.ok = false; } });
       const gov = cs.reduce((a, c) => (a === null || c.U > a.U + 1e-9 || (Math.abs(c.U - a.U) <= 1e-9 && c.sum > a.sum) ? c : a), null);   // ties (e.g. detailing governs): most utilised overall
       out.push({ story: rs[0].story, label: rs[0].label, target: tg.t, gov, cases: cs, nCombo: new Set(u.map(r => r.combo)).size });
     });
@@ -260,7 +268,7 @@
       <textarea id="etPaste" class="ctl" rows="3" placeholder="Paste a table copied from ETABS (Ctrl+V) - include the header row"></textarea>
       <div class="etabs-btns"><button class="btn primary" data-et="paste">${ic('check')}Read pasted table</button><button class="btn" data-et="demo">${ic('layers')}Try with demo data</button>${S.tables.length ? `<button class="btn" data-et="clear">${ic('x')}Clear</button>` : ''}</div>${how}</div>`;
     let body = '';
-    if (S.msg) body += `<div class="etabs-msg">${esc(S.msg)}</div>`;
+    if (S.msg) body += `<div class="etabs-msg${/^Reading /.test(S.msg) ? ' info' : ''}" role="status">${esc(S.msg)}</div>`;
     if (S.tables.length) {
       const cs = Object.keys(S.combos);
       body += `<div class="card"><div class="card-h"><b>Load combinations</b><small>${esc(S.file)} · ${S.tables.length} table(s) · click to change the use of a combination</small></div>

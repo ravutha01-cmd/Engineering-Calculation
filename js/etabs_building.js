@@ -144,6 +144,29 @@
       });
       out.bsSP = SP; out.bsCt = Ct;
     }
+    // 8. soft storey - EN 1998-1 4.2.3.3(4)P (lateral stiffness constant or reducing gradually upwards); limits of
+    //    ASCE 7 Table 12.3-2: k_i < 0.7·k_i+1 or < 0.8·mean(k_i+1..i+3) soft, < 0.6 / 0.7 extreme. k_i = V_i / (d_r,i·h_i)
+    out.soft = [];
+    ['X', 'Y'].forEach(dir => {
+      const seisC = [...new Set(d.drifts.filter(r => r.dir === dir && role(r.combo) === 'seis').map(r => r.combo))];
+      // the seismic case acting in this direction: largest base shear in it
+      const c = seisC.map(c => [c, Math.max(0, ...fBot.filter(r => r.combo === c).map(r => Math.abs(dir === 'X' ? r.VX : r.VY)))]).sort((a, b2) => b2[1] - a[1])[0];
+      if (!c) return;
+      const ks = st.map(x => {
+        const dr = d.drifts.find(r => r.story === x.name && r.dir === dir && r.combo === c[0]);
+        const f = fBot.find(r => r.story === x.name && r.combo === c[0]);
+        const V = f ? Math.abs(dir === 'X' ? f.VX : f.VY) : 0, dd = dr ? dr.drift * x.h : 0;
+        return { story: x.name, z: x.elev, dir, combo: c[0], V, d: dd, k: dd > 0 ? V / dd : null };
+      });
+      ks.forEach((r, i) => {
+        const up = ks.slice(i + 1, i + 4).filter(q => q.k);
+        r.r1 = r.k && up.length ? r.k / up[0].k : null;
+        r.r3 = r.k && up.length >= 3 ? r.k / (up.reduce((a, q) => a + q.k, 0) / up.length) : null;
+        r.cls = r.r1 == null ? 'top storey' : (r.r1 < 0.6 || (r.r3 != null && r.r3 < 0.7)) ? 'Extreme soft storey' : (r.r1 < 0.7 || (r.r3 != null && r.r3 < 0.8)) ? 'Soft storey' : 'Regular';
+        r.U = r.r1 == null ? 0 : Math.max(0.7 / r.r1, r.r3 != null ? 0.8 / r.r3 : 0);
+        out.soft.push(r);
+      });
+    });
     return out;
   }
 
@@ -381,6 +404,7 @@
       ${sumCard('wind', 'Wind drift', R.wind.length ? wU : null, `drift ÷ h/${s.windLim}`)}
       ${sumCard('base', 'Overturning', R.base.some(x => Number.isFinite(x.fos)) ? oU : null, 'required ÷ provided safety')}
       ${sumCard('modal', 'Modal mass participation', R.modal ? R.modal.U : null, R.modal ? `ΣU<sub>X</sub> ${fmt(R.modal.sum.X * 100, 1)} % · ΣU<sub>Y</sub> ${fmt(R.modal.sum.Y * 100, 1)} % · T<sub>1</sub> ${fmt(R.modal.T1, 2)} s` : '')}
+      ${R.soft.length ? sumCard('soft', 'Soft storey k<sub>i</sub>/k<sub>i+1</sub>', Umax(R.soft), (() => { const w = R.soft.filter(r => r.r1 != null).reduce((a, r) => (!a || r.r1 < a.r1 ? r : a), null); return w ? `min ${fmt(w.r1, 2)} at ${esc(w.story)} ${w.dir} (0.7)` : ''; })()) : ''}
       ${R.bs ? `<a class="card bc-sum" href="#bc-bshear"><div class="label">Base shear V<sub>RS</sub> / F<sub>b</sub></div><div class="value">${R.bs.map(r => (r.ratio != null ? fmt(r.ratio, 2) : '–')).join(' · ')} <small>X · Y</small></div><div class="foot">${R.bs.every(r => r.ratio == null || r.ratio >= 0.8) ? '<span class="res ok">✓ OK</span>' : '<span class="res bad">! Check</span>'} <span>T<sub>1</sub> ${R.bs.map(r => fmt(r.T1, 2)).join(' / ')} s vs C<sub>t</sub>H<sup>¾</sup> ${fmt(R.bs[0].Tct, 2)} s</span></div></a>` : ''}
       ${MC ? `<a class="card bc-sum" href="#bc-mods"><div class="label">Stiffness modifiers</div><div class="value">${MC.filter(r => r.st === 'bad').length} <small>of ${MC.length} properties flagged</small></div><div class="foot">${MC.some(r => r.st === 'bad') ? '<span class="res bad">✗ Revise</span>' : MC.some(r => r.st === 'warn') ? '<span class="res ok">✓ OK</span> <span>with notes</span>' : '<span class="res ok">✓ OK</span>'} <span>${PURPOSE[s.kPurpose][0].split(' (')[0]}</span></div></a>` : ''}
       ${sumCard('buckling', 'Global buckling α<sub>cr</sub>', R.acr ? R.acr.U : null, R.acr ? `α<sub>cr</sub> = ${fmt(R.acr.a, 2)}${R.acr.a >= 10 ? ' ≥ 10: 1st order' : R.acr.a >= 3 ? ` · sway × ${fmt(R.acr.k, 3)}` : ' < 3'}` : '')}</div>`;
@@ -425,6 +449,14 @@
         `<div class="bc-split">${cumChart(M.md)}
           ${tbl([['Mode', r => r.mode, 'num'], ['T s', r => fmt(r.T, 3), 'num'], ['f Hz', r => r.T > 0 ? fmt(1 / r.T, 2) : '–', 'num'], ['U<sub>X</sub>', r => pc(r.Ux), 'num'], ['U<sub>Y</sub>', r => pc(r.Uy), 'num'], ['R<sub>Z</sub>', r => pc(r.Rz), 'num'], ['ΣU<sub>X</sub>', r => pc(r.SumUx), 'num'], ['ΣU<sub>Y</sub>', r => pc(r.SumUy), 'num'], ['Dominant', r => esc(M.dom(r))]], M.md.slice(0, 30))}</div>
         <div class="bc-verdict ${M.U <= 1 + 1e-9 ? 'ok' : 'bad'}">${verdict}</div>${notes.length ? `<p class="muted bc-pad">Note: ${notes.join('; ')}.</p>` : ''}`);
+    }
+    if (R.soft.length) {
+      const bad = R.soft.filter(r => r.cls !== 'Regular' && r.cls !== 'top storey');
+      html += card('soft', 'Soft storey: lateral stiffness by storey', 'EN 1998-1 4.2.3.3(4)P', 'k<sub>i</sub> = V<sub>i</sub>/(d<sub>r,i</sub>·h<sub>i</sub>) · soft if k<sub>i</sub> &lt; 0.7·k<sub>i+1</sub> or &lt; 0.8·mean of the 3 storeys above; extreme &lt; 0.6 / 0.7 (limits of ASCE 7 Table 12.3-2)',
+        `<div class="bc-split">${profile(ser(R.soft.filter(r => r.k), 'k'), { title: 'Storey stiffness', xlabel: 'storey stiffness kN/m', unit: 'kN/m', fmt: v => fmt(v, 0) })}
+        ${tbl([['Storey', r => esc(r.story)], ['Dir.', r => r.dir], ['V<sub>i</sub> kN', r => fmt(r.V, 0), 'num'], ['d<sub>r</sub> mm', r => fmt(r.d * 1000, 2), 'num'], ['k<sub>i</sub> kN/m', r => r.k ? fmt(r.k, 0) : '–', 'num'], ['k<sub>i</sub>/k<sub>i+1</sub>', r => r.r1 != null ? fmt(r.r1, 2) : '–', 'num'], ['k<sub>i</sub>/k̄<sub>3 above</sub>', r => r.r3 != null ? fmt(r.r3, 2) : '–', 'num'], ['Class', r => esc(r.cls)], ['U', r => r.r1 != null ? api.ubar(r.U) : '']], top(R.soft))}</div>
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(r => `${esc(r.story)} ${r.dir}: ${esc(r.cls).toLowerCase()} (k<sub>i</sub>/k<sub>i+1</sub> = ${fmt(r.r1, 2)})`).join(' · ')} → the building is not regular in elevation (EN 1998-1 4.2.3.1): use the modal response spectrum analysis (Table 4.1) and reduce q<sub>0</sub> by 20 % (5.2.2.2(3)); better, stiffen the soft storey.` : 'Stiffness constant or reducing gradually upwards in X and Y: regular in elevation for the stiffness criterion (EN 1998-1 4.2.3.3(4)P).'}</div>
+        <p class="muted bc-pad">k<sub>i</sub> from the seismic case with the largest base shear in each direction (storey shear and storey drift of the same case). EN 1998-1 gives the criterion without numbers; the ASCE 7 limits are a common quantification.</p>`);
     }
     if (R.bs) {
       const SP = R.bsSP, tmax = Math.max(4, ...R.bs.map(x => x.T1 * 1.2)), ts = SP.T.filter(t => t <= tmax), ymax = Math.max(...ts.map(t => SP.sd(t))) * 1.1;

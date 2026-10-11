@@ -21,6 +21,7 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] Stiffness modifiers: frame / shell property modifiers and object overrides read from ETABS, by use (columns, beams, braces, walls, slabs) and material, checked against the purpose of the model - seismic EN 1998-1 4.3.1(7), wind SLS (≈ 1.4 × cracked), P-Δ / αcr EN 1992-1-1 5.8.7.2; steel unreduced; mass, weight, axial area 1.0
 - [x] P-Δ member design, exact for imperfections: the linked members' forces under the notional cases are read from ETABS with the combinations that use them; only the notional share Σ|f|·F(N) of each amplified force is multiplied, M_d = M + (1/(1−1/αcr) − 1)·Σ|f|·F(N) (EN 1993-1-1 5.2.2(5)B); whole-force amplification stays as the fallback
 - [x] Base shear check: modal T1 vs Ct·H^¾ (EN 1998-1 4.3.3.2.2(3)), lateral force method applicability T1 ≤ min(4TC, 2 s) (4.3.3.2.1), Fb = Sd(T1)·m·λ (4.3.3.2.2(1)) with the EC8 spectrum of Loads & combinations, compared with the response-spectrum base shear (V_RS/Fb plausibility ≥ 0.8)
+- [x] Soft storey: storey stiffness k_i = V_i/(d_r,i·h_i) from the seismic case with the largest base shear per direction, k_i/k_i+1 and k_i/mean(3 above) against 0.7 / 0.8 (soft) and 0.6 / 0.7 (extreme, ASCE 7 Table 12.3-2) for the EN 1998-1 4.2.3.3(4)P criterion; consequence stated (4.2.3.1, Table 4.1, 5.2.2.2(3))
 
 ## Fixes
 - [x] 2026-10-11 · Notional loads asked the user to set them by hand when the notional table was not found (it was searched only among the tables that already had data). Now fully automatic: all tables searched (also empty ones, fields read with GetAllFieldsInTable); without such a table, a gravity analysis gives N per floor and H_i = θi·N is applied as storey joint loads (EN 1992-1-1 5.2(8))
@@ -29,7 +30,6 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] 2026-10-11 · Building checks: Print opened the print dialog twice (the page and the app both handled the click)
 
 ## Next
-- [ ] Soft storey: lateral stiffness of each storey vs the storey above (regularity in elevation) - EN 1998-1 4.2.3.3
 - [ ] Weak storey: storey shear strength ratio
 - [ ] Mass irregularity: storey mass vs adjacent storeys
 - [ ] Torsional radius r vs radius of gyration ls and eccentricity e0 ≤ 0.3 r - EN 1998-1 4.2.3.2(6)

@@ -185,6 +185,8 @@
       <h4>Schedules</h4>
       ${a('schedules', 'table', 'Element schedules', '', r0 === 'schedules')}
       ${a('programme', 'gantt', 'Design programme', '', r0 === 'programme')}
+      <h4>Analysis link</h4>
+      ${a('etabs', 'upload', 'ETABS link', `<span class="count">${p.elements.filter(e => e.etabs).length}</span>`, r0 === 'etabs')}
       <h4>Reference</h4>
       ${a('library', 'book', 'Mathcad library', `<span class="count">${EC.library.length}</span>`, r0 === 'library')}
       ${a('project', 'gear', 'Project settings', '', r0 === 'project')}
@@ -300,7 +302,7 @@
         <div><label>Due</label><input data-m="due" type="date" value="${esc(e.due || '')}"></div>
         <div><label>Designer</label><input data-m="assignee" value="${esc(e.assignee || '')}"></div>
       </div></div>
-      <div class="editor">
+      ${EC.etabs.banner(e)}<div class="editor">
         <div class="card inputs"><div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px"><b>Input data</b><span class="badge" style="background:var(--input-bg);border-color:var(--input-border)">yellow = input</span><button class="btn sm" style="margin-left:auto" data-reset title="Restore default inputs">Defaults</button></div>${inputs}</div>
         <div id="out">${vOutput(e)}</div>
       </div>`;
@@ -467,8 +469,9 @@
     chrome(r);
     const m = $('#main');
     const v = r[0] || 'dashboard';
-    m.innerHTML = v === 'elements' ? vElements(r[1]) : v === 'el' ? vElement(r[1]) : v === 'schedules' ? vSchedules() : v === 'programme' ? vProgramme() : v === 'library' ? vLibrary() : v === 'project' ? vProject() : vDashboard();
-    if (v !== 'el') m.scrollTop = 0;
+    m.innerHTML = v === 'elements' ? vElements(r[1]) : v === 'el' ? vElement(r[1]) : v === 'schedules' ? vSchedules() : v === 'programme' ? vProgramme() : v === 'library' ? vLibrary() : v === 'etabs' ? EC.etabs.view() : v === 'project' ? vProject() : vDashboard();
+    if (v === 'etabs') EC.etabs.mount(m); else m.onclick = m.onchange = null;
+    if (v !== 'el' && v !== 'etabs') m.scrollTop = 0;
     $('#app').classList.remove('nav-open');
     const p = proj();
     document.title = `${v === 'el' ? ((p.elements.find(e => e.id === r[1]) || {}).mark || '') + ' · ' : ''}${p.name} · CAMBO STRUCT`;
@@ -481,7 +484,7 @@
     const p = proj(), go = h => () => { location.hash = h; };
     const items = [];
     p.elements.forEach(e => items.push({ g: 'Elements', t: e.mark, s: typeName(e.type) + (e.level ? ' · ' + e.level : '') + (e.grid ? ' · ' + e.grid : ''), b: e.status, ic: (CATS.find(c => MOD[e.type] && c.k === MOD[e.type].cat) || {}).icon || 'layers', run: () => { activeTab = 'summary'; location.hash = '#/el/' + e.id; } }));
-    [['dashboard', 'dashboard', 'Dashboard'], ['elements', 'layers', 'All elements']].concat(CATS.map(c => ['elements/' + c.k, c.icon, c.l]), [['schedules', 'table', 'Element schedules'], ['programme', 'gantt', 'Design programme'], ['library', 'book', 'Mathcad library'], ['project', 'gear', 'Project settings']])
+    [['dashboard', 'dashboard', 'Dashboard'], ['elements', 'layers', 'All elements']].concat(CATS.map(c => ['elements/' + c.k, c.icon, c.l]), [['schedules', 'table', 'Element schedules'], ['programme', 'gantt', 'Design programme'], ['etabs', 'upload', 'ETABS link'], ['library', 'book', 'Mathcad library'], ['project', 'gear', 'Project settings']])
       .forEach(([h, i, l]) => items.push({ g: 'Go to', t: l, ic: i, run: go('#/' + h) }));
     CATS.forEach(c => c.types.forEach(t => items.push({ g: 'New element', t: 'New ' + typeName(t), s: c.l, ic: 'plus', run: () => createEl(t) })));
     items.push({ g: 'Actions', t: 'Toggle light / dark mode', ic: 'moon', run: () => $('#themeBtn').click() });
@@ -678,6 +681,7 @@
     try { localStorage.setItem('cambo.theme', nx); } catch (e) { /* private mode */ }
     chrome(route());
   };
+  EC.etabs.install({ proj, save, toast, ic, fmt, ubar, uid, today, addDays, render: () => render() });
   EC.mcui.install({
     MOD, STATUS, proj, save, toast, modal, ic, fmt, ubar, route, catName: k => (CATS.find(c => c.k === k) || {}).l || k,
     render: () => render(),

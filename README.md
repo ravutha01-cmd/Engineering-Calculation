@@ -50,7 +50,18 @@ Pro accounts with registration come later.
 - **Dashboard**: KPIs (elements, checks OK / revise, design progress, rebar and steel tonnage), utilisation by element, design status, upcoming deadlines and the main element groups.
 - **Two separate design tools**, each with its own section in the sidebar, its own element list and its own cards on the dashboard:
   - **Design by hand calculation (Mathcad)**: pick a Mathcad worksheet, enter section, materials and forces by hand. Lists at `#/elements`; the Mathcad library is in this section.
-  - **Design with ETABS link**: import ETABS results (beam / column / pier forces, joint reactions), envelope the load combinations and create or update linked elements that are designed for the governing combination. Import at `#/etabs`, linked elements at `#/linked`.
+  - **Design with ETABS link**: a live link to the open ETABS model through the CSI API (no Excel export). Pick the load combinations, read beam / column / brace / pier forces and support reactions, envelope them and create or update linked elements designed for the governing combination. After re-running the analysis, **Sync linked elements** pushes the new forces into every linked element and keeps your section and bar edits. Link at `#/etabs`, linked elements at `#/linked`. An exported table (Excel / CSV / paste) is still accepted as an offline fallback.
+
+### ETABS live link (CSI API)
+
+A web page cannot call the ETABS API (a Windows COM interface) itself, so a small local bridge does it:
+
+1. On the Windows computer with ETABS v18 or later, install Python 3 (tick *Add to PATH*).
+2. Copy `tools/etabs_bridge/etabs_bridge.py` and `start_etabs_link.bat` into one folder.
+3. Open the model in ETABS and run the analysis. Double-click `start_etabs_link.bat`: it installs `comtypes` the first time, attaches to the running ETABS and serves the results on `http://127.0.0.1:5480`. Leave the window open.
+4. In the app: **Design with ETABS link → Link to ETABS → Connect to ETABS** (Chrome or Edge).
+
+The bridge listens only on this computer, answers only the CAMBO STRUCT page (add other origins with `--allow-origin`), and never edits the model: it switches the present units to kN, m while reading and then restores them. If ETABS is not found, run `RegisterETABS.exe` from the ETABS folder as administrator. `python etabs_bridge.py --mock` serves demo results without ETABS.
 - **Project → main elements → elements**: nine groups (Foundations, Columns & walls, Beams, Slabs & stairs, Connections & details, Durability & SLS, Geotechnical, Actions & loads, Steel & composite). Each element has a mark, level, grid, quantity, status, start/due dates and a designer.
 - **Element editor**: inputs on the left (yellow cells, as in the Mathcad worksheets). Rows of data such as soil layers, SPT logs, pile coordinates, load spectra and FE forces go in editable tables. On the right are four tabs:
   - **Summary**: Item / U / Status table and U<sub>max</sub>.

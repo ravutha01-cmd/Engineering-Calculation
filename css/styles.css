@@ -624,3 +624,23 @@ a.badge:hover { border-color: var(--ok-ink); }
   .etabs-drop { min-height: 0; }
 }
 @media print { .etabs-banner { display: none; } }
+/* ETABS live link */
+.etabs-live .card-h b { display: inline-flex; align-items: center; gap: 8px; }
+.etabs-live .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--good); display: inline-block; }
+.etabs-conn { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; padding: 4px 16px 12px; }
+.etabs-conn label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); flex: 1 1 240px; }
+.etabs-pick { padding: 0 16px 6px; }
+.etabs-pick .lbl { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); margin: 8px 0 6px; }
+.etabs-pick summary { cursor: pointer; font-size: 12px; margin: 6px 0; }
+.etabs-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.etabs-chips .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 16px; padding: 4px 10px; font-size: 12px; cursor: pointer; background: var(--surface-2); }
+.etabs-chips .chip:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.etabs-offline { margin-top: 16px; }
+.etabs-offline > summary { cursor: pointer; padding: 12px 16px; display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.etabs-live .etabs-btns { padding: 8px 16px 14px; }
+.etabs-live .etabs-msg, .etabs-offline .etabs-msg { margin: 0 16px 12px; }
+.etabs-live .etabs-how { margin: 0 16px; padding-bottom: 14px; }
+.etabs-live ~ .card, .etabs-live ~ .etabs-msg { margin-top: 16px; }
+.etabs-offline > summary::-webkit-details-marker { display: none; }
+.etabs-offline > summary:hover { color: var(--accent); }
+.etabs-offline[open] > summary { border-bottom: 1px solid var(--border); }

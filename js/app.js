@@ -192,7 +192,7 @@
       ${tool('hand', CATS)}
       ${a('library', 'book', 'Mathcad library', `<span class="count">${EC.library.length}</span>`, r0 === 'library')}
       <h4 class="tool">Design with ETABS link<small>analysis results → design</small></h4>
-      ${a('etabs', 'upload', 'Import ETABS results', '', r0 === 'etabs')}
+      ${a('etabs', 'upload', 'Link to ETABS', '', r0 === 'etabs')}
       ${tool('etabs', linkedCats)}
       <h4>Schedules</h4>
       ${a('schedules', 'table', 'Element schedules', '', r0 === 'schedules')}
@@ -271,12 +271,12 @@
       <h2 style="font-size:16px;margin:22px 0 10px">Design tools</h2>
       <div class="grid g2">
         ${toolCard('hand', 'book', nHand, 'Mathcad worksheets · section, materials and forces entered by hand', 'elements', `<button class="btn sm primary" data-add>${ic('plus')}New hand calculation</button><button class="btn sm" data-go="library">${ic('book')}Mathcad library</button>`)}
-        ${toolCard('etabs', 'upload', nLinked, 'Import ETABS forces · envelope the combinations · design each member', 'linked', `<button class="btn sm primary" data-go="etabs">${ic('upload')}Import ETABS results</button><button class="btn sm" data-go="linked">${ic('layers')}Linked elements</button>`)}
+        ${toolCard('etabs', 'upload', nLinked, 'Live link to the ETABS model (API) · envelope the combinations · design each member', 'linked', `<button class="btn sm primary" data-go="etabs">${ic('upload')}Link to ETABS</button><button class="btn sm" data-go="linked">${ic('layers')}Linked elements</button>`)}
       </div>
       <h2 style="font-size:16px;margin:22px 0 10px">Design by hand calculation (Mathcad) · main elements</h2>
       <div class="grid g3">${catCards('hand', CATS)}</div>
       <h2 style="font-size:16px;margin:22px 0 10px">Design with ETABS link · main elements</h2>
-      ${linkedCats.length ? `<div class="grid g3">${catCards('etabs', linkedCats)}</div>` : `<div class="card"><div class="empty">No ETABS-linked elements yet.<br><br><button class="btn primary" data-go="etabs">${ic('upload')}Import ETABS results</button></div></div>`}`;
+      ${linkedCats.length ? `<div class="grid g3">${catCards('etabs', linkedCats)}</div>` : `<div class="card"><div class="empty">No ETABS-linked elements yet.<br><br><button class="btn primary" data-go="etabs">${ic('upload')}Link to ETABS</button></div></div>`}`;
   }
 
   /* ---------------- element list ---------------- */
@@ -286,7 +286,7 @@
     const all = p.elements.filter(T.has);
     const els = all.filter(e => !cat || MOD[e.type].cat === cat.k);
     const tabCats = hand ? CATS : CATS.filter(c => c.k === catKey || all.some(e => MOD[e.type].cat === c.k));
-    const addBtn = (lbl, cls) => hand ? `<button class="btn ${cls}" data-add="${cat ? cat.k : ''}">${ic('plus')}${lbl}</button>` : `<button class="btn ${cls}" data-go="etabs">${ic('upload')}Import ETABS results</button>`;
+    const addBtn = (lbl, cls) => hand ? `<button class="btn ${cls}" data-add="${cat ? cat.k : ''}">${ic('plus')}${lbl}</button>` : `<button class="btn ${cls}" data-go="etabs">${ic('upload')}Link to ETABS</button>`;
     const rows = els.map(e => { const r = result(e); return `<tr class="click" data-open="${e.id}">
       <td class="mark">${esc(e.mark)}</td><td>${esc(typeName(e.type))}</td><td>${esc(e.level || '')}</td><td>${esc(e.grid || '')}</td>${hand ? '' : `<td><small>${esc(e.etabs.combo)}</small></td>`}<td class="num">${esc(e.qty)}</td>
       <td>${pill(e.status)}</td><td class="num">${esc(e.due || '')}</td><td>${ubar(r.Umax)}</td><td>${resTag(r)}</td>
@@ -294,7 +294,7 @@
     return `<div class="page-head"><div><div class="tool-tag">${ic(hand ? 'book' : 'upload')}${T.l}</div><h1>${cat ? cat.l : T.all}</h1><div class="sub">${hand && cat ? `${cat.types.length} Mathcad worksheets` : T.sub} · ${els.length} elements in this project</div></div>
       <div class="actions">${addBtn(hand ? 'New element' : '', 'primary')}</div></div>
       <div class="tabs">${[{ k: '', l: 'All' }].concat(tabCats).map(c => `<button class="${(c.k || '') === (catKey || '') ? 'active' : ''}" data-go="${T.r}${c.k ? '/' + c.k : ''}">${c.l}<span class="badge">${all.filter(e => !c.k || MOD[e.type].cat === c.k).length}</span></button>`).join('')}</div>
-      <div class="card"><div class="tbl-wrap">${els.length ? `<table class="tbl"><thead><tr><th>Mark</th><th>Type</th><th>Level</th><th>Grid / location</th>${hand ? '' : '<th>Governing combination</th>'}<th class="num">Qty</th><th>Status</th><th class="num">Due</th><th>Utilisation</th><th>Result</th><th class="no-print"></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty">${hand ? 'No hand-calculated elements in this group yet.' : 'No ETABS-linked elements in this group yet - import the ETABS results to create them.'}<br><br>${addBtn('Add the first one', 'primary')}</div>`}</div></div>`;
+      <div class="card"><div class="tbl-wrap">${els.length ? `<table class="tbl"><thead><tr><th>Mark</th><th>Type</th><th>Level</th><th>Grid / location</th>${hand ? '' : '<th>Governing combination</th>'}<th class="num">Qty</th><th>Status</th><th class="num">Due</th><th>Utilisation</th><th>Result</th><th class="no-print"></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty">${hand ? 'No hand-calculated elements in this group yet.' : 'No ETABS-linked elements in this group yet - link to ETABS to create them.'}<br><br>${addBtn('Add the first one', 'primary')}</div>`}</div></div>`;
   }
 
   /* ---------------- element editor ---------------- */
@@ -507,7 +507,7 @@
     const p = proj(), go = h => () => { location.hash = h; };
     const items = [];
     p.elements.forEach(e => items.push({ g: 'Elements', t: e.mark, s: typeName(e.type) + (e.level ? ' · ' + e.level : '') + (e.grid ? ' · ' + e.grid : ''), b: e.status, ic: (CATS.find(c => MOD[e.type] && c.k === MOD[e.type].cat) || {}).icon || 'layers', run: () => { activeTab = 'summary'; location.hash = '#/el/' + e.id; } }));
-    [['dashboard', 'dashboard', 'Dashboard'], ['elements', 'layers', 'Hand-calculated elements', 'Design by hand calculation (Mathcad)']].concat(CATS.map(c => ['elements/' + c.k, c.icon, c.l, 'Hand calculation (Mathcad)']), [['library', 'book', 'Mathcad library', 'Design by hand calculation'], ['etabs', 'upload', 'Import ETABS results', 'Design with ETABS link'], ['linked', 'layers', 'ETABS-linked elements', 'Design with ETABS link']], CATS.map(c => ['linked/' + c.k, c.icon, c.l, 'ETABS link']), [['schedules', 'table', 'Element schedules'], ['programme', 'gantt', 'Design programme'], ['project', 'gear', 'Project settings']])
+    [['dashboard', 'dashboard', 'Dashboard'], ['elements', 'layers', 'Hand-calculated elements', 'Design by hand calculation (Mathcad)']].concat(CATS.map(c => ['elements/' + c.k, c.icon, c.l, 'Hand calculation (Mathcad)']), [['library', 'book', 'Mathcad library', 'Design by hand calculation'], ['etabs', 'upload', 'Link to ETABS', 'Design with ETABS link'], ['linked', 'layers', 'ETABS-linked elements', 'Design with ETABS link']], CATS.map(c => ['linked/' + c.k, c.icon, c.l, 'ETABS link']), [['schedules', 'table', 'Element schedules'], ['programme', 'gantt', 'Design programme'], ['project', 'gear', 'Project settings']])
       .forEach(([h, i, l, sub]) => items.push({ g: 'Go to', t: l, s: sub, ic: i, run: go('#/' + h) }));
     CATS.forEach(c => c.types.forEach(t => items.push({ g: 'New element', t: 'New ' + typeName(t), s: c.l, ic: 'plus', run: () => createEl(t) })));
     items.push({ g: 'Actions', t: 'Toggle light / dark mode', ic: 'moon', run: () => $('#themeBtn').click() });

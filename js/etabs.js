@@ -237,7 +237,8 @@
   function guessCombo(name, ctype) {
     const n = name.toUpperCase();
     if (/QP|QUASI/.test(n)) return 'qp';
-    if (/SLS|SER|CHAR|FREQ/.test(n)) return 'sls';
+    if (/SLS|SER|CHAR|FREQ|^DEF\b|DEFL|LONG TERM|SHORT TERM/.test(n)) return 'sls';
+    if (/EQU|\bDA\d|PILE|COMPARISON|^MODAL|^DEAD$|^LIVE$/.test(n)) return 'off';   // equilibrium, geotechnical and pile checks: not member design
     if (ctype && !/comb/i.test(ctype)) return 'off';   // plain load cases: off by default
     return 'uls';
   }
@@ -385,6 +386,39 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const KN = { reactions: 'Joint reactions', beams: 'Beam forces', columns: 'Column forces', piers: 'Pier forces', braces: 'Brace forces' };
   const CL = { uls: 'ULS', sls: 'SLS char.', qp: 'SLS q-p', off: 'Not used' };
+  /* combinations: grouped by name pattern, one click sets a whole group */
+  const USES = [['uls', 'ULS', 'Strength design'], ['sls', 'SLS char.', 'Cracks, stresses, deflection'], ['qp', 'SLS q-p', 'Long-term'], ['off', 'Off', 'Not used']];
+  const groupKey = c => (c.replace(/[\s_\-.:]*\d+$/, '').trim() || c);
+  function comboGroups(cs) {
+    const m = new Map();
+    cs.forEach(c => { const k = groupKey(c); if (!m.has(k)) m.set(k, []); m.get(k).push(c); });
+    return Array.from(m.entries()).map(([k, list]) => ({ k, list }));
+  }
+  const seg = (attr, val, cur, small) => `<div class="useg${small ? ' sm' : ''}" role="group">${USES.map(([u, l, t]) => `<button type="button" class="${u}${cur === u ? ' on' : ''}" ${attr}="${esc(val)}" data-use="${u}" title="${t}" aria-pressed="${cur === u}">${l}</button>`).join('')}</div>`;
+  function comboPanel(cs) {
+    S.open = S.open || {};
+    const n = { uls: 0, sls: 0, qp: 0, off: 0 }; cs.forEach(c => { n[S.combos[c]]++; });
+    const hasEnv = cs.some(c => /ENV/i.test(c));
+    const gs = comboGroups(cs);
+    const rows = gs.map(g => {
+      const uses = new Set(g.list.map(c => S.combos[c])), cur = uses.size === 1 ? g.list.map(c => S.combos[c])[0] : 'mixed';
+      const single = g.list.length === 1;
+      const open = !!S.open[g.k];
+      const range = single ? '' : `<small>${esc(g.list[0])} … ${esc(g.list[g.list.length - 1])}</small>`;
+      return `<div class="cg${open ? ' open' : ''}" data-cgq="${esc((g.k + ' ' + g.list.join(' ')).toLowerCase())}">
+        <div class="cg-row">${single ? '<span class="cg-tw"></span>' : `<button type="button" class="cg-tw" data-cgopen="${esc(g.k)}" aria-expanded="${open}" aria-label="Show the ${g.list.length} combinations">${api.ic('chev')}</button>`}
+          <div class="cg-name"><b>${esc(single ? g.list[0] : g.k)}</b>${single ? '' : `<span class="cg-n">${g.list.length}</span>`}${cur === 'mixed' ? '<span class="cg-mixed">mixed</span>' : ''}${range}</div>
+          ${seg('data-cguse', g.k, cur)}</div>
+        ${open && !single ? `<div class="cg-list">${g.list.map(c => `<div class="cg-item"><span>${esc(c)}</span>${seg('data-cmbuse', c, S.combos[c], true)}</div>`).join('')}</div>` : ''}</div>`;
+    }).join('');
+    return `<div class="card combos"><div class="card-h"><b>Load combinations</b><small>${esc(S.file)} · ${cs.length} combinations in ${gs.length} groups</small></div>
+      <div class="cg-bar"><div class="cg-search">${api.ic('search')}<input id="cgQ" type="search" placeholder="Filter combinations…" value="${esc(S.cq || '')}" aria-label="Filter combinations"></div>
+        <div class="cg-count">${USES.map(([u, l]) => `<span class="${u}"><i></i>${n[u]} ${l}</span>`).join('')}</div>
+        <div class="cg-presets"><button type="button" class="btn sm" data-cgpreset="auto" title="Classify every combination from its name">Auto-detect</button>${hasEnv ? '<button type="button" class="btn sm" data-cgpreset="env" title="Use only the envelope combinations (ENV) - fastest">Envelopes only</button>' : ''}<button type="button" class="btn sm" data-cgpreset="off">All off</button></div></div>
+      <div class="cg-head"><span>Group</span><span>Use for</span></div>
+      <div class="cg-groups">${rows}</div>
+      <p class="cg-help muted">ULS combinations design the members (the governing one is found for each member). SLS characteristic gives the service forces for cracks, stresses and deflection, SLS quasi-permanent the long-term forces.</p></div>`;
+  }
   function view() {
     const ic = api.ic, fmt = api.fmt;
     const linked = api.proj().elements.filter(e => e.etabs);
@@ -398,9 +432,12 @@
           <div class="etabs-btns" style="padding:10px 0 2px"><button class="btn primary" data-et="design" ${!(L.sel || []).length || busy ? 'disabled' : ''}>${ic('check')}<span>${busy === 'design' ? 'Designing…' : (L.sel || []).length ? `Design ${L.sel.length} selected member(s)` : 'Design selected members'}</span></button>
           <small class="muted">Reads the forces of the selected members for the ticked combinations, envelopes them and creates / updates their design elements.</small></div></div>
         ${L.err ? `<div class="etabs-msg">${esc(L.err)}</div>` : ''}
-        <details class="etabs-pick" ${L.model.combos.length ? '' : 'open'}><summary>${ic('gear')}Combinations &amp; results <small class="muted">${Object.keys(L.pick).filter(c => L.pick[c]).length} of ${L.model.combos.length + L.model.cases.length} ticked</small></summary>
+        <details class="etabs-pick" ${L.pickOpen || !L.model.combos.length ? 'open' : ''}><summary>${ic('gear')}Combinations &amp; results <small class="muted">${Object.keys(L.pick).filter(c => L.pick[c]).length} of ${L.model.combos.length + L.model.cases.length} ticked</small></summary>
           <div class="lbl">Load combinations <button class="btn sm" data-et="all">All</button><button class="btn sm" data-et="none">None</button></div>
-          <div class="etabs-chips">${L.model.combos.map(c => `<label class="chip"><input type="checkbox" data-etpick="${esc(c)}" ${L.pick[c] ? 'checked' : ''}>${esc(c)}</label>`).join('') || '<span class="muted">No load combinations in the model</span>'}</div>
+          ${L.model.combos.length ? `<div class="pk-groups">${comboGroups(L.model.combos).map(g => { const n = g.list.filter(c => L.pick[c]).length, open = S.open && S.open['pk:' + g.k];
+            return g.list.length === 1 ? `<label class="pk-row"><span class="cg-tw"></span><input type="checkbox" data-etpick="${esc(g.list[0])}" ${L.pick[g.list[0]] ? 'checked' : ''}><b>${esc(g.list[0])}</b></label>`
+              : `<div class="pk-g"><div class="pk-row"><button type="button" class="cg-tw" data-cgopen="pk:${esc(g.k)}" aria-expanded="${!!open}" aria-label="Show the ${g.list.length} combinations">${ic('chev')}</button><label><input type="checkbox" data-etpickg="${esc(g.k)}" ${n === g.list.length ? 'checked' : ''} data-part="${n > 0 && n < g.list.length ? 1 : ''}"><b>${esc(g.k)}</b><span class="cg-n">${n}/${g.list.length}</span><small class="muted">${esc(g.list[0])} … ${esc(g.list[g.list.length - 1])}</small></label></div>
+                ${open ? `<div class="etabs-chips pk-list">${g.list.map(c => `<label class="chip"><input type="checkbox" data-etpick="${esc(c)}" ${L.pick[c] ? 'checked' : ''}>${esc(c)}</label>`).join('')}</div>` : ''}</div>`; }).join('')}</div>` : '<span class="muted">No load combinations in the model</span>'}
           ${L.model.cases.length ? `<details><summary class="muted">Load cases (${L.model.cases.length})</summary><div class="etabs-chips">${L.model.cases.map(c => `<label class="chip"><input type="checkbox" data-etpick="${esc(c)}" ${L.pick[c] ? 'checked' : ''}>${esc(c)}</label>`).join('')}</div></details>` : ''}
           <div class="lbl">Results to read</div><div class="etabs-chips">${Object.keys(kindsL).map(k => `<label class="chip"><input type="checkbox" data-etkind="${k}" ${L.kinds[k] ? 'checked' : ''}>${kindsL[k]}</label>`).join('')}</div></details>
         <div class="etabs-btns"><button class="btn" data-et="read" ${busy ? 'disabled' : ''}>${ic('download')}${busy === 'read' ? 'Reading ETABS…' : 'Read whole model'}</button>
@@ -419,8 +456,7 @@
     if (S.msg) body += `<div class="etabs-msg${/^Reading /.test(S.msg) ? ' info' : ''}" role="status">${esc(S.msg)}</div>`;
     if (S.tables.length) {
       const cs = Object.keys(S.combos);
-      body += `<div class="card"><div class="card-h"><b>Load combinations</b><small>${esc(S.file)} · ${S.tables.length} table(s) · click to change the use of a combination</small></div>
-        <div class="etabs-combos">${cs.map(c => `<button class="cmb ${S.combos[c]}" data-cmb="${esc(c)}" title="Click: ULS → SLS characteristic → SLS quasi-permanent → not used">${esc(c)}<span>${CL[S.combos[c]]}</span></button>`).join('')}</div></div>`;
+      body += comboPanel(cs);
       S.tables.forEach((t, ti) => {
         const sel = S.sel[ti], tg = TARGETS[t.kind];
         let ms = []; let err = '';
@@ -454,7 +490,7 @@
       fi.onchange = () => { if (fi.files[0]) go(fi.files[0]); };
     }
     root.onclick = ev => {
-      const b = ev.target.closest('[data-et],[data-cmb],[data-etapply],[data-etall],[data-etrow],[data-etpick],[data-etkind]'); if (!b) return;
+      const b = ev.target.closest('[data-etpickg],[data-et],[data-cmb],[data-cguse],[data-cmbuse],[data-cgopen],[data-cgpreset],[data-etapply],[data-etall],[data-etrow],[data-etpick],[data-etkind]'); if (!b) return;
       const d = b.dataset;
       const run = (k, f) => { if (L.busy) return; L.busy = k; L.err = ''; rer(); f().then(m => { L.busy = ''; if (m) api.toast(m); rer(); }, e => { L.busy = ''; L.err = e.message; rer(); }); };
       if (d.et === 'connect') return openConnect(rer);
@@ -464,16 +500,30 @@
       if (d.et === 'read') return run('read', () => readLive().then(() => { S.msg = ''; }));
       if (d.et === 'sync') return run('sync', () => readLive().then(() => { const n = syncLinked(); return `${n} linked element(s) updated from ETABS`; }));
       if (d.et === 'all' || d.et === 'none') { L.model.combos.forEach(c => { L.pick[c] = d.et === 'all'; }); return rer(); }
-      if (d.etpick !== undefined) { L.pick[d.etpick] = b.checked; return; }
+      if (d.etpickg !== undefined) { const g = comboGroups(L.model.combos).find(x => x.k === d.etpickg); if (g) g.list.forEach(c => { L.pick[c] = b.checked; }); return rer(); }
+      if (d.etpick !== undefined) { L.pick[d.etpick] = b.checked; return rer(); }
       if (d.etkind !== undefined) { L.kinds[d.etkind] = b.checked; keepL(); return; }
       if (d.et === 'demo') { demo(); S.msg = ''; return rer(); }
       if (d.et === 'clear') { S.tables = []; S.combos = {}; S.sel = {}; S.msg = ''; S.file = ''; return rer(); }
       if (d.et === 'paste') { const t = root.querySelector('#etPaste').value; try { S.file = 'Pasted table'; ingest([[splitText(t), '']]); S.msg = ''; } catch (e) { S.msg = e.message; } return rer(); }
+      if (d.cguse !== undefined) { const g = comboGroups(Object.keys(S.combos)).find(x => x.k === d.cguse); if (g) g.list.forEach(c => { S.combos[c] = d.use; }); return rer(); }
+      if (d.cmbuse !== undefined) { S.combos[d.cmbuse] = d.use; return rer(); }
+      if (d.cgopen !== undefined) { S.open = S.open || {}; S.open[d.cgopen] = !S.open[d.cgopen]; return rer(); }
+      if (d.cgpreset) { const cs = Object.keys(S.combos); const ct = {}; S.tables.forEach(t => Object.assign(ct, t.ctypes));
+        cs.forEach(c => { S.combos[c] = d.cgpreset === 'off' ? 'off' : d.cgpreset === 'env' ? (/ENV/i.test(c) ? guessCombo(c, '') : 'off') : guessCombo(c, ct[c] || ''); }); return rer(); }
       if (d.cmb !== undefined) { const o = ['uls', 'sls', 'qp', 'off']; S.combos[d.cmb] = o[(o.indexOf(S.combos[d.cmb]) + 1) % o.length]; return rer(); }
       if (d.etapply !== undefined) { if (EC.auth && EC.auth.isDemo && EC.auth.isDemo()) api.toast('Demo account: elements are kept until you reload'); apply(+d.etapply); return rer(); }
       if (d.etall !== undefined) { const s = S.sel[+d.etall]; s.rows = s.rows.map(() => b.checked); return rer(); }
       if (d.etrow !== undefined) { const [ti, i] = d.etrow.split(':').map(Number); S.sel[ti].rows[i] = b.checked; return rer(); }
     };
+    root.querySelectorAll('[data-part="1"]').forEach(x => { x.indeterminate = true; });
+    { const dp = root.querySelector('.etabs-pick'); if (dp) dp.ontoggle = () => { L.pickOpen = dp.open; }; }
+    root.oninput = ev => {
+      if (ev.target.id !== 'cgQ') return;
+      S.cq = ev.target.value; const q = S.cq.toLowerCase().trim();
+      root.querySelectorAll('.cg').forEach(g => { g.hidden = q && !g.dataset.cgq.includes(q); });
+    };
+    { const q = (S.cq || '').toLowerCase().trim(); if (q) root.querySelectorAll('.cg').forEach(g => { g.hidden = !g.dataset.cgq.includes(q); }); }
     root.onchange = ev => {
       const t = ev.target;
       if (t.dataset.ettarget !== undefined) { S.sel[+t.dataset.ettarget] = { target: t.value, tpl: '', rows: null }; rer(); }

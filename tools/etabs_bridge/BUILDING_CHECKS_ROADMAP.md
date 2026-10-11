@@ -25,6 +25,7 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] Weak storey: storey shear resistance V_Rd,i from the ETABS columns and walls (bridge `/strength`: section size, material, local-axis angle, wall length / angle), V_Rd,i/V_Rd,i+1 against 0.8 (weak) / 0.65 (extreme, ASCE 7 Table 12.3-2) and the resistance-to-demand ratio Ω_i against the storey above (≤ 30 % drop, prEN 1998-1-2) for EN 1998-1 4.2.3.3(4)
 - [x] Mass irregularity: storey masses from the ETABS “Mass Summary by Story” table (fallback “Centers Of Mass And Rigidity”, diaphragms summed) read with the building, m_i against 1.5 × the lighter adjacent storey (ASCE 7 Table 12.3-2 type 2, lighter roof excluded) for EN 1998-1 4.2.3.3(3); storeys > 10 % heavier than the one below noted
 - [x] Torsional radius and eccentricity: e_0x ≤ 0.30·r_x, r_x ≥ l_s (and Y) per storey - EN 1998-1 4.2.3.2(6); r/l_s from the modal periods (T_Y/T_θ, T_X/T_θ, uncoupled-mode relation, coupling noted), l_s = √(MMI/m) from “Mass Summary by Diaphragm”, e_0 from the ETABS centres of mass and rigidity; torsionally flexible → q_0 of Table 5.1 (5.2.2.1(4))
+- [x] Accidental torsion: eccentricity ratio of the ETABS response-spectrum cases (ResponseSpectrum.GetEccentricity / GetLoads) against 0.05 (EN 1998-1 4.3.2(1)P), storey torques M_ai = 0.05·L_i·F_i per direction (4.3.3.3.3), δ = 1 + 0.6 x/L_e and 1 + 1.2 x/L_e for planar models (4.3.3.2.4)
 
 ## Fixes
 - [x] 2026-10-11 · Notional loads asked the user to set them by hand when the notional table was not found (it was searched only among the tables that already had data). Now fully automatic: all tables searched (also empty ones, fields read with GetAllFieldsInTable); without such a table, a gravity analysis gives N per floor and H_i = θi·N is applied as storey joint loads (EN 1992-1-1 5.2(8))
@@ -34,7 +35,6 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] 2026-10-11 · Soft storey cited EN 1998-1 4.2.3.3(4)P for the stiffness criterion - it is 4.2.3.3(3) (4.2.3.3(4) is the storey resistance ratio, now the weak-storey check)
 
 ## Next
-- [ ] Accidental torsion e_ai = ±0.05 L_i and the δ = 1 + 0.6 x/L_e factor - EN 1998-1 4.3.2, 4.3.3.2.4
 - [ ] Wind-induced top acceleration / occupant comfort (ISO 10137)
 - [ ] Support uplift and pile tension from base reactions
 - [ ] Column axial shortening / differential shortening in tall buildings

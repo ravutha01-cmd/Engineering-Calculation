@@ -20,7 +20,8 @@ Endpoints (JSON):
     GET /selection                 members selected in ETABS now (beams, columns, braces, piers, joints)
     GET /building?c=<combo>&c=...  global building checks: stories, storey drifts, storey forces,
                                    max / average displacement ratios, base reactions, buckling factors, modes, storey masses,
-                                   centres of mass / rigidity and mass moments of inertia
+                                   centres of mass / rigidity and mass moments of inertia,
+                                   accidental eccentricity of the response-spectrum cases
     GET /results?c=<combo>&c=...&k=beams&k=columns&k=braces&k=piers&k=reactions[&sel=1]
                                    results as ETABS-style tables (header row, units row, rows);
                                    sel=1: only the members selected in ETABS
@@ -51,7 +52,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.10'
+VERSION = '1.11'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -511,8 +512,25 @@ def building_from_model(m, combos, cset):
                            'xcr': pick(r, 'XCR'), 'ycr': pick(r, 'YCR')})
     except Exception:
         pass
+    # accidental eccentricity of the response-spectrum cases (EN 1998-1 4.3.2: e_ai = 0.05 L_i, applied by ETABS as storey torques)
+    rs_ecc = []
+    try:
+        rs = m.LoadCases.ResponseSpectrum
+        for nm in ok(rs.GetNameList(0, []), 'ResponseSpectrum.GetNameList')[1] or []:
+            e = {'case': nm, 'ecc': None, 'dirs': []}
+            try:
+                e['ecc'] = ok(rs.GetEccentricity(nm, 0.0), 'ResponseSpectrum.GetEccentricity')[0]
+            except Exception:
+                pass
+            try:
+                e['dirs'] = [str(x) for x in (ok(rs.GetLoads(nm, 0, [], [], [], [], []), 'ResponseSpectrum.GetLoads')[1] or [])]
+            except Exception:
+                pass
+            rs_ecc.append(e)
+    except Exception:
+        pass
     return {'stories': stories, 'drifts': drifts, 'forces': forces, 'torsion': torsion, 'base': base_r, 'buckling': buck, 'modal': modal, 'masses': masses,
-            'plan_cm': list(plan.values())}
+            'plan_cm': list(plan.values()), 'rs_ecc': rs_ecc}
 
 
 COMBO_TYPES = {0: 'Linear Add', 1: 'Envelope', 2: 'Absolute Add', 3: 'SRSS', 4: 'Range Add'}
@@ -1106,7 +1124,8 @@ class Mock:
         plan_cm = [{'story': s['name'], 'diaph': 'D1', 'm': mt, 'mmi': mt * (24 ** 2 + 18 ** 2) / 12, 'xcm': 12.0, 'ycm': 9.0,
                     'xcr': round(13.6 + 0.09 * i, 2), 'ycr': round(9.3 + 0.02 * i, 2)} for i, (s, mt) in enumerate(zip(st, MOCK_MASS))]
         return {'file': self.status()['file'], 'stories': st, 'drifts': drifts, 'forces': forces, 'torsion': torsion, 'base': base, 'buckling': buck, 'modal': modal,
-                'masses': masses, 'plan_cm': plan_cm, 'plan': {'Bx': 24, 'By': 18}}
+                'masses': masses, 'plan_cm': plan_cm, 'rs_ecc': [{'case': 'EQX RS', 'ecc': 0.05, 'dirs': ['U1']}, {'case': 'EQY RS', 'ecc': 0.05, 'dirs': ['U2']}],
+                'plan': {'Bx': 24, 'By': 18}}
 
     def selection(self):
         return {'items': [{'kind': 'beams', 'story': b[0], 'label': b[1]} for b in self.BEAMS if b[2] in self.SEL['frames']] +

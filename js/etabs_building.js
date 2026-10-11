@@ -61,6 +61,7 @@
     d.masses = st.map((x, i) => ({ story: x.name, mx: [430, 405, 405, 405, 405, 470, 405, 405, 405, 330][i], my: [430, 405, 405, 405, 405, 470, 405, 405, 405, 330][i] }));
     // centre of mass at the plan centre, core 1.6-2.4 m off in X, MMI of a uniform 24 × 18 m floor (same as the --mock bridge)
     d.plan_cm = d.masses.map((r, i) => ({ story: r.story, diaph: 'D1', m: r.mx, mmi: r.mx * (24 * 24 + 18 * 18) / 12, xcm: 12, ycm: 9, xcr: Math.round((13.6 + 0.09 * i) * 100) / 100, ycr: Math.round((9.3 + 0.02 * i) * 100) / 100 }));
+    d.rs_ecc = [{ case: 'EQX RS', ecc: 0.05, dirs: ['U1'] }, { case: 'EQY RS', ecc: 0.05, dirs: ['U2'] }];
     return d;
   }
 
@@ -238,6 +239,22 @@
         });
       });
     }
+    // 12. accidental torsion - EN 1998-1 4.3.2(1)P e_ai = ±0.05·L_i (L_i floor size normal to the seismic action);
+    //     spatial model: torques M_ai = e_ai·F_i (4.3.3.2.4(3), 4.3.3.3.3) - ETABS applies them through the eccentricity
+    //     ratio of the response-spectrum case; planar models: δ = 1 + 0.6·x/L_e (4.3.3.2.4(1)), 1 + 1.2·x/L_e (4.3.3.2.4(2))
+    out.acc = { cases: (d.rs_ecc || []).map(c => {
+      const dir = (c.dirs || []).some(x => /U1|X/i.test(x)) ? 'X' : (c.dirs || []).some(x => /U2|Y/i.test(x)) ? 'Y' : '';
+      const e = c.ecc == null ? null : +c.ecc;
+      return { case: c.case, dir, ecc: e, U: e == null ? null : e > 0 ? 0.05 / e : 9.99 };
+    }), rows: [] };
+    ['X', 'Y'].forEach(dir => {
+      const seisC = [...new Set(fBot.filter(r => role(r.combo) === 'seis').map(r => r.combo))];
+      const c = seisC.map(c => [c, Math.max(0, ...fBot.filter(r => r.combo === c).map(r => Math.abs(dir === 'X' ? r.VX : r.VY)))]).sort((a, b2) => b2[1] - a[1])[0];
+      if (!c || !(c[1] > 0)) return;
+      const V = st.map(x => { const f = fBot.find(r => r.story === x.name && r.combo === c[0]); return f ? Math.abs(dir === 'X' ? f.VX : f.VY) : 0; });
+      const L = dir === 'X' ? +s.By : +s.Bx, e = 0.05 * L;
+      st.forEach((x, i) => { const F = Math.max(0, V[i] - (i + 1 < st.length ? V[i + 1] : 0)); out.acc.rows.push({ story: x.name, z: x.elev, dir, combo: c[0], F, L, e, M: e * F }); });
+    });
     return out;
   }
 
@@ -500,6 +517,7 @@
       ${sumCard('base', 'Overturning', R.base.some(x => Number.isFinite(x.fos)) ? oU : null, 'required ÷ provided safety')}
       ${sumCard('modal', 'Modal mass participation', R.modal ? R.modal.U : null, R.modal ? `ΣU<sub>X</sub> ${fmt(R.modal.sum.X * 100, 1)} % · ΣU<sub>Y</sub> ${fmt(R.modal.sum.Y * 100, 1)} % · T<sub>1</sub> ${fmt(R.modal.T1, 2)} s` : '')}
       ${R.soft.length ? sumCard('soft', 'Soft storey k<sub>i</sub>/k<sub>i+1</sub>', Umax(R.soft), (() => { const w = R.soft.filter(r => r.r1 != null).reduce((a, r) => (!a || r.r1 < a.r1 ? r : a), null); return w ? `min ${fmt(w.r1, 2)} at ${esc(w.story)} ${w.dir} (0.7)` : ''; })()) : ''}
+      ${R.acc.cases.some(c => c.U != null) ? sumCard('acc', 'Accidental eccentricity 0.05 / e', Umax(R.acc.cases), R.acc.cases.map(c => `${esc(c.case)} ${c.ecc != null ? fmt(c.ecc, 3) : '–'}`).join(' · ')) : ''}
       ${R.plan.length ? sumCard('plan', 'Torsional radius e<sub>0</sub>/0.3r · l<sub>s</sub>/r', Umax(R.plan), `r<sub>x</sub>/l<sub>s</sub> = ${fmt(R.planModes.rho.X, 2)} · r<sub>y</sub>/l<sub>s</sub> = ${fmt(R.planModes.rho.Y, 2)} (≥ 1)`) : ''}
       ${R.mass.length ? sumCard('mass', 'Mass irregularity m<sub>i</sub>/m<sub>adj</sub>', Umax(R.mass), (() => { const w = R.mass.reduce((a, r) => (r.ratio != null && (!a || r.ratio > a.ratio) ? r : a), null); return w ? `max ${fmt(w.ratio, 2)} at ${esc(w.story)} (1.5)` : ''; })()) : ''}
       ${R.weak.length ? sumCard('weak', 'Weak storey V<sub>Rd,i</sub>/V<sub>Rd,i+1</sub>', Umax(R.weak), (() => { const w = R.weak.filter(r => r.r1 != null).reduce((a, r) => (!a || r.r1 < a.r1 ? r : a), null); return w ? `min ${fmt(w.r1, 2)} at ${esc(w.story)} ${w.dir} (0.8)` : ''; })()) : ''}
@@ -555,6 +573,16 @@
         ${tbl([['Storey', r => esc(r.story)], ['Dir.', r => r.dir], ['V<sub>i</sub> kN', r => fmt(r.V, 0), 'num'], ['d<sub>r</sub> mm', r => fmt(r.d * 1000, 2), 'num'], ['k<sub>i</sub> kN/m', r => r.k ? fmt(r.k, 0) : '–', 'num'], ['k<sub>i</sub>/k<sub>i+1</sub>', r => r.r1 != null ? fmt(r.r1, 2) : '–', 'num'], ['k<sub>i</sub>/k̄<sub>3 above</sub>', r => r.r3 != null ? fmt(r.r3, 2) : '–', 'num'], ['Class', r => esc(r.cls)], ['U', r => r.r1 != null ? api.ubar(r.U) : '']], top(R.soft))}</div>
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(r => `${esc(r.story)} ${r.dir}: ${esc(r.cls).toLowerCase()} (k<sub>i</sub>/k<sub>i+1</sub> = ${fmt(r.r1, 2)})`).join(' · ')} → the building is not regular in elevation (EN 1998-1 4.2.3.1): use the modal response spectrum analysis (Table 4.1) and reduce q<sub>0</sub> by 20 % (5.2.2.2(3)); better, stiffen the soft storey.` : 'Stiffness constant or reducing gradually upwards in X and Y: regular in elevation for the stiffness criterion (EN 1998-1 4.2.3.3(3)).'}</div>
         <p class="muted bc-pad">k<sub>i</sub> from the seismic case with the largest base shear in each direction (storey shear and storey drift of the same case). EN 1998-1 gives the criterion without numbers; the ASCE 7 limits are a common quantification.</p>`);
+    }
+    if (R.acc.rows.length || R.acc.cases.length) {
+      const A = R.acc, bad = A.cases.filter(c => c.U != null && c.U > 1 + 1e-9), unk = A.cases.filter(c => c.ecc == null), dirs = [...new Set(A.rows.map(r => r.dir))];
+      const tot = d => A.rows.filter(r => r.dir === d).reduce((a, r) => a + r.M, 0);
+      html += card('acc', 'Accidental torsion', 'EN 1998-1 4.3.2(1)P · 4.3.3.2.4 · 4.3.3.3.3', `e<sub>ai</sub> = ±0.05·L<sub>i</sub> (L<sub>i</sub> floor size normal to the action: B<sub>y</sub> = ${fmt(s.By, 1)} m for X, B<sub>x</sub> = ${fmt(s.Bx, 1)} m for Y) · M<sub>ai</sub> = e<sub>ai</sub>·F<sub>i</sub>`,
+        `${A.cases.length ? tbl([['Response-spectrum case', r => esc(r.case)], ['Dir.', r => r.dir || '–'], ['Eccentricity ratio in ETABS', r => r.ecc != null ? fmt(r.ecc, 3) : '<small class="muted">not read</small>', 'num'], ['Required', () => '0.050', 'num'], ['U', r => r.U != null ? api.ubar(Math.min(r.U, 9.99)) : '']], A.cases) : ''}
+        ${A.rows.length ? `<div class="bc-split">${profile(dirs.map((dd, i) => ({ n: 'M_ai ' + dd, c: dd === 'Y' ? '--s2' : '--s1', pts: A.rows.filter(r => r.dir === dd).map(r => ({ story: r.story, z: r.z, v: r.M })) })), { title: 'Accidental storey torques', xlabel: 'M_ai kN·m', unit: 'kN·m', fmt: v => fmt(v, 0) })}
+        ${tbl([['Storey', r => esc(r.story)], ['Dir.', r => r.dir], ['F<sub>i</sub> kN', r => fmt(r.F, 0), 'num'], ['L<sub>i</sub> m', r => fmt(r.L, 1), 'num'], ['e<sub>ai</sub> m', r => fmt(r.e, 2), 'num'], ['M<sub>ai</sub> kN·m', r => fmt(r.M, 0), 'num']], top(A.rows))}</div>` : ''}
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(c => `${esc(c.case)}: eccentricity ${fmt(c.ecc, 3)} &lt; 0.05`).join(' · ')} → set the accidental eccentricity ratio of the response-spectrum case to 0.05 (Load cases → Modify → Diaphragm eccentricity, or Loads &amp; combinations → write the spectrum) and run again.` : A.cases.length && !unk.length ? 'Accidental eccentricity 0.05·L<sub>i</sub> applied in every response-spectrum case (4.3.2(1)P): ETABS adds the storey torques M<sub>ai</sub> = e<sub>ai</sub>·F<sub>i</sub> as an envelope (±) - the forces and drifts read here already include them.' : 'No eccentricity read from ETABS: apply the torques M<sub>ai</sub> of the table about the vertical axis at each floor, with both signs (4.3.3.3.3), or set the eccentricity ratio 0.05 in the response-spectrum cases.'}${dirs.length ? `<br>Total accidental torque: ${dirs.map(dd => `${dd}: ΣM<sub>ai</sub> = ${fmt(tot(dd), 0)} kN·m`).join(' · ')}.` : ''}</div>
+        <p class="muted bc-pad">Without the spatial torques (lateral force method): stiffness and mass symmetric in plan → multiply the action effects of each resisting element by δ = 1 + 0.6·x/L<sub>e</sub> (4.3.3.2.4(1)), 1.30 at the perimeter (x = L<sub>e</sub>/2); two planar models (4.3.3.1(8)) → δ = 1 + 1.2·x/L<sub>e</sub> (4.3.3.2.4(2)), 1.60 at the perimeter. F<sub>i</sub> = storey shear difference of the seismic case with the largest base shear (for response-spectrum results the SRSS/CQC storey shears, an approximation of the floor forces).</p>`);
     }
     if (R.plan.length) {
       const PM = R.planModes, flex = R.plan.filter(r => r.Ur > 1), ecc = R.plan.filter(r => r.Ue > 1), noCR = R.plan.some(r => r.e0 == null);
@@ -647,7 +675,7 @@
         if (!cs.length) { err = 'Give at least one combination a role (Seismic, Wind SLS or ULS).'; return rer(); }
         busy = 'read'; err = ''; rer();
         EC.etabs.live.get('/building?' + cs.map(c => 'c=' + encodeURIComponent(c)).join('&')).then(j => {
-          b.data = { stories: j.stories || [], drifts: j.drifts || [], forces: j.forces || [], torsion: j.torsion || [], base: j.base || [], buckling: j.buckling || [], modal: j.modal || [], masses: j.masses || [], plan_cm: j.plan_cm || [] };
+          b.data = { stories: j.stories || [], drifts: j.drifts || [], forces: j.forces || [], torsion: j.torsion || [], base: j.base || [], buckling: j.buckling || [], modal: j.modal || [], masses: j.masses || [], plan_cm: j.plan_cm || [], rs_ecc: j.rs_ecc || [] };
           b.file = String(j.file || '').split(/[\\/]/).pop(); b.at = Date.now(); b.demo = false;
           if (j.plan && b.set.Bx === DEF.Bx && b.set.By === DEF.By) { b.set.Bx = j.plan.Bx; b.set.By = j.plan.By; }
           if (!b.data.stories.length) throw new Error('ETABS returned no storeys.');

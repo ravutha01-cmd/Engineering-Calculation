@@ -50,7 +50,48 @@ Pro accounts with registration come later.
 - **Dashboard**: KPIs (elements, checks OK / revise, design progress, rebar and steel tonnage), utilisation by element, design status, upcoming deadlines and the main element groups.
 - **Two separate design tools**, each with its own section in the sidebar, its own element list and its own cards on the dashboard:
   - **Design by hand calculation (Mathcad)**: pick a Mathcad worksheet, enter section, materials and forces by hand. Lists at `#/elements`; the Mathcad library is in this section.
-  - **Design with ETABS link**: import ETABS results (beam / column / pier forces, joint reactions), envelope the load combinations and create or update linked elements that are designed for the governing combination. Import at `#/etabs`, linked elements at `#/linked`.
+  - **Design with ETABS link**: a live link to the open ETABS model through the CSI API (no Excel export). Pick the load combinations, read beam / column / brace / pier forces and support reactions, envelope them and create or update linked elements designed for the governing combination. After re-running the analysis, **Sync linked elements** pushes the new forces into every linked element and keeps your section and bar edits. Link at `#/etabs`, linked elements at `#/linked`. An exported table (Excel / CSV / paste) is still accepted as an offline fallback.
+
+### Loads & combinations (ETABS)
+
+**Design with ETABS link → Loads & combinations** writes to the open ETABS model:
+
+- **Load patterns** - creates the missing standard patterns (Dead with self-weight 1.0, SDL, Live, Roof Live, Wind X, Wind Y); every pattern and response-spectrum case is mapped to its action (G, Q with its EN 1990 category, S, W, E, T), guessed from its ETABS type.
+- **Slab loads** - SDL and the imposed load q_k of the chosen category (EN 1991-1-1 Table 6.2) on the floor slabs selected in ETABS.
+- **Load combinations (EN 1990 Annex A1)** - ULS 6.10 or 6.10a/6.10b with each variable action leading in turn and ψ0 from Table A1.1, G favourable with leading wind, wind ±, EQU 0.9 G + 1.5 W, seismic G + ψ2·Q + E with 100 % + 30 % (EN 1998-1 4.3.3.5.2, ± for static seismic patterns), SLS characteristic / frequent / quasi-permanent, wind-only SLS for drift, and envelopes. Roof imposed loads are not combined with snow or wind (EN 1991-1-1 3.3.2).
+- **Preview** - tabs for load patterns, load cases and load combinations show what ETABS will contain after writing: *New*, *Changed* (old and new factors side by side), *Removed* (managed combinations no longer generated), *Unchanged* and your own combinations (*kept*). **Preview with demo model** shows it without ETABS.
+- **Auto-update** - the managed combinations (prefix `CS-`) are rebuilt and written back whenever the load patterns or cases change in ETABS (the building is modified) or a rule changes here; the user's own combinations are never touched.
+
+Writing needs `etabs_bridge.py` 1.3 or later. Writes are POST requests accepted only from the CAMBO STRUCT page; an analysed (locked) model is unlocked only after you confirm, because ETABS then deletes the analysis results.
+
+### Building checks (ETABS)
+
+**Design with ETABS link → Building checks** reads the whole building from ETABS (storey drifts, storey forces, max / average displacements, base reactions, buckling factors) and checks:
+
+| Check | Rule |
+|---|---|
+| Inter-storey drift (seismic) | EN 1998-1 4.4.3.2: d_r = q_d·d_e, d_r·ν ≤ α·h (α = 0.005 / 0.0075 / 0.010) |
+| P-Δ second-order effects | EN 1998-1 4.4.2.2: θ = P_tot·d_r / (V_tot·h); ≤ 0.1 neglect, ≤ 0.2 multiply by 1/(1−θ), ≤ 0.3 second-order analysis |
+| Torsion of the building | Δmax/Δavg per storey: ≤ 1.2 regular, ≤ 1.4 torsional irregularity, > 1.4 extreme |
+| Wind drift (SLS) | storey drift ≤ h/500 (editable) |
+| Base shear & overturning moment | storey shear and overturning-moment profiles, V/W per combination, overturning stability W·B/2 ÷ M (EQU) |
+| Global buckling | α_cr from a linear buckling case: ≥ 10 first order; ≥ 3 sway effects × 1/(1−1/α_cr) (EN 1993-1-1 5.2.2(5)B); < 3 second-order analysis |
+| Modal analysis | EN 1998-1 4.3.3.3.1: periods and participating mass of every mode; Σ effective mass ≥ 90 % in X and Y and every mode with > 5 % included, or k ≥ 3√n with T_k ≤ 0.20 s; a torsional first mode is flagged (4.2.3.2(6)) |
+| P-Δ design of the linked members | each ETABS-linked beam, column, wall, steel member and footing gets the factor of its storey: seismic governing case × 1/(1−θ), lateral (wind / notional) case × 1/(1−1/α_cr), gravity-only case none. **Apply** multiplies its M and V; the ETABS values are kept, re-reads keep the factor, **Remove** restores them |
+
+**Load demo building** shows every check on a sample ETABS building (10 storeys, 24 × 18 m) without ETABS or the bridge, and designs a few demo ETABS-linked members for the P-Δ member design. Each combination gets a role (Seismic, Wind SLS, ULS, not used); inputs and the last ETABS read are kept with the project. Planned checks: `tools/etabs_bridge/BUILDING_CHECKS_ROADMAP.md`.
+
+### ETABS live link (CSI API)
+
+A web page cannot call the ETABS API (a Windows COM interface) itself, so a small local bridge does it:
+
+1. On the Windows computer with ETABS v18 or later, install Python 3 (tick *Add to PATH*).
+2. Copy `tools/etabs_bridge/etabs_bridge.py` and `start_etabs_link.bat` into one folder.
+3. Open the model in ETABS and run the analysis. Double-click `start_etabs_link.bat`: it installs `comtypes` the first time, attaches to the running ETABS and serves the results on `http://127.0.0.1:5480`. Leave the window open.
+4. In the app: **Design with ETABS link → Link to ETABS → Connect to ETABS…** (Chrome or Edge). The popup lists every open ETABS window (model file and process); pick one and click **Connect**.
+5. **Select members in ETABS** (beams, columns, braces, wall piers, support joints). The *Selected in ETABS* box follows the ETABS selection live. **Design N selected member(s)** reads their forces for the ticked combinations, envelopes them and creates or updates their design elements in one step. *Read whole model* and *Sync linked elements* work on the whole model.
+
+The bridge listens only on this computer, answers only the CAMBO STRUCT page (add other origins with `--allow-origin`), and never edits the model: it switches the present units to kN, m while reading and then restores them. If ETABS is not found, run `RegisterETABS.exe` from the ETABS folder as administrator. `python etabs_bridge.py --mock` serves two demo ETABS windows with a demo selection, without ETABS.
 - **Project → main elements → elements**: nine groups (Foundations, Columns & walls, Beams, Slabs & stairs, Connections & details, Durability & SLS, Geotechnical, Actions & loads, Steel & composite). Each element has a mark, level, grid, quantity, status, start/due dates and a designer.
 - **Element editor**: inputs on the left (yellow cells, as in the Mathcad worksheets). Rows of data such as soil layers, SPT logs, pile coordinates, load spectra and FE forces go in editable tables. On the right are four tabs:
   - **Summary**: Item / U / Status table and U<sub>max</sub>.

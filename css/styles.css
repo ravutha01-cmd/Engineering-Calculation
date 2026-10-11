@@ -667,3 +667,93 @@ svg.mplot .pext { stroke: var(--muted); stroke-width: .75; }
 svg.mplot .pdt { fill: var(--ink); font-weight: 600; font-size: 11px; font-variant-numeric: tabular-nums; }
 .plegend b { font-weight: 600; color: var(--ink); }
 @media print { .ptip { display: none !important; } }
+/* ETABS live link */
+.etabs-live .card-h b { display: inline-flex; align-items: center; gap: 8px; }
+.etabs-live .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--good); display: inline-block; }
+.etabs-conn { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; padding: 4px 16px 12px; }
+.etabs-conn label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); flex: 1 1 240px; }
+.etabs-pick { padding: 0 16px 6px; }
+.etabs-pick .lbl { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); margin: 8px 0 6px; }
+.etabs-pick summary { cursor: pointer; font-size: 12px; margin: 6px 0; }
+.etabs-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.etabs-chips .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 16px; padding: 4px 10px; font-size: 12px; cursor: pointer; background: var(--surface-2); }
+.etabs-chips .chip:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.etabs-offline { margin-top: 16px; }
+.etabs-offline > summary { cursor: pointer; padding: 12px 16px; display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.etabs-live .etabs-btns { padding: 8px 16px 14px; }
+.etabs-live .etabs-msg, .etabs-offline .etabs-msg { margin: 0 16px 12px; }
+.etabs-live .etabs-how { margin: 0 16px; padding-bottom: 14px; }
+.etabs-live ~ .card, .etabs-live ~ .etabs-msg { margin-top: 16px; }
+.etabs-offline > summary::-webkit-details-marker { display: none; }
+.etabs-offline > summary:hover { color: var(--accent); }
+.etabs-offline[open] > summary { border-bottom: 1px solid var(--border); }
+
+.etabs-hero { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 18px; }
+.etabs-hero > svg { flex: none; width: 44px; height: 44px; padding: 11px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); }
+.etabs-hero > div { flex: 1 1 260px; min-width: 0; }
+.etabs-hero small { display: block; color: var(--muted); margin-top: 2px; }
+.etabs-live .card-h .etabs-hbtn { margin-left: auto; display: inline-flex; gap: 6px; }
+.etabs-selbox { margin: 0 16px 12px; padding: 12px 14px; border: 1px solid var(--key-border, var(--border)); border-radius: var(--radius, 10px); background: var(--key-bg, var(--surface-2)); }
+.etabs-selbox .lbl { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+.etabs-selbox .lbl .icon { width: 16px; height: 16px; color: var(--accent); }
+.etabs-sel-sum { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.etabs-sel-empty { display: flex; gap: 10px; align-items: center; color: var(--ink-2); }
+.etabs-sel-empty small { display: block; color: var(--muted); }
+.etabs-chips .chip.sel { cursor: default; gap: 5px; background: var(--surface); }
+.etabs-chips .chip.sel i { font-style: normal; font-size: 10px; font-weight: 700; color: var(--good); text-transform: uppercase; }
+.etabs-pick > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; color: var(--ink-2); padding: 4px 0 8px; }
+.etabs-pick > summary .icon { width: 16px; height: 16px; }
+.etc-list { display: grid; gap: 8px; }
+.etc-it { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.etc-it:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.etc-it span { flex: 1; min-width: 0; }
+.etc-it small { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.etc-it input { accent-color: var(--accent); }
+
+/* Building checks (ETABS) */
+.bc-sums { margin-bottom: 16px; }
+.bc-sum { padding: 14px 16px; text-decoration: none; color: inherit; transition: border-color .15s; }
+.bc-sum:hover { border-color: var(--accent); }
+.bc-sum .label { color: var(--ink-2); font-size: 12px; }
+.bc-sum .value { font-size: 26px; font-weight: 700; margin: 4px 0; font-variant-numeric: tabular-nums; }
+.bc-sum .foot { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.bc-card { margin-top: 16px; scroll-margin-top: 16px; }
+.bc-split { display: grid; grid-template-columns: minmax(260px, 380px) minmax(0, 1fr); gap: 8px 18px; align-items: start; padding: 0 16px 14px; }
+.bc-split.two { grid-template-columns: repeat(2, minmax(0, 380px)); }
+.bc-chart { margin: 0; }
+.bc-chart svg { width: 100%; height: auto; display: block; }
+.bc-chart .ax { font-size: 10px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.bc-chart .ax.lim { fill: var(--ink-2); }
+.bc-chart .pt:hover circle:first-child { r: 6; }
+.bc-chart .legend { margin-top: 4px; }
+.bc-pad { padding: 0 16px 14px; margin: 0; font-size: 12.5px; }
+.bc-verdict { margin: 12px 16px 16px; padding: 10px 14px; border-radius: 8px; font-size: 13px; }
+.bc-verdict.ok { background: var(--ok-bg); color: var(--ok-ink); }
+.bc-verdict.bad { background: var(--bad-bg); color: var(--bad-ink); }
+.bc-inputs { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px 16px; padding: 0 16px 16px; }
+.bc-in { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-2); }
+.bc-in input, .bc-in select { background: var(--input-bg); border-color: var(--input-border); }
+.bc-in small { color: var(--muted); font-size: 11px; }
+@media (max-width: 900px) { .bc-split, .bc-split.two { grid-template-columns: minmax(0, 1fr); } }
+
+/* Loads & combinations (ETABS) */
+.ld-chks { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 0 16px 16px; }
+.ld-chk { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+.ld-chk input { width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
+.ld-auto { flex: 1 1 320px; min-width: 0; }
+.ld-auto span { min-width: 0; }
+.ld-tbl td { font-size: 12.5px; }
+.ld-tbl select.ctl, .card .tbl select.ctl { min-width: 140px; }
+
+.ld-st { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap; border: 1px solid transparent; }
+.ld-st.new { background: var(--key-bg); color: var(--accent); border-color: var(--key-border); }
+.ld-st.changed { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--ink); border-color: color-mix(in srgb, var(--warn) 55%, transparent); }
+.ld-st.removed { background: var(--bad-bg); color: var(--bad-ink); }
+.ld-st.same, .ld-st.exist { background: var(--surface-2); color: var(--muted); border-color: var(--border); }
+.ld-st.kept { background: transparent; color: var(--ink-2); border: 1px dashed var(--border-strong); }
+.ld-was { margin-top: 3px; font-size: 11.5px; color: var(--muted); }
+.ld-sum { padding: 0 16px 10px; font-size: 13px; color: var(--ink-2); }
+.ld-tabs { padding: 0 8px; margin-bottom: 8px; }
+.ld-tabs .ld-ch { background: var(--key-bg); color: var(--accent); border-color: var(--key-border); }
+.ld-filter { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 12px; }
+tr.ld-removed td { opacity: .75; }

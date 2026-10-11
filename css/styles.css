@@ -644,3 +644,25 @@ a.badge:hover { border-color: var(--ok-ink); }
 .etabs-offline > summary::-webkit-details-marker { display: none; }
 .etabs-offline > summary:hover { color: var(--accent); }
 .etabs-offline[open] > summary { border-bottom: 1px solid var(--border); }
+
+.etabs-hero { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 18px; }
+.etabs-hero > svg { flex: none; width: 44px; height: 44px; padding: 11px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); }
+.etabs-hero > div { flex: 1 1 260px; min-width: 0; }
+.etabs-hero small { display: block; color: var(--muted); margin-top: 2px; }
+.etabs-live .card-h .etabs-hbtn { margin-left: auto; display: inline-flex; gap: 6px; }
+.etabs-selbox { margin: 0 16px 12px; padding: 12px 14px; border: 1px solid var(--key-border, var(--border)); border-radius: var(--radius, 10px); background: var(--key-bg, var(--surface-2)); }
+.etabs-selbox .lbl { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+.etabs-selbox .lbl .icon { width: 16px; height: 16px; color: var(--accent); }
+.etabs-sel-sum { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.etabs-sel-empty { display: flex; gap: 10px; align-items: center; color: var(--ink-2); }
+.etabs-sel-empty small { display: block; color: var(--muted); }
+.etabs-chips .chip.sel { cursor: default; gap: 5px; background: var(--surface); }
+.etabs-chips .chip.sel i { font-style: normal; font-size: 10px; font-weight: 700; color: var(--good); text-transform: uppercase; }
+.etabs-pick > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; color: var(--ink-2); padding: 4px 0 8px; }
+.etabs-pick > summary .icon { width: 16px; height: 16px; }
+.etc-list { display: grid; gap: 8px; }
+.etc-it { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.etc-it:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.etc-it span { flex: 1; min-width: 0; }
+.etc-it small { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.etc-it input { accent-color: var(--accent); }

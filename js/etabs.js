@@ -13,7 +13,7 @@
 
   /* ---------- live link to ETABS (CSI API through the local bridge) ---------- */
   const LKEY = 'cambo.etabs.bridge';
-  const L = { url: 'http://127.0.0.1:5480', st: null, model: null, pick: {}, kinds: { beams: true, columns: true, braces: true, piers: true, reactions: true }, busy: '', err: '' };
+  const L = { url: 'http://127.0.0.1:5480', st: null, model: null, pick: {}, kinds: { beams: true, columns: true, braces: true, piers: true, reactions: true }, busy: '', err: '', sel: null, selErr: '' };
   try { const v = JSON.parse(localStorage.getItem(LKEY) || 'null'); if (v && v.url) L.url = v.url; if (v && v.kinds) Object.assign(L.kinds, v.kinds); } catch (e) {}
   const keepL = () => { try { localStorage.setItem(LKEY, JSON.stringify({ url: L.url, kinds: L.kinds })); } catch (e) {} };
   async function bget(path) {
@@ -24,20 +24,90 @@
     if (!r.ok || j.error) throw new Error(j.error || 'HTTP ' + r.status);
     return j;
   }
-  async function connect() {
-    L.st = await bget('/status'); L.model = await bget('/model');
+  async function connect(pid) {
+    L.st = await bget(pid === undefined ? '/status' : '/connect?pid=' + pid); L.model = await bget('/model');
+    L.sel = null; pollSel(true);
     const prev = L.pick; L.pick = {};
     L.model.combos.forEach(c => { L.pick[c] = c in prev ? prev[c] : true; });
     L.model.cases.forEach(c => { L.pick[c] = c in prev ? prev[c] : false; });
   }
-  async function readLive() {
+  async function readLive(onlySel) {
     const names = Object.keys(L.pick).filter(c => L.pick[c]);
     if (!names.length) throw new Error('Select at least one load combination');
     const q = names.map(c => 'c=' + encodeURIComponent(c)).concat(Object.keys(L.kinds).filter(k => L.kinds[k]).map(k => 'k=' + k)).join('&');
-    const j = await bget('/results?' + q);
-    if (!j.tables.length) throw new Error('ETABS returned no results for the selected combinations - run the analysis first (F5).');
-    S.file = 'ETABS live · ' + String(j.file || '').split(/[\\/]/).pop();
+    const j = await bget('/results?' + q + (onlySel ? '&sel=1' : ''));
+    if (!j.tables.length) throw new Error(onlySel ? 'ETABS returned no results for the selected members - run the analysis (F5) and tick their result types below.' : 'ETABS returned no results for the selected combinations - run the analysis first (F5).');
+    S.file = (onlySel ? 'ETABS selection · ' : 'ETABS live · ') + String(j.file || '').split(/[\\/]/).pop();
     ingest(j.tables.map(t => [t.rows, t.name]));
+  }
+  /* members selected in the ETABS window, watched while the ETABS page is open */
+  let selT = null, selBusy = false;
+  const KS = { beams: ['beam', 'beams'], columns: ['column', 'columns'], braces: ['brace', 'braces'], piers: ['wall pier', 'wall piers'], reactions: ['support', 'supports'] };
+  function selHtml() {
+    const ic = api.ic;
+    if (L.selErr) return `<div class="etabs-msg">${esc(L.selErr)}</div>`;
+    if (!L.sel) return '<p class="muted">Reading the selection in ETABS…</p>';
+    if (!L.sel.length) return `<div class="etabs-sel-empty">${ic('search')}<div><b>Nothing selected in ETABS</b><small>Click beams, columns, wall piers or support joints in the ETABS window - they appear here at once.</small></div></div>`;
+    const by = {}; L.sel.forEach(x => { (by[x.kind] = by[x.kind] || []).push(x); });
+    const linkedOf = x => api.proj().elements.find(e => e.etabs && e.etabs.story === x.story && e.etabs.label === x.label);
+    return `<div class="etabs-sel-sum">${Object.keys(by).map(k => `<span class="badge">${by[k].length} ${KS[k][by[k].length > 1 ? 1 : 0]}</span>`).join('')}</div>
+      <div class="etabs-chips">${L.sel.slice(0, 40).map(x => { const e = linkedOf(x); return `<span class="chip sel" title="${esc(KS[x.kind][0])}${e ? ' · linked to ' + esc(e.mark) : ''}"><b>${esc(x.label)}</b>${esc(x.story)}${e ? ' <i>linked</i>' : ''}</span>`; }).join('')}${L.sel.length > 40 ? `<span class="muted">+${L.sel.length - 40} more</span>` : ''}</div>`;
+  }
+  async function pollSel(now) {
+    clearTimeout(selT); selT = null;
+    if (!L.st || !/^#\/?etabs\b/.test(location.hash)) return;
+    if (!selBusy && !L.busy) {
+      selBusy = true;
+      try { const j = await bget('/selection'); const was = JSON.stringify(L.sel); L.sel = j.items || []; L.selErr = ''; if (was !== JSON.stringify(L.sel)) paintSel(); }
+      catch (e) { if (L.selErr !== e.message) { L.selErr = e.message; paintSel(); } }
+      selBusy = false;
+    }
+    selT = setTimeout(pollSel, now === true ? 1500 : 2000);
+  }
+  function paintSel() {
+    const box = document.getElementById('etSel'); if (box) box.innerHTML = selHtml();
+    const b = document.querySelector('[data-et="design"]'); if (b) { const n = (L.sel || []).length; b.disabled = !n || !!L.busy; b.lastChild.textContent = n ? `Design ${n} selected member(s)` : 'Design selected members'; }
+  }
+  /* selection -> results -> linked elements, in one step */
+  async function designSelection() {
+    await readLive(true);
+    let nNew = 0, nUpd = 0;
+    S.tables.forEach((t, ti) => { const r = apply(ti, true); nNew += r.nNew; nUpd += r.nUpd; });
+    return `${nNew} element(s) created, ${nUpd} updated from the ETABS selection`;
+  }
+  /* popup: find the running ETABS windows and pick the one to link */
+  function openConnect(rer) {
+    const ic = api.ic;
+    const bg = api.modal('Connect to ETABS', `<div class="etc">
+      <p class="muted" style="margin:0 0 12px">Links this app to an ETABS window on this computer through the CSI API. Keep <b>start_etabs_link.bat</b> running.</p>
+      <div class="etabs-conn" style="padding:0 0 12px"><label>ETABS link address<input class="ctl" id="etcUrl" value="${esc(L.url)}" spellcheck="false"></label><button class="btn" data-etc="scan">${ic('search')}Find ETABS</button></div>
+      <div id="etcList"></div></div>`, () => { const r = bg.querySelector('input[name="etcPid"]:checked'); if (!r) return false; go(+r.value); return false; }, 'Connect');
+    const list = bg.querySelector('#etcList'), okB = bg.querySelector('[data-ok]');
+    const setup = open => `<details class="etabs-how" ${open ? 'open' : ''}><summary>${ic('gear')}Set up the live link (once per computer)</summary><ol>
+      <li>On the Windows computer with ETABS (v18 or later), install <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">Python 3</a> (tick <i>Add to PATH</i>).</li>
+      <li>Download <a href="tools/etabs_bridge/etabs_bridge.py" download>etabs_bridge.py</a> and <a href="tools/etabs_bridge/start_etabs_link.bat" download>start_etabs_link.bat</a> into one folder.</li>
+      <li>Open the model in ETABS and run the analysis, then double-click <b>start_etabs_link.bat</b> (it installs <code>comtypes</code> the first time) and leave the window open.</li>
+      <li>Click <b>Find ETABS</b> (Chrome or Edge). The link reads the model only on this computer (127.0.0.1) and never changes it.</li></ol></details>`;
+    const scan = async () => {
+      L.url = bg.querySelector('#etcUrl').value.trim() || L.url; keepL();
+      list.innerHTML = '<p class="muted">Looking for ETABS…</p>'; okB.disabled = true;
+      try {
+        const xs = (await bget('/instances')).instances || [];
+        if (!xs.length) { list.innerHTML = `<div class="etabs-msg">The ETABS link is running, but no ETABS window is open. Open the model in ETABS and click Find ETABS again.</div>`; return; }
+        const cur = L.st ? L.st.pid : null;
+        list.innerHTML = `<div class="etc-list" role="radiogroup" aria-label="ETABS windows">${xs.map((x, i) => `<label class="etc-it"><input type="radio" name="etcPid" value="${x.pid}" ${(cur ? x.pid === cur : i === 0) ? 'checked' : ''}>${ic('layers')}<span><b>${esc(String(x.file).split(/[\\/]/).pop())}</b><small>${esc(x.file)}${x.pid ? ' · process ' + x.pid : ''}</small></span>${L.st && x.pid === cur ? '<span class="badge">linked</span>' : ''}</label>`).join('')}</div>`;
+        okB.disabled = false;
+      } catch (e) { list.innerHTML = `<div class="etabs-msg">${esc(e.message)}</div>${setup(true)}`; }
+    };
+    const go = async pid => {
+      okB.disabled = true; okB.textContent = 'Connecting…';
+      try { await connect(pid); bg.remove(); api.toast('Connected to ' + String(L.st.file).split(/[\\/]/).pop()); L.err = ''; rer(); }
+      catch (e) { list.insertAdjacentHTML('beforeend', `<div class="etabs-msg">${esc(e.message)}</div>`); okB.disabled = false; okB.textContent = 'Connect'; }
+    };
+    bg.querySelector('[data-etc="scan"]').onclick = scan;
+    bg.querySelector('#etcUrl').onkeydown = ev => { if (ev.key === 'Enter') scan(); };
+    list.addEventListener('dblclick', ev => { const r = ev.target.closest('.etc-it'); if (r) go(+r.querySelector('input').value); });
+    scan();
   }
   /* re-read and push the new governing forces into every element already linked (keeps section / bar edits) */
   function syncLinked() {
@@ -264,7 +334,7 @@
   /* ---------- create / update linked elements ---------- */
   const linkOf = (t, m) => ({ file: S.file, table: t.name, story: m.story, label: m.label, combo: m.gov.combo, at: Date.now(),
     cases: m.cases.slice(0, 40).map(c => ({ combo: c.combo, show: c.show, U: Number.isFinite(c.U) ? Math.round(c.U * 1000) / 1000 : null })) });
-  function apply(ti) {
+  function apply(ti, quiet) {
     const t = S.tables[ti], sel = S.sel[ti], p = api.proj();
     const list = members(ti).filter((m, i) => !sel.rows || sel.rows[i] !== false);
     let nNew = 0, nUpd = 0;
@@ -279,6 +349,7 @@
       }
     });
     api.save();
+    if (quiet) return { nNew, nUpd };
     api.toast(`${nNew} element(s) created, ${nUpd} updated from ETABS`);
     return list.length;
   }
@@ -311,23 +382,22 @@
     const linked = api.proj().elements.filter(e => e.etabs);
     const nLinked = linked.length, busy = L.busy;
     const kindsL = { beams: 'Beams', columns: 'Columns', braces: 'Braces', piers: 'Piers (walls)', reactions: 'Support reactions' };
-    const setup = `<details class="etabs-how" ${L.st ? '' : 'open'}><summary>${ic('gear')}Set up the live link (once per computer)</summary><ol>
-      <li>On the Windows computer with ETABS (v18 or later), install <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">Python 3</a> (tick <i>Add to PATH</i>).</li>
-      <li>Download <a href="tools/etabs_bridge/etabs_bridge.py" download>etabs_bridge.py</a> and <a href="tools/etabs_bridge/start_etabs_link.bat" download>start_etabs_link.bat</a> into one folder.</li>
-      <li>Open the model in ETABS and run the analysis, then double-click <b>start_etabs_link.bat</b> (it installs <code>comtypes</code> the first time) and leave the window open.</li>
-      <li>Click <b>Connect to ETABS</b> here (Chrome or Edge). The link reads the model through the CSI API, only on this computer (127.0.0.1), and never changes the model.</li></ol></details>`;
-    const live = !L.st ? `<div class="card etabs-live"><div class="card-h"><b>${ic('upload')}Live link to ETABS (API)</b><small>results read directly from the open ETABS model - no export</small></div>
-        <div class="etabs-conn"><label>ETABS link address<input class="ctl" id="etUrl" value="${esc(L.url)}" spellcheck="false"></label><button class="btn primary" data-et="connect" ${busy ? 'disabled' : ''}>${ic('check')}${busy === 'connect' ? 'Connecting…' : 'Connect to ETABS'}</button></div>
-        ${L.err ? `<div class="etabs-msg">${esc(L.err)}</div>` : ''}${setup}</div>`
-      : `<div class="card etabs-live on"><div class="card-h"><b><i class="dot"></i>Connected to ETABS ${esc(L.st.etabs || '')}</b><small>${esc(L.st.file)}${L.st.analysed ? ' · analysed' : ' · <span style="color:var(--critical)">not analysed - run the analysis (F5)</span>'}</small></div>
-        <div class="etabs-pick"><div class="lbl">Load combinations <button class="btn sm" data-et="all">All</button><button class="btn sm" data-et="none">None</button></div>
+    const live = !L.st ? `<div class="card etabs-live"><div class="etabs-hero">${ic('upload')}<div><b>Live link to ETABS (API)</b><small>Select members in ETABS and send them to your calculations - no export, no Excel.</small></div>
+        <button class="btn primary" data-et="connect">${ic('check')}Connect to ETABS…</button></div>${L.err ? `<div class="etabs-msg">${esc(L.err)}</div>` : ''}</div>`
+      : `<div class="card etabs-live on"><div class="card-h"><b><i class="dot"></i>Connected to ${esc(String(L.st.file).split(/[\\/]/).pop())}</b><small>ETABS ${esc(L.st.etabs || '')}${L.st.pid ? ' · process ' + L.st.pid : ''}${L.st.analysed ? ' · analysed' : ' · <span style="color:var(--critical)">not analysed - run the analysis (F5)</span>'}</small>
+          <span class="etabs-hbtn"><button class="btn sm" data-et="connect">Change ETABS…</button><button class="btn sm" data-et="disconnect">Disconnect</button></span></div>
+        <div class="etabs-selbox"><div class="lbl">${ic('search')}Selected in ETABS <small class="muted">live · select members in the ETABS window</small></div><div id="etSel">${selHtml()}</div>
+          <div class="etabs-btns" style="padding:10px 0 2px"><button class="btn primary" data-et="design" ${!(L.sel || []).length || busy ? 'disabled' : ''}>${ic('check')}<span>${busy === 'design' ? 'Designing…' : (L.sel || []).length ? `Design ${L.sel.length} selected member(s)` : 'Design selected members'}</span></button>
+          <small class="muted">Reads the forces of the selected members for the ticked combinations, envelopes them and creates / updates their design elements.</small></div></div>
+        ${L.err ? `<div class="etabs-msg">${esc(L.err)}</div>` : ''}
+        <details class="etabs-pick" ${L.model.combos.length ? '' : 'open'}><summary>${ic('gear')}Combinations &amp; results <small class="muted">${Object.keys(L.pick).filter(c => L.pick[c]).length} of ${L.model.combos.length + L.model.cases.length} ticked</small></summary>
+          <div class="lbl">Load combinations <button class="btn sm" data-et="all">All</button><button class="btn sm" data-et="none">None</button></div>
           <div class="etabs-chips">${L.model.combos.map(c => `<label class="chip"><input type="checkbox" data-etpick="${esc(c)}" ${L.pick[c] ? 'checked' : ''}>${esc(c)}</label>`).join('') || '<span class="muted">No load combinations in the model</span>'}</div>
           ${L.model.cases.length ? `<details><summary class="muted">Load cases (${L.model.cases.length})</summary><div class="etabs-chips">${L.model.cases.map(c => `<label class="chip"><input type="checkbox" data-etpick="${esc(c)}" ${L.pick[c] ? 'checked' : ''}>${esc(c)}</label>`).join('')}</div></details>` : ''}
-          <div class="lbl">Results to read</div><div class="etabs-chips">${Object.keys(kindsL).map(k => `<label class="chip"><input type="checkbox" data-etkind="${k}" ${L.kinds[k] ? 'checked' : ''}>${kindsL[k]}</label>`).join('')}</div></div>
-        ${L.err ? `<div class="etabs-msg">${esc(L.err)}</div>` : ''}
-        <div class="etabs-btns"><button class="btn primary" data-et="read" ${busy ? 'disabled' : ''}>${ic('download')}${busy === 'read' ? 'Reading ETABS…' : 'Read results from ETABS'}</button>
+          <div class="lbl">Results to read</div><div class="etabs-chips">${Object.keys(kindsL).map(k => `<label class="chip"><input type="checkbox" data-etkind="${k}" ${L.kinds[k] ? 'checked' : ''}>${kindsL[k]}</label>`).join('')}</div></details>
+        <div class="etabs-btns"><button class="btn" data-et="read" ${busy ? 'disabled' : ''}>${ic('download')}${busy === 'read' ? 'Reading ETABS…' : 'Read whole model'}</button>
           ${nLinked ? `<button class="btn" data-et="sync" ${busy ? 'disabled' : ''} title="Re-read ETABS and update the forces of the ${nLinked} linked element(s)">${ic('undo')}${busy === 'sync' ? 'Syncing…' : `Sync ${nLinked} linked element(s)`}</button>` : ''}
-          <button class="btn" data-et="connect" ${busy ? 'disabled' : ''}>Refresh model</button><button class="btn" data-et="disconnect">Disconnect</button></div></div>`;
+          <button class="btn" data-et="refresh" ${busy ? 'disabled' : ''}>Refresh combinations</button></div></div>`;
     const how = `<details class="etabs-how"><summary>${ic('book')}How to export from ETABS</summary><ol>
       <li>Run the analysis. <b>Display → Show Tables…</b> (Ctrl+T).</li>
       <li>Tick <b>Analysis → Results → Frame Output → Element Forces - Beams / Element Forces - Columns</b>, <b>Wall Output → Pier Forces</b> and <b>Joint Output → Reactions</b>. Set <b>Load Patterns / Combos</b> to your design combinations.</li>
@@ -366,6 +436,7 @@
   }
   function mount(root) {
     const rer = () => api.render();
+    if (L.st && !selT) pollSel(true);
     const fi = root.querySelector('#etFile'), drop = root.querySelector('#etDrop');
     const go = f => { S.msg = 'Reading ' + f.name + '…'; rer(); readFile(f).then(() => { S.msg = ''; rer(); }, e => { S.msg = e.message; rer(); }); };
     if (drop) {
@@ -378,8 +449,10 @@
       const b = ev.target.closest('[data-et],[data-cmb],[data-etapply],[data-etall],[data-etrow],[data-etpick],[data-etkind]'); if (!b) return;
       const d = b.dataset;
       const run = (k, f) => { if (L.busy) return; L.busy = k; L.err = ''; rer(); f().then(m => { L.busy = ''; if (m) api.toast(m); rer(); }, e => { L.busy = ''; L.err = e.message; rer(); }); };
-      if (d.et === 'connect') { const u = root.querySelector('#etUrl'); if (u) { L.url = u.value.trim() || L.url; keepL(); } return run('connect', () => connect()); }
-      if (d.et === 'disconnect') { L.st = null; L.model = null; L.err = ''; return rer(); }
+      if (d.et === 'connect') return openConnect(rer);
+      if (d.et === 'refresh') return run('refresh', () => connect(L.st.pid || 0));
+      if (d.et === 'disconnect') { L.st = null; L.model = null; L.sel = null; L.err = ''; clearTimeout(selT); return rer(); }
+      if (d.et === 'design') { if (EC.auth && EC.auth.isDemo && EC.auth.isDemo()) api.toast('Demo account: elements are kept until you reload'); return run('design', designSelection); }
       if (d.et === 'read') return run('read', () => readLive().then(() => { S.msg = ''; }));
       if (d.et === 'sync') return run('sync', () => readLive().then(() => { const n = syncLinked(); return `${n} linked element(s) updated from ETABS`; }));
       if (d.et === 'all' || d.et === 'none') { L.model.combos.forEach(c => { L.pick[c] = d.et === 'all'; }); return rer(); }

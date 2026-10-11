@@ -59,9 +59,10 @@ A web page cannot call the ETABS API (a Windows COM interface) itself, so a smal
 1. On the Windows computer with ETABS v18 or later, install Python 3 (tick *Add to PATH*).
 2. Copy `tools/etabs_bridge/etabs_bridge.py` and `start_etabs_link.bat` into one folder.
 3. Open the model in ETABS and run the analysis. Double-click `start_etabs_link.bat`: it installs `comtypes` the first time, attaches to the running ETABS and serves the results on `http://127.0.0.1:5480`. Leave the window open.
-4. In the app: **Design with ETABS link → Link to ETABS → Connect to ETABS** (Chrome or Edge).
+4. In the app: **Design with ETABS link → Link to ETABS → Connect to ETABS…** (Chrome or Edge). The popup lists every open ETABS window (model file and process); pick one and click **Connect**.
+5. **Select members in ETABS** (beams, columns, braces, wall piers, support joints). The *Selected in ETABS* box follows the ETABS selection live. **Design N selected member(s)** reads their forces for the ticked combinations, envelopes them and creates or updates their design elements in one step. *Read whole model* and *Sync linked elements* work on the whole model.
 
-The bridge listens only on this computer, answers only the CAMBO STRUCT page (add other origins with `--allow-origin`), and never edits the model: it switches the present units to kN, m while reading and then restores them. If ETABS is not found, run `RegisterETABS.exe` from the ETABS folder as administrator. `python etabs_bridge.py --mock` serves demo results without ETABS.
+The bridge listens only on this computer, answers only the CAMBO STRUCT page (add other origins with `--allow-origin`), and never edits the model: it switches the present units to kN, m while reading and then restores them. If ETABS is not found, run `RegisterETABS.exe` from the ETABS folder as administrator. `python etabs_bridge.py --mock` serves two demo ETABS windows with a demo selection, without ETABS.
 - **Project → main elements → elements**: nine groups (Foundations, Columns & walls, Beams, Slabs & stairs, Connections & details, Durability & SLS, Geotechnical, Actions & loads, Steel & composite). Each element has a mark, level, grid, quantity, status, start/due dates and a designer.
 - **Element editor**: inputs on the left (yellow cells, as in the Mathcad worksheets). Rows of data such as soil layers, SPT logs, pile coordinates, load spectra and FE forces go in editable tables. On the right are four tabs:
   - **Summary**: Item / U / Status table and U<sub>max</sub>.

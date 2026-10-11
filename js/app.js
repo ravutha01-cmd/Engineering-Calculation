@@ -704,7 +704,7 @@
     try { localStorage.setItem('cambo.theme', nx); } catch (e) { /* private mode */ }
     chrome(route());
   };
-  EC.etabs.install({ proj, save, toast, ic, fmt, ubar, uid, today, addDays, render: () => render() });
+  EC.etabs.install({ proj, save, toast, modal, ic, fmt, ubar, uid, today, addDays, render: () => render() });
   EC.mcui.install({
     MOD, STATUS, proj, save, toast, modal, ic, fmt, ubar, route, catName: k => (CATS.find(c => c.k === k) || {}).l || k,
     render: () => render(),

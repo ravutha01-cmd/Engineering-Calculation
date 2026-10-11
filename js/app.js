@@ -193,6 +193,7 @@
       ${a('library', 'book', 'Mathcad library', `<span class="count">${EC.library.length}</span>`, r0 === 'library')}
       <h4 class="tool">Design with ETABS link<small>analysis results → design</small></h4>
       ${a('etabs', 'upload', 'Link to ETABS', '', r0 === 'etabs')}
+      ${a('building', 'gantt', 'Building checks', '', r0 === 'building')}
       ${tool('etabs', linkedCats)}
       <h4>Schedules</h4>
       ${a('schedules', 'table', 'Element schedules', '', r0 === 'schedules')}
@@ -492,9 +493,9 @@
     chrome(r);
     const m = $('#main');
     const v = r[0] || 'dashboard';
-    m.innerHTML = v === 'elements' ? vElements(r[1], 'hand') : v === 'linked' ? vElements(r[1], 'etabs') : v === 'el' ? vElement(r[1]) : v === 'schedules' ? vSchedules() : v === 'programme' ? vProgramme() : v === 'library' ? vLibrary() : v === 'etabs' ? EC.etabs.view() : v === 'project' ? vProject() : vDashboard();
-    if (v === 'etabs') EC.etabs.mount(m); else m.onclick = m.onchange = null;
-    if (v !== 'el' && v !== 'etabs') m.scrollTop = 0;
+    m.innerHTML = v === 'elements' ? vElements(r[1], 'hand') : v === 'linked' ? vElements(r[1], 'etabs') : v === 'el' ? vElement(r[1]) : v === 'schedules' ? vSchedules() : v === 'programme' ? vProgramme() : v === 'library' ? vLibrary() : v === 'etabs' ? EC.etabs.view() : v === 'building' ? EC.building.view() : v === 'project' ? vProject() : vDashboard();
+    if (v === 'etabs') EC.etabs.mount(m); else if (v === 'building') EC.building.mount(m); else m.onclick = m.onchange = null;
+    if (v !== 'el' && v !== 'etabs' && v !== 'building') m.scrollTop = 0;
     $('#app').classList.remove('nav-open');
     const p = proj();
     document.title = `${v === 'el' ? ((p.elements.find(e => e.id === r[1]) || {}).mark || '') + ' · ' : ''}${p.name} · CAMBO STRUCT`;
@@ -507,7 +508,7 @@
     const p = proj(), go = h => () => { location.hash = h; };
     const items = [];
     p.elements.forEach(e => items.push({ g: 'Elements', t: e.mark, s: typeName(e.type) + (e.level ? ' · ' + e.level : '') + (e.grid ? ' · ' + e.grid : ''), b: e.status, ic: (CATS.find(c => MOD[e.type] && c.k === MOD[e.type].cat) || {}).icon || 'layers', run: () => { activeTab = 'summary'; location.hash = '#/el/' + e.id; } }));
-    [['dashboard', 'dashboard', 'Dashboard'], ['elements', 'layers', 'Hand-calculated elements', 'Design by hand calculation (Mathcad)']].concat(CATS.map(c => ['elements/' + c.k, c.icon, c.l, 'Hand calculation (Mathcad)']), [['library', 'book', 'Mathcad library', 'Design by hand calculation'], ['etabs', 'upload', 'Link to ETABS', 'Design with ETABS link'], ['linked', 'layers', 'ETABS-linked elements', 'Design with ETABS link']], CATS.map(c => ['linked/' + c.k, c.icon, c.l, 'ETABS link']), [['schedules', 'table', 'Element schedules'], ['programme', 'gantt', 'Design programme'], ['project', 'gear', 'Project settings']])
+    [['dashboard', 'dashboard', 'Dashboard'], ['elements', 'layers', 'Hand-calculated elements', 'Design by hand calculation (Mathcad)']].concat(CATS.map(c => ['elements/' + c.k, c.icon, c.l, 'Hand calculation (Mathcad)']), [['library', 'book', 'Mathcad library', 'Design by hand calculation'], ['etabs', 'upload', 'Link to ETABS', 'Design with ETABS link'], ['building', 'gantt', 'Building checks: drift, P-Δ, torsion, overturning, buckling', 'Design with ETABS link'], ['linked', 'layers', 'ETABS-linked elements', 'Design with ETABS link']], CATS.map(c => ['linked/' + c.k, c.icon, c.l, 'ETABS link']), [['schedules', 'table', 'Element schedules'], ['programme', 'gantt', 'Design programme'], ['project', 'gear', 'Project settings']])
       .forEach(([h, i, l, sub]) => items.push({ g: 'Go to', t: l, s: sub, ic: i, run: go('#/' + h) }));
     CATS.forEach(c => c.types.forEach(t => items.push({ g: 'New element', t: 'New ' + typeName(t), s: c.l, ic: 'plus', run: () => createEl(t) })));
     items.push({ g: 'Actions', t: 'Toggle light / dark mode', ic: 'moon', run: () => $('#themeBtn').click() });
@@ -705,6 +706,7 @@
     chrome(route());
   };
   EC.etabs.install({ proj, save, toast, modal, ic, fmt, ubar, uid, today, addDays, render: () => render() });
+  EC.building.install({ proj, save, toast, ic, fmt, ubar, render: () => render() });
   EC.mcui.install({
     MOD, STATUS, proj, save, toast, modal, ic, fmt, ubar, route, catName: k => (CATS.find(c => c.k === k) || {}).l || k,
     render: () => render(),

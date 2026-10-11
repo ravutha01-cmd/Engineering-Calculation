@@ -52,6 +52,21 @@ Pro accounts with registration come later.
   - **Design by hand calculation (Mathcad)**: pick a Mathcad worksheet, enter section, materials and forces by hand. Lists at `#/elements`; the Mathcad library is in this section.
   - **Design with ETABS link**: a live link to the open ETABS model through the CSI API (no Excel export). Pick the load combinations, read beam / column / brace / pier forces and support reactions, envelope them and create or update linked elements designed for the governing combination. After re-running the analysis, **Sync linked elements** pushes the new forces into every linked element and keeps your section and bar edits. Link at `#/etabs`, linked elements at `#/linked`. An exported table (Excel / CSV / paste) is still accepted as an offline fallback.
 
+### Building checks (ETABS)
+
+**Design with ETABS link → Building checks** reads the whole building from ETABS (storey drifts, storey forces, max / average displacements, base reactions, buckling factors) and checks:
+
+| Check | Rule |
+|---|---|
+| Inter-storey drift (seismic) | EN 1998-1 4.4.3.2: d_r = q_d·d_e, d_r·ν ≤ α·h (α = 0.005 / 0.0075 / 0.010) |
+| P-Δ second-order effects | EN 1998-1 4.4.2.2: θ = P_tot·d_r / (V_tot·h); ≤ 0.1 neglect, ≤ 0.2 multiply by 1/(1−θ), ≤ 0.3 second-order analysis |
+| Torsion of the building | Δmax/Δavg per storey: ≤ 1.2 regular, ≤ 1.4 torsional irregularity, > 1.4 extreme |
+| Wind drift (SLS) | storey drift ≤ h/500 (editable) |
+| Base shear & overturning moment | storey shear and overturning-moment profiles, V/W per combination, overturning stability W·B/2 ÷ M (EQU) |
+| Global buckling | α_cr from a linear buckling case: ≥ 10 first order; ≥ 3 sway effects × 1/(1−1/α_cr) (EN 1993-1-1 5.2.2(5)B); < 3 second-order analysis |
+
+Each combination gets a role (Seismic, Wind SLS, ULS, not used); inputs and the last ETABS read are kept with the project. Planned checks: `tools/etabs_bridge/BUILDING_CHECKS_ROADMAP.md`.
+
 ### ETABS live link (CSI API)
 
 A web page cannot call the ETABS API (a Windows COM interface) itself, so a small local bridge does it:

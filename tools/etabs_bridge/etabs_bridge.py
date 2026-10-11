@@ -18,6 +18,8 @@ Endpoints (JSON):
     GET /status                    ETABS version, model file, analysed or not
     GET /model                     load combinations and load cases
     GET /selection                 members selected in ETABS now (beams, columns, braces, piers, joints)
+    GET /building?c=<combo>&c=...  global building checks: stories, storey drifts, storey forces,
+                                   max / average displacement ratios, base reactions, buckling factors
     GET /results?c=<combo>&c=...&k=beams&k=columns&k=braces&k=piers&k=reactions[&sel=1]
                                    results as ETABS-style tables (header row, units row, rows);
                                    sel=1: only the members selected in ETABS
@@ -34,7 +36,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.1'
+VERSION = '1.2'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -212,6 +214,20 @@ class Etabs:
         m = self.attach()
         return {'combos': self.names(m.RespCombo, 'RespCombo.GetNameList'), 'cases': self.names(m.LoadCases, 'LoadCases.GetNameList')}
 
+    def building(self, combos):
+        m = self.attach()
+        if not combos:
+            raise BridgeError('Select at least one load combination')
+        cset = set(self.model_info()['combos'])
+        old = m.GetPresentUnits()
+        m.SetPresentUnits(KN_M_C)
+        try:
+            out = building_from_model(m, combos, cset)
+        finally:
+            m.SetPresentUnits(old)
+        out['file'] = m.GetModelFilename(True)
+        return out
+
     def results(self, combos, kinds, only_sel=False):
         m = self.attach()
         sel = self.selected(m) if only_sel else None
@@ -307,6 +323,106 @@ class Etabs:
                                                     ['', '', '', '', '', '', 'kN', 'kN', 'kN', 'kN-m', 'kN-m', 'kN-m']] + rows}
 
 
+def table(m, key):
+    """an ETABS display table (Database Tables API) as a list of dicts, numbers converted"""
+    out = ok(m.DatabaseTables.GetTableForDisplayArray(key, [], 'All', 0, [], 0, []), 'GetTableForDisplayArray ' + key)
+    _fields, _ver, keys, n, data = out[:5]
+    keys = list(keys or [])
+    rows = []
+    for i in range(n or 0):
+        r = {}
+        for j, k in enumerate(keys):
+            v = data[i * len(keys) + j]
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                pass
+            r[k] = v
+        rows.append(r)
+    return rows
+
+
+def pick(r, *names, default=None):
+    for nm in names:
+        if nm in r and r[nm] not in ('', None):
+            return r[nm]
+    return default
+
+
+def building_from_model(m, combos, cset):
+    """global building data in kN, m for the requested combinations / cases"""
+    # stories (bottom-up, base excluded)
+    stories = []
+    try:
+        base, n, names, elev, hgt = ok(m.Story.GetStories_2(0, 0, [], [], [], [], [], [], [], []), 'Story.GetStories_2')[:5]
+    except Exception:
+        n, names, elev, hgt = ok(m.Story.GetStories(0, [], [], [], [], [], [], []), 'Story.GetStories')[:4]
+        base = None
+    for i in range(n):
+        if hgt[i] > 0:
+            stories.append({'name': names[i], 'elev': elev[i], 'h': hgt[i]})
+    stories.sort(key=lambda x: x['elev'])
+    # results through the Results API
+    setup = m.Results.Setup
+    setup.DeselectAllCasesAndCombosForOutput()
+    for c in combos:
+        ok(setup.SetComboSelectedForOutput(c, True) if c in cset else setup.SetCaseSelectedForOutput(c, True), 'select ' + c)
+    drifts = []
+    r = ok(m.Results.StoryDrifts(0, [], [], [], [], [], [], [], [], [], []), 'Results.StoryDrifts')
+    nr, story, case, step, _sn, dirn, drift, label, x, y, _z = r[:11]
+    for i in range(nr):
+        d = str(dirn[i]).upper()
+        drifts.append({'story': story[i], 'combo': case[i], 'step': step[i], 'dir': 'X' if 'X' in d else 'Y', 'drift': abs(drift[i]), 'label': label[i]})
+    base_r = []
+    r = ok(m.Results.BaseReact(0, [], [], [], [], [], [], [], [], [], 0, 0, 0), 'Results.BaseReact')
+    nr, case, step, _sn, FX, FY, FZ, MX, MY, MZ, gx, gy, gz = r[:13]
+    for i in range(nr):
+        base_r.append({'combo': case[i], 'step': step[i], 'FX': FX[i], 'FY': FY[i], 'FZ': FZ[i], 'MX': MX[i], 'MY': MY[i], 'MZ': MZ[i]})
+    # buckling: every buckling load case
+    buck = []
+    try:
+        setup.DeselectAllCasesAndCombosForOutput()
+        bcases = []
+        for c in ok(m.LoadCases.GetNameList(0, []), 'LoadCases.GetNameList')[1] or []:
+            try:
+                if int(ok(m.LoadCases.GetTypeOAPI(c, 0, 0), 'GetTypeOAPI')[0]) == 10:   # eLoadCaseType.Buckling
+                    bcases.append(c)
+                    setup.SetCaseSelectedForOutput(c, True)
+            except BridgeError:
+                pass
+        if bcases:
+            nr, case, _st, num, fac = ok(m.Results.BucklingFactor(0, [], [], [], []), 'Results.BucklingFactor')[:5]
+            buck = [{'case': case[i], 'mode': int(num[i]), 'factor': fac[i]} for i in range(nr)]
+    except BridgeError:
+        pass
+    # storey forces and max / average displacements through the display tables
+    forces, torsion = [], []
+    try:
+        dt = m.DatabaseTables
+        cs = [c for c in combos if c in cset]
+        ks = [c for c in combos if c not in cset]
+        dt.SetLoadCombinationsSelectedForDisplay(cs)
+        dt.SetLoadCasesSelectedForDisplay(ks)
+        for r in table(m, 'Story Forces'):
+            forces.append({'story': pick(r, 'Story'), 'combo': pick(r, 'OutputCase', 'LoadCase'), 'step': pick(r, 'StepType', default=''),
+                           'loc': pick(r, 'Location', default=''), 'P': pick(r, 'P', default=0), 'VX': pick(r, 'VX', default=0), 'VY': pick(r, 'VY', default=0),
+                           'T': pick(r, 'T', default=0), 'MX': pick(r, 'MX', default=0), 'MY': pick(r, 'MY', default=0)})
+        for key in ('Story Max Over Avg Displacements', 'Story Max Over Avg Drifts'):
+            try:
+                rows = table(m, key)
+            except Exception:
+                continue
+            for r in rows:
+                torsion.append({'story': pick(r, 'Story'), 'combo': pick(r, 'OutputCase', 'LoadCase'), 'step': pick(r, 'StepType', default=''),
+                                'dir': 'X' if 'X' in str(pick(r, 'Direction', default='X')).upper() else 'Y',
+                                'max': pick(r, 'Maximum', 'Max', default=0), 'avg': pick(r, 'Average', 'Avg', default=0), 'ratio': pick(r, 'Ratio', default=0)})
+            if torsion:
+                break
+    except Exception as e:
+        print('display tables not available:', e)
+    return {'stories': stories, 'drifts': drifts, 'forces': forces, 'torsion': torsion, 'base': base_r, 'buckling': buck}
+
+
 class Mock:
     """Demo model with the same answers as a live ETABS (for testing without ETABS).
     The selection is B12 on Story3, column C3 on Story1 and support J1."""
@@ -333,7 +449,52 @@ class Mock:
         return {'connected': True, 'etabs': 'mock', 'pid': self.pid, 'file': f, 'analysed': True}
 
     def model_info(self):
-        return {'combos': self.COMBOS, 'cases': ['Dead', 'Live', 'Wind X']}
+        return {'combos': self.COMBOS + ['EQX RS', 'EQY RS', 'G+0.3Q+EX', 'G+0.3Q+EY', 'WX SLS', 'WY SLS'], 'cases': ['Dead', 'Live', 'Wind X', 'Buckling']}
+
+    def building(self, combos):
+        """10-storey RC frame, 3.4 m ground storey + 3.2 m above, 24 x 18 m plan"""
+        if not combos:
+            raise BridgeError('Select at least one load combination')
+        st, z = [], 0.0
+        for i in range(10):
+            h = 3.4 if i == 0 else 3.2
+            z += h
+            st.append({'name': f'Story{i + 1}', 'elev': round(z, 2), 'h': h})
+        W = 9.2 * 24 * 18          # kN per floor (seismic mass, G + 0.3Q)
+        H = st[-1]['elev']
+        lat = {'EQX RS': ('X', 0.075, 1.0), 'EQY RS': ('Y', 0.068, 1.12), 'G+0.3Q+EX': ('X', 0.075, 1.0), 'G+0.3Q+EY': ('Y', 0.068, 1.12),
+               'WX SLS': ('X', 0.012, 0.35), 'WY SLS': ('Y', 0.016, 0.42), 'ULS1 1.35G+1.5Q': (None, 0, 0), 'ULS2 1.35G+1.05Q+1.5W': ('X', 0.018, 0.5)}
+        grav = {'ULS1 1.35G+1.5Q': 1.42, 'ULS2 1.35G+1.05Q+1.5W': 1.3, 'G+0.3Q+EX': 1.0, 'G+0.3Q+EY': 1.0, 'EQX RS': 0, 'EQY RS': 0, 'WX SLS': 0, 'WY SLS': 0,
+                'SLS-CHAR G+Q': 1.1, 'SLS-QP G+0.3Q': 1.0}
+        drifts, forces, torsion, base = [], [], [], []
+        for c in combos:
+            d, cs, k = lat.get(c, (None, 0, 0))
+            g = grav.get(c, 1.0)
+            step = 'Max' if 'RS' in c else ''
+            V = cs * W * len(st)
+            wsum = sum(s['elev'] for s in st)
+            Fi = [V * s['elev'] / wsum for s in st]
+            for i, s in enumerate(st):
+                above = range(i, len(st))
+                Vs = sum(Fi[j] for j in above)
+                Ms = sum(Fi[j] * (st[j]['elev'] - s['elev'] + s['h']) for j in above)
+                P = g * W * len(above) if g else 0
+                prof = 1.25 - 0.55 * (i / (len(st) - 1)) ** 1.3
+                dr = 0.0019 * k * prof * (1.15 if i == 0 else 1)
+                if d:
+                    drifts.append({'story': s['name'], 'combo': c, 'step': step, 'dir': d, 'drift': dr, 'label': '12'})
+                    drifts.append({'story': s['name'], 'combo': c, 'step': step, 'dir': 'Y' if d == 'X' else 'X', 'drift': dr * 0.18, 'label': '12'})
+                    rat = (1.12 if d == 'X' else 1.31) + (0.06 if i < 2 else 0) - 0.008 * i
+                    torsion.append({'story': s['name'], 'combo': c, 'step': step, 'dir': d, 'max': dr * s['elev'] * rat, 'avg': dr * s['elev'], 'ratio': round(rat, 3)})
+                forces.append({'story': s['name'], 'combo': c, 'step': step, 'loc': 'Bottom', 'P': P,
+                               'VX': Vs if d == 'X' else 0.12 * Vs if d else 0, 'VY': Vs if d == 'Y' else 0.12 * Vs if d else 0, 'T': 0.05 * Vs * 24,
+                               'MX': Ms if d == 'Y' else 0, 'MY': Ms if d == 'X' else 0})
+            Mb = sum(Fi[j] * st[j]['elev'] for j in range(len(st)))
+            base.append({'combo': c, 'step': step, 'FX': -V if d == 'X' else 0, 'FY': -V if d == 'Y' else 0, 'FZ': g * W * len(st),
+                         'MX': Mb if d == 'Y' else 0, 'MY': Mb if d == 'X' else 0, 'MZ': 0})
+        buck = [{'case': 'Buckling', 'mode': i + 1, 'factor': f} for i, f in enumerate([8.4, 9.1, 13.7, 21.5, 24.0, 33.2])]
+        return {'file': self.status()['file'], 'stories': st, 'drifts': drifts, 'forces': forces, 'torsion': torsion, 'base': base, 'buckling': buck,
+                'plan': {'Bx': 24, 'By': 18}}
 
     def selection(self):
         return {'items': [{'kind': 'beams', 'story': b[0], 'label': b[1]} for b in self.BEAMS if b[2] in self.SEL['frames']] +
@@ -421,6 +582,8 @@ def make_handler(src, origins):
                     return self.send(200, dict(src.status(), bridge=VERSION))
                 if u.path == '/model':
                     return self.send(200, src.model_info())
+                if u.path == '/building':
+                    return self.send(200, src.building(q.get('c', [])))
                 if u.path == '/results':
                     kinds = [k for k in q.get('k', KINDS) if k in KINDS]
                     return self.send(200, src.results(q.get('c', []), kinds, q.get('sel', ['0'])[0] == '1'))

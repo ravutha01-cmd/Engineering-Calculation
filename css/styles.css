@@ -666,3 +666,29 @@ a.badge:hover { border-color: var(--ok-ink); }
 .etc-it span { flex: 1; min-width: 0; }
 .etc-it small { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .etc-it input { accent-color: var(--accent); }
+
+/* Building checks (ETABS) */
+.bc-sums { margin-bottom: 16px; }
+.bc-sum { padding: 14px 16px; text-decoration: none; color: inherit; transition: border-color .15s; }
+.bc-sum:hover { border-color: var(--accent); }
+.bc-sum .label { color: var(--ink-2); font-size: 12px; }
+.bc-sum .value { font-size: 26px; font-weight: 700; margin: 4px 0; font-variant-numeric: tabular-nums; }
+.bc-sum .foot { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.bc-card { margin-top: 16px; scroll-margin-top: 16px; }
+.bc-split { display: grid; grid-template-columns: minmax(260px, 380px) minmax(0, 1fr); gap: 8px 18px; align-items: start; padding: 0 16px 14px; }
+.bc-split.two { grid-template-columns: repeat(2, minmax(0, 380px)); }
+.bc-chart { margin: 0; }
+.bc-chart svg { width: 100%; height: auto; display: block; }
+.bc-chart .ax { font-size: 10px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.bc-chart .ax.lim { fill: var(--ink-2); }
+.bc-chart .pt:hover circle:first-child { r: 6; }
+.bc-chart .legend { margin-top: 4px; }
+.bc-pad { padding: 0 16px 14px; margin: 0; font-size: 12.5px; }
+.bc-verdict { margin: 12px 16px 16px; padding: 10px 14px; border-radius: 8px; font-size: 13px; }
+.bc-verdict.ok { background: var(--ok-bg); color: var(--ok-ink); }
+.bc-verdict.bad { background: var(--bad-bg); color: var(--bad-ink); }
+.bc-inputs { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px 16px; padding: 0 16px 16px; }
+.bc-in { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-2); }
+.bc-in input, .bc-in select { background: var(--input-bg); border-color: var(--input-border); }
+.bc-in small { color: var(--muted); font-size: 11px; }
+@media (max-width: 900px) { .bc-split, .bc-split.two { grid-template-columns: minmax(0, 1fr); } }

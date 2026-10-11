@@ -123,6 +123,17 @@
     if (i.kind === 'str') return ov ? ov[1] : i.v;
     return '';
   }
+  // edited input: show the worksheet value and a one-click reset for this input only
+  const wasHTML = i => `<div class="was">Mathcad: <b>${esc(inputText(i, undefined))}</b><button type="button" class="was-reset" data-mreset1="${esc(i.n)}" title="Back to the worksheet value" aria-label="Reset ${esc(i.l || i.n)} to the worksheet value">${api.ic('undo')}Reset</button></div>`;
+  // live typing does not re-render the input card: keep the "N edited" badge in step
+  function syncEditBadge(e) {
+    const head = document.querySelector('.card.inputs .inp-head'); if (!head) return;
+    const n = Object.keys(e.inputs || {}).length;
+    let bd = head.querySelector('.n-edit');
+    if (!n) { if (bd) bd.remove(); return; }
+    if (!bd) { bd = document.createElement('span'); bd.className = 'badge n-edit'; head.querySelector('.badge').after(bd); }
+    bd.textContent = n + ' edited';
+  }
   function matOf(i, ov) {
     let a = ov !== undefined ? ov : null;
     let M = i.v;
@@ -144,12 +155,13 @@
       const o = ov[i.n];
       const edited = (o !== undefined ? ' edited' : '') + ((i.l || '').length > 26 && i.kind !== 'num' ? ' lab-top' : '');
       const lab = `<span class="fl" title="${esc(i.l || i.n)}">${esc(i.l || i.n)} ${sym(i.n)}</span>`;
+      const was = o !== undefined ? wasHTML(i) : '';
       if (i.kind === 'combo') {
         const k = o !== undefined ? o : i.v;
-        return `<div class="field wide${edited}">${lab}<select data-mi="${esc(i.n)}">${(i.opts || []).map((n, j) => `<option value="${j}" ${j === k ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></div>`;
+        return `<div class="field wide${edited}">${lab}<select data-mi="${esc(i.n)}">${(i.opts || []).map((n, j) => `<option value="${j}" ${j === k ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>${was}</div>`;
       }
-      if (i.kind === 'str') return `<div class="field wide${edited}">${lab}<input data-mi="${esc(i.n)}" data-kind="str" value="${esc(o ? o[1] : i.v)}"></div>`;
-      if (i.kind === 'num') return `<div class="field${edited}">${lab}<input data-mi="${esc(i.n)}" data-kind="num" type="number" step="any" inputmode="decimal" value="${esc(numOf(i, o))}"><span class="fu">${esc(i.u ? R.unitText(i.u) : '')}</span></div>`;
+      if (i.kind === 'str') return `<div class="field wide${edited}">${lab}<input data-mi="${esc(i.n)}" data-kind="str" value="${esc(o ? o[1] : i.v)}">${was}</div>`;
+      if (i.kind === 'num') return `<div class="field${edited}">${lab}<input data-mi="${esc(i.n)}" data-kind="num" type="number" step="any" inputmode="decimal" value="${esc(numOf(i, o))}"><span class="fu">${esc(i.u ? R.unitText(i.u) : '')}</span>${was}</div>`;
       return '';
     };
     const table = cols => {
@@ -455,7 +467,7 @@
         <div><label>Designer</label><input data-m="assignee" value="${esc(e.assignee || '')}"></div>
       </div></div>
       <div class="editor">
-        <div class="card inputs"><div class="inp-head"><b>Input data</b><span class="badge" style="background:var(--input-bg);border-color:var(--input-border)">yellow regions</span>${nEdit ? `<span class="badge">${nEdit} edited</span>` : ''}<button class="btn sm" style="margin-left:auto" data-mreset title="Restore the worksheet values">Defaults</button></div>${inputsHTML(e, doc)}</div>
+        <div class="card inputs"><div class="inp-head"><b>Input data</b><span class="badge" style="background:var(--input-bg);border-color:var(--input-border)">yellow regions</span>${nEdit ? `<span class="badge n-edit">${nEdit} edited</span>` : ''}<button class="btn sm" style="margin-left:auto" data-mreset title="Restore the worksheet values">Defaults</button></div>${inputsHTML(e, doc)}</div>
         <div id="out">${vOutput(e)}</div>
       </div>`;
   }
@@ -554,8 +566,13 @@
       else if (i.kind === 'str') v = ['s', t.value];
       else { const x = parseFloat(t.value); if (!Number.isFinite(x)) return; v = i.u ? ['o', '*', x, i.u] : x; }
       if (JSON.stringify(v) === JSON.stringify(i.kind === 'combo' ? i.v : i.kind === 'str' ? ['s', i.v] : i.u ? ['o', '*', i.v, i.u] : i.v)) delete e.inputs[i.n]; else e.inputs[i.n] = v;
-      t.closest('.field') && t.closest('.field').classList.toggle('edited', e.inputs[i.n] !== undefined);
-      changed(e); return;
+      const f = t.closest('.field');
+      if (f) {
+        const ed = e.inputs[i.n] !== undefined, w = f.querySelector('.was');
+        f.classList.toggle('edited', ed);
+        if (ed && !w) f.insertAdjacentHTML('beforeend', wasHTML(i)); else if (!ed && w) w.remove();
+      }
+      syncEditBadge(e); changed(e); return;
     }
     if (t.dataset.mc !== undefined) {
       const i = inputDef(e, t.dataset.mc); if (!i) return;
@@ -565,7 +582,7 @@
       if (typeof old === 'number' || t.type === 'number') { v = parseFloat(v); if (!Number.isFinite(v)) return; }
       m.cells[+t.dataset.r * m.c + +t.dataset.c] = v;
       e.inputs = e.inputs || {}; e.inputs[i.n] = matAst(i, m.r, m.c, m.cells);
-      changed(e);
+      syncEditBadge(e); changed(e);
     }
   });
   document.addEventListener('change', ev => {
@@ -573,7 +590,7 @@
     if (t.dataset.wopt) { opts[t.dataset.wopt] = t.checked; try { localStorage.setItem('cambo.wsopts', JSON.stringify(opts)); } catch (x) { /* ignore */ } const e = curEl(); if (e) refresh(e); }
   });
   document.addEventListener('click', ev => {
-    const t = ev.target.closest('[data-mtab],[data-mradd],[data-mrdel],[data-mreset],[data-mrec],[data-mrestore],[data-mrecdel]');
+    const t = ev.target.closest('[data-mtab],[data-mradd],[data-mrdel],[data-mreset1],[data-mreset],[data-mrec],[data-mrestore],[data-mrecdel]');
     if (!t) return;
     const e = curEl(); if (!e) return;
     const d = t.dataset;
@@ -594,6 +611,15 @@
         e.inputs[n] = matAst(i, m.r, m.c, m.cells);
       });
       e.u = Date.now(); api.save(); api.render(); return;
+    }
+    if (d.mreset1) {
+      if (e.inputs) delete e.inputs[d.mreset1];
+      // keep the input card's scroll and put focus back on the reset input
+      const box = document.querySelector('.inputs'), y = box ? box.scrollTop : 0;
+      e.u = Date.now(); api.save(); api.render();
+      const nb = document.querySelector('.inputs'); if (nb) nb.scrollTop = y;
+      const f = document.querySelector(`[data-mi="${CSS.escape(d.mreset1)}"]`); if (f) f.focus({ preventScroll: true });
+      return;
     }
     if (d.mreset !== undefined) {
       api.modal('Restore worksheet values', `<p>Replace all inputs of <b>${esc(e.mark)}</b> with the values saved in the Mathcad worksheet? Save a record first if you want to keep the current set.</p>`, () => { e.inputs = {}; e.u = Date.now(); api.save(); api.render(); }, 'Restore');

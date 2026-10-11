@@ -509,3 +509,11 @@ kbd { font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 
 @media (max-width: 760px) { .search-btn { min-width: 0; padding: 0 10px; } .search-btn span, .search-btn kbd, .cmdk-foot { display: none; } .cmdk-bg { padding-top: 8px; } }
 @media (max-width: 1200px) { .search-btn { min-width: 0; padding: 0 10px; flex: none; } .search-btn span, .search-btn kbd { display: none; } }
 @media (max-width: 1000px) { .brand { min-width: 0; flex: none; } .brand > div:last-child { display: none; } }
+
+/* edited input: worksheet value + reset */
+.field .was { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: -2px; font-size: 11px; color: var(--muted); }
+.field .was b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.was-reset { display: inline-flex; align-items: center; gap: 3px; border: 0; background: none; padding: 2px 4px; border-radius: 4px; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
+.was-reset:hover, .was-reset:focus-visible { background: var(--accent-soft); outline: none; }
+.was-reset svg { width: 12px; height: 12px; }
+@media print { .field .was { display: none; } }

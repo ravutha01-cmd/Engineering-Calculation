@@ -508,4 +508,4 @@ kbd { font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 
 .cmdk-foot kbd { margin-right: 3px; }
 @media (max-width: 760px) { .search-btn { min-width: 0; padding: 0 10px; } .search-btn span, .search-btn kbd, .cmdk-foot { display: none; } .cmdk-bg { padding-top: 8px; } }
 @media (max-width: 1200px) { .search-btn { min-width: 0; padding: 0 10px; flex: none; } .search-btn span, .search-btn kbd { display: none; } }
-@media (max-width: 1000px) { .brand { min-width: 0; } .brand > div:last-child { display: none; } }
+@media (max-width: 1000px) { .brand { min-width: 0; flex: none; } .brand > div:last-child { display: none; } }

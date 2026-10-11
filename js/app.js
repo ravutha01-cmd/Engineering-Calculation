@@ -494,7 +494,8 @@
     const score = (it, w) => { const t = it.t.toLowerCase(), all = (it.t + ' ' + (it.s || '') + ' ' + it.g).toLowerCase(); let sc = 0; for (const x of w) { if (t.startsWith(x)) sc += 3; else if (t.includes(x)) sc += 2; else if (all.includes(x)) sc += 1; else return -1; } return sc; };
     const draw = () => {
       const w = q.value.toLowerCase().split(/\s+/).filter(Boolean);
-      shown = w.length ? items.map(it => ({ it, sc: score(it, w) })).filter(x => x.sc >= 0).sort((a, b) => b.sc - a.sc).map(x => x.it).slice(0, 60) : items.filter(it => it.g !== 'New element').slice(0, 40);
+      const r = items.map(it => ({ it, sc: score(it, w) })).filter(x => x.sc >= 0).sort((a, b) => b.sc - a.sc), gs = [...new Set(r.map(x => x.it.g))];   // groups ordered by their best match, so each header appears once
+      shown = w.length ? r.sort((a, b) => gs.indexOf(a.it.g) - gs.indexOf(b.it.g)).map(x => x.it).slice(0, 60) : items.filter(it => it.g !== 'New element').slice(0, 40);
       sel = Math.min(sel, Math.max(0, shown.length - 1));
       let last = '';
       list.innerHTML = shown.length ? shown.map((it, i) => { const h = it.g !== last ? `<div class="cmdk-g">${esc(it.g)}</div>` : ''; last = it.g; return `${h}<div class="cmdk-it${i === sel ? ' sel' : ''}" data-i="${i}" role="option" aria-selected="${i === sel}">${ic(it.ic)}<b>${esc(it.t)}</b>${it.s ? `<small>${esc(it.s)}</small>` : ''}${it.b ? pill(it.b) : ''}</div>`; }).join('') : `<div class="cmdk-empty">No match for “${esc(q.value)}”</div>`;

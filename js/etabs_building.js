@@ -255,6 +255,18 @@
       const L = dir === 'X' ? +s.By : +s.Bx, e = 0.05 * L;
       st.forEach((x, i) => { const F = Math.max(0, V[i] - (i + 1 < st.length ? V[i + 1] : 0)); out.acc.rows.push({ story: x.name, z: x.elev, dir, combo: c[0], F, L, e, M: e * F }); });
     });
+    // 13. wind comfort - peak along-wind acceleration at the top (EN 1991-1-4 Annex B.4) by the user's worksheet
+    //     Wind_TallBuilding, fed with the ETABS building: height, plan, storeys, density from the storey masses,
+    //     n_1 = 1/T of the first translational mode in the wind direction, base shear / moment of the wind cases
+    out.wc = [];
+    const mt = (d.masses || []).reduce((a, r) => a + Math.max(+r.mx || 0, +r.my || 0), 0);
+    ['X', 'Y'].forEach(dir => {
+      const m1 = mdP.find(r => domOf(r) === dir); if (!m1 || !(m1.T > 0)) return;
+      const bw = dir === 'X' ? +s.By : +s.Bx, dw = dir === 'X' ? +s.Bx : +s.By;
+      const wb = d.base.filter(r => role(r.combo) === 'wind'), Vas = Math.max(0, ...wb.map(r => Math.abs(dir === 'X' ? r.FX : r.FY))), Mas = Math.max(0, ...wb.map(r => Math.abs(dir === 'X' ? r.MY : r.MX)));
+      const wcase = wb.filter(r => Math.abs(dir === 'X' ? r.FX : r.FY) === Vas).map(r => r.combo)[0] || '';
+      out.wc.push({ dir, H, bw, dw, nst: st.length, rho: mt > 0 && H > 0 ? mt * 1000 / (bw * dw * H) : null, n1: 1 / m1.T, mode: m1.mode, Vas: Vas > 0 ? Vas : null, Mas: Mas > 0 ? Mas : null, wcase });
+    });
     return out;
   }
 
@@ -477,6 +489,43 @@
       <figcaption class="legend">${series.map(s => `<span><i style="background:var(${s.c})"></i>${esc(s.n)}</span>`).join('')}${opt.limit ? '<span>┆ limit</span>' : ''}</figcaption></figure>`;
   }
 
+  /* ---------- wind comfort worksheets (one ETABS-linked Wind_TallBuilding element per direction) ---------- */
+  const WT = 'mc:Wind_TallBuilding_EC1-2023_Standalone', WTID = 'Wind_TallBuilding_EC1-2023_Standalone';
+  const wcEl = dir => api.proj().elements.find(e => e.type === WT && e.etabs && e.etabs.story === 'Building' && e.etabs.label === 'Wind ' + dir);
+  const wcPending = new Set();
+  function wcResult(e) {
+    if (!e) return null;
+    const h = JSON.stringify(e.inputs || {});
+    if ((!e.res || e.res.h !== h) && EC.mcui && !wcPending.has(e.id)) { wcPending.add(e.id); EC.mcui.ensure(e).then(() => { wcPending.delete(e.id); api.render(); }, () => wcPending.delete(e.id)); }
+    if (!e.res || e.res.h !== h) return { pending: true };
+    if (e.res.error) return { error: e.res.error };
+    const row = (e.res.rows || []).find(x => /comfort/i.test(x.item)), key = n => ((e.res.keys || []).find(k => k[0] === n) || [])[1];
+    const other = (e.res.rows || []).filter(x => x !== row && Number.isFinite(x.U) && x.U > 1 + 1e-9).map(x => ({ item: x.item, U: x.U }));
+    return { U: row ? row.U : null, st: row ? row.st : '', a: key('a_peak'), Umax: e.res.Umax, other };
+  }
+  function wcWrite(b, R) {
+    const p = api.proj();
+    return EC.mcui.loadSheet(WTID).then(doc => {
+      const I = {}; (doc.inputs || []).forEach(i => { I[i.n] = i; });
+      const u = (n, v) => (I[n] && I[n].u ? ['o', '*', Math.round(v * 1000) / 1000, I[n].u] : v);
+      let nNew = 0, nUpd = 0;
+      R.wc.forEach(w => {
+        const inp = { h_b: u('h_b', w.H), b_w: u('b_w', w.bw), d_w: u('d_w', w.dw), n_st: w.nst, F_meth: 1, n_1u: u('n_1u', w.n1), ID: ['s', `${b.file || 'ETABS building'} - wind ${w.dir}`] };
+        if (w.rho) inp['ρ_bld'] = u('ρ_bld', w.rho);
+        if (w.Vas) inp.V_as = u('V_as', w.Vas);
+        if (w.Mas) inp.M_as = u('M_as', w.Mas);
+        const link = { file: b.file || '', table: 'Building checks', story: 'Building', label: 'Wind ' + w.dir, combo: w.wcase, at: Date.now(), cases: [] };
+        let e = wcEl(w.dir);
+        if (e) { e.inputs = Object.assign(e.inputs || {}, inp); e.etabs = link; e.u = Date.now(); nUpd++; }   // the user's wind data (v_b,0, terrain, damping, limit) are kept
+        else {
+          e = { id: api.uid(), type: WT, mark: 'WIND-' + w.dir, level: 'Building', grid: 'ETABS building', qty: 1, status: 'In design', start: api.today(), due: api.addDays(api.today(), 14), assignee: p.engineer || '', inputs: inp, etabs: link };
+          p.elements.push(e); nNew++;
+        }
+      });
+      api.save(); return { nNew, nUpd };
+    });
+  }
+
   /* ---------- page ---------- */
   const okTag = U => U <= 1 + 1e-9 ? '<span class="res ok">✓ OK</span>' : '<span class="res bad">✗ Revise</span>';
   function view() {
@@ -517,6 +566,7 @@
       ${sumCard('base', 'Overturning', R.base.some(x => Number.isFinite(x.fos)) ? oU : null, 'required ÷ provided safety')}
       ${sumCard('modal', 'Modal mass participation', R.modal ? R.modal.U : null, R.modal ? `ΣU<sub>X</sub> ${fmt(R.modal.sum.X * 100, 1)} % · ΣU<sub>Y</sub> ${fmt(R.modal.sum.Y * 100, 1)} % · T<sub>1</sub> ${fmt(R.modal.T1, 2)} s` : '')}
       ${R.soft.length ? sumCard('soft', 'Soft storey k<sub>i</sub>/k<sub>i+1</sub>', Umax(R.soft), (() => { const w = R.soft.filter(r => r.r1 != null).reduce((a, r) => (!a || r.r1 < a.r1 ? r : a), null); return w ? `min ${fmt(w.r1, 2)} at ${esc(w.story)} ${w.dir} (0.7)` : ''; })()) : ''}
+      ${(() => { const rs = R.wc.map(w => wcResult(wcEl(w.dir))).filter(x => x && x.U != null); return R.wc.length ? sumCard('wcomf', 'Wind comfort a<sub>peak</sub>/a<sub>lim</sub>', rs.length ? Math.max(...rs.map(x => x.U)) : null, rs.length ? `top acceleration ${R.wc.map(w => { const x = wcResult(wcEl(w.dir)); return w.dir + ' ' + (x && x.a ? x.a : '–'); }).join(' · ')}` : '') : ''; })()}
       ${R.acc.cases.some(c => c.U != null) ? sumCard('acc', 'Accidental eccentricity 0.05 / e', Umax(R.acc.cases), R.acc.cases.map(c => `${esc(c.case)} ${c.ecc != null ? fmt(c.ecc, 3) : '–'}`).join(' · ')) : ''}
       ${R.plan.length ? sumCard('plan', 'Torsional radius e<sub>0</sub>/0.3r · l<sub>s</sub>/r', Umax(R.plan), `r<sub>x</sub>/l<sub>s</sub> = ${fmt(R.planModes.rho.X, 2)} · r<sub>y</sub>/l<sub>s</sub> = ${fmt(R.planModes.rho.Y, 2)} (≥ 1)`) : ''}
       ${R.mass.length ? sumCard('mass', 'Mass irregularity m<sub>i</sub>/m<sub>adj</sub>', Umax(R.mass), (() => { const w = R.mass.reduce((a, r) => (r.ratio != null && (!a || r.ratio > a.ratio) ? r : a), null); return w ? `max ${fmt(w.ratio, 2)} at ${esc(w.story)} (1.5)` : ''; })()) : ''}
@@ -573,6 +623,16 @@
         ${tbl([['Storey', r => esc(r.story)], ['Dir.', r => r.dir], ['V<sub>i</sub> kN', r => fmt(r.V, 0), 'num'], ['d<sub>r</sub> mm', r => fmt(r.d * 1000, 2), 'num'], ['k<sub>i</sub> kN/m', r => r.k ? fmt(r.k, 0) : '–', 'num'], ['k<sub>i</sub>/k<sub>i+1</sub>', r => r.r1 != null ? fmt(r.r1, 2) : '–', 'num'], ['k<sub>i</sub>/k̄<sub>3 above</sub>', r => r.r3 != null ? fmt(r.r3, 2) : '–', 'num'], ['Class', r => esc(r.cls)], ['U', r => r.r1 != null ? api.ubar(r.U) : '']], top(R.soft))}</div>
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(r => `${esc(r.story)} ${r.dir}: ${esc(r.cls).toLowerCase()} (k<sub>i</sub>/k<sub>i+1</sub> = ${fmt(r.r1, 2)})`).join(' · ')} → the building is not regular in elevation (EN 1998-1 4.2.3.1): use the modal response spectrum analysis (Table 4.1) and reduce q<sub>0</sub> by 20 % (5.2.2.2(3)); better, stiffen the soft storey.` : 'Stiffness constant or reducing gradually upwards in X and Y: regular in elevation for the stiffness criterion (EN 1998-1 4.2.3.3(3)).'}</div>
         <p class="muted bc-pad">k<sub>i</sub> from the seismic case with the largest base shear in each direction (storey shear and storey drift of the same case). EN 1998-1 gives the criterion without numbers; the ASCE 7 limits are a common quantification.</p>`);
+    }
+    if (R.wc.length) {
+      const rows = R.wc.map(w => Object.assign({}, w, { e: wcEl(w.dir) })).map(w => Object.assign(w, { r: wcResult(w.e) }));
+      const done = rows.filter(w => w.r && w.r.U != null), bad = done.filter(w => w.r.U > 1 + 1e-9);
+      html += card('wcomf', 'Wind comfort: peak acceleration at the top', 'EN 1991-1-4 Annex B.4 · ISO 10137', 'a<sub>peak</sub> = k<sub>p</sub>·σ<sub>a,x</sub> (B.10) for the comfort return period ≤ a<sub>lim</sub> · computed by the worksheet Wind_TallBuilding with the ETABS building',
+        `${tbl([['Dir.', w => w.dir], ['h m', w => fmt(w.H, 1), 'num'], ['b across m', w => fmt(w.bw, 1), 'num'], ['d along m', w => fmt(w.dw, 1), 'num'], ['Storeys', w => w.nst, 'num'], ['ρ<sub>bld</sub> kg/m³', w => (w.rho ? fmt(w.rho, 0) : '<small class="muted">worksheet</small>'), 'num'], ['n<sub>1</sub> Hz', w => `${fmt(w.n1, 3)} <small class="muted">mode ${w.mode}</small>`, 'num'], ['V<sub>wind</sub> kN', w => (w.Vas ? fmt(w.Vas, 0) : '–'), 'num'], ['Calculation', w => (w.e ? `<a class="mark" style="cursor:pointer" data-open="${w.e.id}">${esc(w.e.mark)}</a>` : '<small class="muted">not created</small>')], ['a<sub>peak</sub>', w => (w.r && w.r.a ? esc(w.r.a) : w.r && w.r.pending ? '<small class="muted">computing…</small>' : '–'), 'num'], ['U', w => (w.r && w.r.U != null ? api.ubar(w.r.U) : '')]], rows)}
+        <div class="etabs-btns" style="padding:12px 16px"><button class="btn primary" data-bc="wcomf">${ic('calc')}${rows.some(w => w.e) ? 'Update the wind calculations from ETABS' : 'Create the wind calculations from ETABS'}</button><small class="muted">One Wind_TallBuilding worksheet per direction, linked to ETABS; your wind data (v<sub>b,0</sub>, terrain, damping δ<sub>s</sub>, T<sub>comf</sub>, a<sub>lim</sub>) are set in the worksheet and kept on update.</small></div>
+        ${done.length ? `<div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(w => `${w.dir}: a<sub>peak</sub> = ${esc(w.r.a)} &gt; a<sub>lim</sub> (U = ${fmt(w.r.U, 2)})`).join(' · ')} → occupants will perceive the motion: stiffen (raise n<sub>1</sub>), add mass or damping (tuned mass damper), or confirm with a wind-tunnel study.` : `Peak top acceleration within the comfort limit in ${done.map(w => w.dir).join(' and ')} (${done.map(w => w.dir + ': ' + esc(w.r.a)).join(', ')}).`}</div>` : ''}
+        ${rows.some(w => w.r && w.r.other && w.r.other.length) ? `<div class="bc-verdict bad">The worksheet also flags: ${rows.filter(w => w.r && w.r.other && w.r.other.length).map(w => w.dir + ': ' + w.r.other.map(x => `${esc(x.item)} = ${fmt(x.U, 2)}`).join(', ')).join(' · ')}${rows.some(w => w.r && w.r.other && w.r.other.some(x => /shear|moment/i.test(x.item))) ? ' - the wind base shear / moment in ETABS is lower than the dynamic wind of EN 1991-1-4 (c<sub>s</sub>c<sub>d</sub>, q<sub>p</sub>): check the ETABS wind load patterns.' : ''}</div>` : ''}
+        <p class="muted bc-pad">From ETABS: height, storeys, plan (B<sub>x</sub>, B<sub>y</sub> above), ρ<sub>bld</sub> = Σm / (B<sub>x</sub>·B<sub>y</sub>·h) from the storey masses, n<sub>1</sub> = 1/T of the first mode in the wind direction, the largest base shear / moment of the Wind SLS cases as V<sub>as</sub> / M<sub>as</sub>. The worksheet computes q<sub>p</sub>, c<sub>s</sub>c<sub>d</sub>, the along-wind acceleration for T<sub>comf</sub> (common practice 1-10 years) and the vortex-shedding screening; limits for a 10-year return: residential 0.15, hotel 0.18, office 0.25 m/s² (ISO 10137 / CTBUH guidance, as in the worksheet). Across-wind and torsional accelerations: worksheet Wind_AcrossTorsion.</p>`);
     }
     if (R.acc.rows.length || R.acc.cases.length) {
       const A = R.acc, bad = A.cases.filter(c => c.U != null && c.U > 1 + 1e-9), unk = A.cases.filter(c => c.ecc == null), dirs = [...new Set(A.rows.map(r => r.dir))];
@@ -668,6 +728,10 @@
           else if (m.e.pdelta) { Object.assign(m.e.inputs, m.e.pdelta.base); delete m.e.pdelta; m.e.u = Date.now(); }
         });
         api.save(); api.toast(d.bc === 'amp' ? `P-Δ amplification applied to ${n} member(s)` : `P-Δ amplification removed from ${n} member(s)`); return rer();
+      }
+      if (d.bc === 'wcomf') {
+        const R = compute(b); if (!R || !R.wc.length || !EC.mcui) return;
+        return wcWrite(b, R).then(n => { api.toast(`Wind calculations: ${n.nNew} created, ${n.nUpd} updated from ETABS`); rer(); }, e => api.toast('Could not load the worksheet: ' + e.message));
       }
       if (d.bcrole !== undefined) { b.roles[d.bcrole] = ROLE_ORDER[(ROLE_ORDER.indexOf(b.roles[d.bcrole] || 'off') + 1) % ROLE_ORDER.length]; api.save(); return rer(); }
       if (d.bc === 'read') {

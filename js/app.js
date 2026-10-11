@@ -812,7 +812,7 @@
     chrome(route());
   };
   EC.etabs.install({ proj, save, toast, modal, ic, fmt, ubar, uid, today, addDays, render: () => render() });
-  EC.building.install({ proj, save, toast, ic, fmt, ubar, render: () => render() });
+  EC.building.install({ proj, save, toast, ic, fmt, ubar, uid, today, addDays, render: () => render() });
   EC.loads.install({ proj, save, toast, ic, fmt, render: () => render() });
   EC.mcui.install({
     MOD, STATUS, proj, save, toast, modal, ic, fmt, ubar, route, catName: k => (CATS.find(c => c.k === k) || {}).l || k,

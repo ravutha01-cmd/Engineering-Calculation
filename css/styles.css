@@ -517,3 +517,4 @@ kbd { font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 
 .was-reset:hover, .was-reset:focus-visible { background: var(--accent-soft); outline: none; }
 .was-reset svg { width: 12px; height: 12px; }
 @media print { .field .was { display: none; } }
+@media (pointer: coarse) { .was-reset { padding: 8px 10px; margin: -6px -6px -6px 0; } }

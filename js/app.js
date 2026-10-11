@@ -475,6 +475,51 @@
   }
   window.addEventListener('hashchange', render);
 
+  /* ---------------- quick search (Ctrl+K / "/") ---------------- */
+  function palette() {
+    if ($('.cmdk-bg')) return;
+    const p = proj(), go = h => () => { location.hash = h; };
+    const items = [];
+    p.elements.forEach(e => items.push({ g: 'Elements', t: e.mark, s: typeName(e.type) + (e.level ? ' · ' + e.level : '') + (e.grid ? ' · ' + e.grid : ''), b: e.status, ic: (CATS.find(c => MOD[e.type] && c.k === MOD[e.type].cat) || {}).icon || 'layers', run: () => { activeTab = 'summary'; location.hash = '#/el/' + e.id; } }));
+    [['dashboard', 'dashboard', 'Dashboard'], ['elements', 'layers', 'All elements']].concat(CATS.map(c => ['elements/' + c.k, c.icon, c.l]), [['schedules', 'table', 'Element schedules'], ['programme', 'gantt', 'Design programme'], ['library', 'book', 'Mathcad library'], ['project', 'gear', 'Project settings']])
+      .forEach(([h, i, l]) => items.push({ g: 'Go to', t: l, ic: i, run: go('#/' + h) }));
+    CATS.forEach(c => c.types.forEach(t => items.push({ g: 'New element', t: 'New ' + typeName(t), s: c.l, ic: 'plus', run: () => createEl(t) })));
+    items.push({ g: 'Actions', t: 'Toggle light / dark mode', ic: 'moon', run: () => $('#themeBtn').click() });
+    if (!DEMO) items.push({ g: 'Actions', t: 'Export all projects (JSON)', ic: 'download', run: () => $('#btnExport').click() });
+    const bg = document.createElement('div'); bg.className = 'modal-bg cmdk-bg';
+    bg.innerHTML = `<div class="cmdk" role="dialog" aria-modal="true" aria-label="Quick search"><div class="cmdk-in">${ic('search')}<input id="cmdkQ" placeholder="Search elements, pages, new element types…" autocomplete="off" spellcheck="false"><kbd>Esc</kbd></div><div class="cmdk-list" role="listbox"></div><div class="cmdk-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span><span><kbd>Ctrl</kbd><kbd>K</kbd> or <kbd>/</kbd> anywhere</span></div></div>`;
+    document.body.appendChild(bg);
+    const q = $('#cmdkQ', bg), list = $('.cmdk-list', bg);
+    let shown = [], sel = 0;
+    const score = (it, w) => { const t = it.t.toLowerCase(), all = (it.t + ' ' + (it.s || '') + ' ' + it.g).toLowerCase(); let sc = 0; for (const x of w) { if (t.startsWith(x)) sc += 3; else if (t.includes(x)) sc += 2; else if (all.includes(x)) sc += 1; else return -1; } return sc; };
+    const draw = () => {
+      const w = q.value.toLowerCase().split(/\s+/).filter(Boolean);
+      shown = w.length ? items.map(it => ({ it, sc: score(it, w) })).filter(x => x.sc >= 0).sort((a, b) => b.sc - a.sc).map(x => x.it).slice(0, 60) : items.filter(it => it.g !== 'New element').slice(0, 40);
+      sel = Math.min(sel, Math.max(0, shown.length - 1));
+      let last = '';
+      list.innerHTML = shown.length ? shown.map((it, i) => { const h = it.g !== last ? `<div class="cmdk-g">${esc(it.g)}</div>` : ''; last = it.g; return `${h}<div class="cmdk-it${i === sel ? ' sel' : ''}" data-i="${i}" role="option" aria-selected="${i === sel}">${ic(it.ic)}<b>${esc(it.t)}</b>${it.s ? `<small>${esc(it.s)}</small>` : ''}${it.b ? pill(it.b) : ''}</div>`; }).join('') : `<div class="cmdk-empty">No match for “${esc(q.value)}”</div>`;
+      const el = $('.cmdk-it.sel', list); if (el) el.scrollIntoView({ block: 'nearest' });
+    };
+    const close = () => bg.remove();
+    const run = i => { const it = shown[i]; if (!it) return; close(); it.run(); };
+    q.oninput = () => { sel = 0; draw(); };
+    q.onkeydown = ev => {
+      if (ev.key === 'ArrowDown') { sel = Math.min(sel + 1, shown.length - 1); draw(); ev.preventDefault(); }
+      else if (ev.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); draw(); ev.preventDefault(); }
+      else if (ev.key === 'Enter') { run(sel); ev.preventDefault(); }
+      else if (ev.key === 'Escape') close();
+    };
+    list.onclick = ev => { const r = ev.target.closest('[data-i]'); if (r) run(+r.dataset.i); };
+    list.onmousemove = ev => { const r = ev.target.closest('[data-i]'); if (r && +r.dataset.i !== sel) { sel = +r.dataset.i; $$('.cmdk-it', list).forEach(x => x.classList.toggle('sel', +x.dataset.i === sel)); } };
+    bg.addEventListener('click', ev => { if (ev.target === bg) close(); });
+    draw(); q.focus();
+  }
+  document.addEventListener('keydown', ev => {
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((ev.target.tagName || '')) || ev.target.isContentEditable;
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ev.preventDefault(); palette(); }
+    else if (ev.key === '/' && !typing && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { ev.preventDefault(); palette(); }
+  });
+
   /* ---------------- actions ---------------- */
   function addElement(catKey, onlyType) {
     if (onlyType) return createEl(onlyType);
@@ -599,6 +644,7 @@
   $('#menuBtn').onclick = () => $('#app').classList.toggle('nav-open');
   $('#btnExport').innerHTML = ic('download') + 'Export';
   $('#btnImport').innerHTML = ic('upload') + 'Import';
+  $('#searchBtn').onclick = palette;
   $('#btnExport').onclick = () => download(`cambo-struct-projects-${today()}.json`, JSON.stringify(DB, null, 1), 'application/json');
   $('#btnImport').onclick = () => $('#fileImport').click();
   $('#fileImport').onchange = ev => {

@@ -22,6 +22,42 @@
     return 'off';
   }
 
+  /* ---------- demo building (sample ETABS results, no ETABS needed) ----------
+   * 10-storey RC frame-wall building, 24 × 18 m, ground storey 3.4 m + 9 × 3.2 m, 9.2 kN/m² seismic mass.
+   * Tuned so every check has something to show: θ between 0.1 and 0.2 in the lower storeys (P-Δ amplification),
+   * torsional irregularity in Y, αcr = 8.4 (sway amplification), 93 % modal mass. */
+  const DEMO_ROLES = { 'EQX RS': 'seis', 'EQY RS': 'seis', 'G+0.3Q+EX': 'seis', 'G+0.3Q+EY': 'seis', 'WX SLS': 'wind', 'WY SLS': 'wind', 'ULS1 1.35G+1.5Q': 'uls', 'ULS2 1.35G+1.05Q+1.5W': 'uls', 'SLS-CHAR G+Q': 'off', 'SLS-QP G+0.3Q': 'off' };
+  function demoBuilding() {
+    const st = []; let z = 0;
+    for (let i = 0; i < 10; i++) { const h = i ? 3.2 : 3.4; z += h; st.push({ name: 'Story' + (i + 1), elev: Math.round(z * 100) / 100, h }); }
+    const W = 9.2 * 24 * 18, n = st.length;
+    const lat = { 'EQX RS': ['X', 0.045, 1.0], 'EQY RS': ['Y', 0.042, 1.15], 'G+0.3Q+EX': ['X', 0.045, 1.0], 'G+0.3Q+EY': ['Y', 0.042, 1.15], 'WX SLS': ['X', 0.010, 0.35], 'WY SLS': ['Y', 0.013, 0.42], 'ULS2 1.35G+1.05Q+1.5W': ['X', 0.016, 0.5] };
+    const grav = { 'ULS1 1.35G+1.5Q': 1.42, 'ULS2 1.35G+1.05Q+1.5W': 1.3, 'G+0.3Q+EX': 1, 'G+0.3Q+EY': 1 };
+    const d = { stories: st, drifts: [], forces: [], torsion: [], base: [], buckling: [], modal: [] };
+    Object.keys(DEMO_ROLES).filter(c => DEMO_ROLES[c] !== 'off').forEach(c => {
+      const [dir, cs, k] = lat[c] || [null, 0, 0], g = grav[c] || 0, step = /RS/.test(c) ? 'Max' : '';
+      const V = cs * W * n, wsum = st.reduce((a, x) => a + x.elev, 0), F = st.map(x => V * x.elev / wsum);
+      st.forEach((x, i) => {
+        const Vs = F.slice(i).reduce((a, f) => a + f, 0), Ms = F.reduce((a, f, j) => a + (j >= i ? f * (st[j].elev - x.elev + x.h) : 0), 0);
+        const de = 0.0016 * k * (1.2 - 0.5 * Math.pow(i / (n - 1), 1.3)) * (i === 0 ? 1.15 : 1);
+        if (dir) {
+          d.drifts.push({ story: x.name, combo: c, step, dir, drift: de }, { story: x.name, combo: c, step, dir: dir === 'X' ? 'Y' : 'X', drift: de * 0.18 });
+          const rat = (dir === 'X' ? 1.12 : 1.31) + (i < 2 ? 0.06 : 0) - 0.008 * i;
+          d.torsion.push({ story: x.name, combo: c, step, dir, max: de * x.elev * rat, avg: de * x.elev, ratio: Math.round(rat * 1000) / 1000 });
+        }
+        d.forces.push({ story: x.name, combo: c, step, loc: 'Bottom', P: g * W * (n - i), VX: dir === 'X' ? Vs : dir ? 0.12 * Vs : 0, VY: dir === 'Y' ? Vs : dir ? 0.12 * Vs : 0, T: 0.05 * Vs * 24, MX: dir === 'Y' ? Ms : 0, MY: dir === 'X' ? Ms : 0 });
+      });
+      const Mb = F.reduce((a, f, j) => a + f * st[j].elev, 0);
+      d.base.push({ combo: c, step, FX: dir === 'X' ? -V : 0, FY: dir === 'Y' ? -V : 0, FZ: g * W * n, MX: dir === 'Y' ? Mb : 0, MY: dir === 'X' ? Mb : 0, MZ: 0 });
+    });
+    d.buckling = [8.4, 9.1, 13.7, 21.5, 24.0, 33.2].map((f, i) => ({ case: 'Buckling (1.35G+1.5Q)', mode: i + 1, factor: f }));
+    let sx = 0, sy = 0, sr = 0;
+    d.modal = [[1.12, 0, .742, .004], [1.01, .728, 0, .006], [.86, .003, .004, .731], [.36, 0, .121, .002], [.33, .128, 0, .001], [.28, .002, .001, .119],
+      [.20, 0, .044, .001], [.18, .047, 0, 0], [.16, .001, .001, .043], [.14, 0, .021, 0], [.12, .022, 0, 0], [.11, 0, 0, .019]]
+      .map(([T, ux, uy, rz], i) => { sx += ux; sy += uy; sr += rz; return { case: 'Modal', mode: i + 1, T, Ux: ux, Uy: uy, Rz: rz, SumUx: sx, SumUy: sy, SumRz: sr }; });
+    return d;
+  }
+
   /* ---------- checks ---------- */
   const maxBy = (xs, f) => xs.reduce((a, x) => (a === null || f(x) > f(a) ? x : a), null);
   function compute(b) {
@@ -48,7 +84,7 @@
       const P = Math.max(0, ...fs.map(r => Math.abs(r.P)));
       const V = Math.max(0, ...fs.map(r => Math.abs(dir === 'X' ? r.VX : r.VY)));
       if (!(P > 0 && V > 0)) return;
-      const th = P * dd.dr / (V * x.h);
+      const th = P * dd.dr / V;   // θ = P·d_r/(V·h) with d_r = dd.dr·h (dd.dr is the drift ratio)
       const amp = th <= 0.1 ? 1 : th <= 0.2 ? 1 / (1 - th) : null;
       out.theta.push({ story: x.name, z: x.elev, h: x.h, dir, P, V, dr: dd.dr, th, amp, U: th / 0.3,
         note: th <= 0.1 ? 'second-order effects may be neglected' : th <= 0.2 ? `multiply seismic action effects by 1/(1−θ) = ${api.fmt(1 / (1 - th), 3)}` : th <= 0.3 ? 'rigorous second-order analysis required' : 'θ > 0.3 not permitted - stiffen the structure' });
@@ -187,9 +223,12 @@
       <div class="actions">${b.data ? `<button class="btn no-print" data-print>${ic('print')}Print</button>` : ''}</div></div>`;
     const combos = L.model ? L.model.combos.concat(L.model.cases) : Object.keys(b.roles);
     combos.forEach(c => { if (!b.roles[c]) b.roles[c] = guessRole(c); });
-    const conn = !L.st ? `<div class="card etabs-live"><div class="etabs-hero">${ic('upload')}<div><b>Connect to ETABS to read the building</b><small>Storey drifts, storey forces, max/avg displacements, base reactions and buckling factors are read through the ETABS API.</small></div><button class="btn primary" data-bc="connect">${ic('check')}Connect to ETABS…</button></div>${b.data ? `<p class="muted" style="margin:0 16px 14px">Showing the last read: ${esc(b.file || '')} · ${new Date(b.at).toLocaleString()}</p>` : ''}</div>`
-      : `<div class="card etabs-live on"><div class="card-h"><b><i class="dot"></i>${esc(String(L.st.file).split(/[\\/]/).pop())}</b><small>click a combination to change its role · ${b.at ? 'last read ' + new Date(b.at).toLocaleString() : 'not read yet'}</small></div>
-        <div class="etabs-combos">${combos.map(c => `<button class="cmb ${{ seis: 'uls', wind: 'sls', uls: 'qp', off: 'off' }[b.roles[c]]}" data-bcrole="${esc(c)}" title="Click: Seismic → Wind SLS → ULS → Not used">${esc(c)}<span>${ROLES[b.roles[c]]}</span></button>`).join('')}</div>
+    const chips = `<div class="etabs-combos">${combos.map(c => `<button class="cmb ${{ seis: 'uls', wind: 'sls', uls: 'qp', off: 'off' }[b.roles[c]]}" data-bcrole="${esc(c)}" title="Click: Seismic → Wind SLS → ULS → Not used">${esc(c)}<span>${ROLES[b.roles[c]]}</span></button>`).join('')}</div>`;
+    const demoBtn = `<button class="btn" data-bc="demo">${ic('layers')}${b.demo ? 'Reload demo building' : 'Load demo building'}</button>`;
+    const conn = !L.st ? `<div class="card etabs-live"><div class="etabs-hero">${ic('upload')}<div><b>Connect to ETABS to read the building</b><small>Storey drifts, storey forces, max/avg displacements, base reactions, modes and buckling factors are read through the ETABS API - or load the demo building to see every check.</small></div><span class="etabs-hbtn">${demoBtn}<button class="btn primary" data-bc="connect">${ic('check')}Connect to ETABS…</button></span></div>
+        ${b.data ? `<div class="card-h" style="padding-top:0"><small>${b.demo ? '<b>Demo building</b> - sample ETABS results of a 10-storey RC building, 24 × 18 m · ' : `Showing the last read: ${esc(b.file || '')} · ${new Date(b.at).toLocaleString()} · `}click a combination to change its role</small></div>${chips}` : ''}</div>`
+      : `<div class="card etabs-live on"><div class="card-h"><b><i class="dot"></i>${esc(String(L.st.file).split(/[\\/]/).pop())}</b><small>click a combination to change its role · ${b.at ? 'last read ' + new Date(b.at).toLocaleString() : 'not read yet'}</small><span class="etabs-hbtn">${demoBtn}</span></div>
+        ${chips}
         ${err ? `<div class="etabs-msg" style="margin:0 16px 12px">${esc(err)}</div>` : ''}
         <div class="etabs-btns" style="padding:0 16px 14px"><button class="btn primary" data-bc="read" ${busy ? 'disabled' : ''}>${ic('download')}${busy ? 'Reading ETABS…' : 'Read building from ETABS'}</button><small class="muted">Seismic: drift, θ, torsion · Wind SLS: wind drift · ULS: base shear &amp; overturning. Put a linear buckling case in the model for αcr.</small></div></div>`;
     const num = (k, l, u, step, hint) => `<label class="bc-in"><span>${l}</span><input class="ctl" type="number" step="${step}" data-bcset="${k}" value="${esc(s[k])}"><small>${u}${hint ? ' · ' + hint : ''}</small></label>`;
@@ -202,7 +241,7 @@
       ${num('By', 'Plan width B<sub>y</sub>', 'm', '0.1', 'overturning about X')}
       ${num('fos', 'Required overturning safety', '-', '0.05', '1.0 with EQU-factored combinations')}</div></div>`;
     const R = compute(b);
-    if (!R) return head + conn + inputs + `<div class="card"><div class="empty">No building data yet - connect to ETABS, give the combinations their role and click <b>Read building from ETABS</b>.</div></div>`;
+    if (!R) return head + conn + inputs + `<div class="card"><div class="empty">No building data yet - connect to ETABS, give the combinations their role and click <b>Read building from ETABS</b>.<br><br>No ETABS at hand? ${demoBtn}</div></div>`;
     const Umax = xs => xs.reduce((a, x) => Math.max(a, x.U || 0), 0);
     const sumCard = (k, label, U, txt) => `<a class="card bc-sum" href="#bc-${k}"><div class="label">${label}</div><div class="value">${U === null ? '–' : fmt(U, 2)}</div><div class="foot">${U === null ? 'no data for this check' : okTag(U) + ' <span>' + txt + '</span>'}</div></a>`;
     const dU = Umax(R.drift), wU = Umax(R.wind), tU = Umax(R.theta), qU = Umax(R.tors), oU = Umax(R.base.filter(x => Number.isFinite(x.fos)));
@@ -274,6 +313,13 @@
       const t = ev.target.closest('[data-bc],[data-bcrole]'); if (!t) return;
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
+      if (d.bc === 'demo') {
+        b.data = demoBuilding(); b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
+        Object.assign(b.roles, DEMO_ROLES); Object.assign(b.set, { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, Bx: 24, By: 18, fos: 1.0 });
+        let n = 0;   // demo ETABS-linked members (beams, columns, footings) for the P-Δ member design
+        if (!api.proj().elements.some(e => e.etabs) && EC.etabs._demoDesign) n = EC.etabs._demoDesign();
+        api.save(); api.toast('Demo building loaded' + (n ? ` · ${n} demo ETABS-linked member(s) designed` : '')); return rer();
+      }
       if (d.bc === 'amp' || d.bc === 'unamp') {
         const R = compute(b); if (!R) return;
         let n = 0;
@@ -291,7 +337,7 @@
         busy = 'read'; err = ''; rer();
         EC.etabs.live.get('/building?' + cs.map(c => 'c=' + encodeURIComponent(c)).join('&')).then(j => {
           b.data = { stories: j.stories || [], drifts: j.drifts || [], forces: j.forces || [], torsion: j.torsion || [], base: j.base || [], buckling: j.buckling || [], modal: j.modal || [] };
-          b.file = String(j.file || '').split(/[\\/]/).pop(); b.at = Date.now();
+          b.file = String(j.file || '').split(/[\\/]/).pop(); b.at = Date.now(); b.demo = false;
           if (j.plan && b.set.Bx === DEF.Bx && b.set.By === DEF.By) { b.set.Bx = j.plan.Bx; b.set.By = j.plan.By; }
           if (!b.data.stories.length) throw new Error('ETABS returned no storeys.');
           busy = ''; api.save(); api.toast('Building read from ETABS'); rer();

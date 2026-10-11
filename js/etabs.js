@@ -482,5 +482,5 @@
       <p class="muted" style="margin:8px 14px 12px">Re-import the ETABS results on the <a href="#/etabs">ETABS link</a> page to update these forces. Section, material and bar inputs you change here are kept.</p></details>`;
   }
 
-  EC.etabs = { install(a) { api = a; }, view, mount, banner, live: { L, get: bget, connect: openConnect }, _parse: (text) => { ingest([[splitText(text), '']]); return S; }, _members: members, _state: S, _demo: demo };
+  EC.etabs = { install(a) { api = a; }, view, mount, banner, live: { L, get: bget, connect: openConnect }, _demoDesign: () => { demo(); let n = 0; S.tables.forEach((t, ti) => { const r = apply(ti, true); n += r.nNew + r.nUpd; }); return n; }, _parse: (text) => { ingest([[splitText(text), '']]); return S; }, _members: members, _state: S, _demo: demo };
 })();

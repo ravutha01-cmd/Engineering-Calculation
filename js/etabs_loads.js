@@ -17,10 +17,10 @@
   const PSI = { S: [0.5, 0.2, 0], W: [0.6, 0.2, 0], T: [0.6, 0.5, 0] };   // snow (≤ 1000 m), wind, temperature
   /* EN 1991-1-1 Table 6.2 imposed loads qk (kN/m²) - values used by many National Annexes; check yours */
   const QK = { A: 2.0, B: 3.0, C: 4.0, D: 4.0, E: 7.5, F: 2.5, G: 5.0, H: 0.4 };
-  const KIND = { G: 'Permanent G', Q: 'Imposed Q', S: 'Snow S', W: 'Wind W', E: 'Seismic E', T: 'Temperature T', off: 'Not used' };
+  const KIND = { G: 'Permanent G', Q: 'Imposed Q', S: 'Snow S', W: 'Wind W', E: 'Seismic E', T: 'Temperature T', N: 'Notional N (imperfection)', off: 'Not used' };
   const PT = { 1: 'Dead', 2: 'Super dead', 3: 'Live', 4: 'Reducible live', 5: 'Quake', 6: 'Wind', 7: 'Snow', 8: 'Other', 10: 'Temperature', 11: 'Roof live', 12: 'Notional' };
   const CT = { 1: 'Linear static', 3: 'Modal', 4: 'Response spectrum', 10: 'Buckling' };
-  const DEF = { expr: '6.10', gG: 1.35, gGinf: 1.0, gQ: 1.5, xi: 0.85, cat: 'B', windBoth: true, e30: true, equ: true, slsW: true, prefix: 'CS-', auto: false, sdl: 1.5, std: true };
+  const DEF = { expr: '6.10', gG: 1.35, gGinf: 1.0, gQ: 1.5, xi: 0.85, cat: 'B', windBoth: true, e30: true, equ: true, slsW: true, prefix: 'CS-', auto: false, sdl: 1.5, std: true, notional: false, nH: 0, nM: 10 };
 
   const P = () => { const p = api.proj(); p.loads = p.loads || {}; const L = p.loads; L.set = Object.assign({}, DEF, L.set || {}); L.act = L.act || {}; L.qk = Object.assign({}, QK, L.qk || {}); return L; };
 
@@ -28,7 +28,14 @@
   function guess(u, set) {
     const dir = /Y/.test(u.name.replace(/[a-z]/g, '')) ? 'Y' : 'X';   // "Wind Y", "EQY RS", "EY" → Y
     if (u.src === 'case') return u.type === 4 ? { k: 'E', dir, rs: true } : { k: 'off' };
+    if (u.type === 12) return { k: 'N', dir, base: u.name.replace(/^N(otional)?[\s_-]+/i, '').replace(/[\s_-]+[XY]$/i, '') };   // "N Dead X" → base Dead
     return ({ 1: { k: 'G' }, 2: { k: 'G' }, 3: { k: 'Q', cat: set.cat }, 4: { k: 'Q', cat: set.cat }, 5: { k: 'E', dir }, 6: { k: 'W', dir }, 7: { k: 'S' }, 10: { k: 'T' }, 11: { k: 'Q', cat: 'H' } })[u.type] || { k: 'off' };
+  }
+  /* geometric imperfections - EN 1992-1-1 5.2(5), EN 1993-1-1 5.3.2(3): θi = θ0·αh·αm, θ0 = 1/200,
+     αh = 2/√l (2/3 ≤ αh ≤ 1), αm = √(0.5·(1 + 1/m)); horizontal force at each floor Hi = θi·N (EC2 5.2(8)) */
+  function theta(H, m) {
+    const ah = H > 0 ? Math.min(1, Math.max(2 / 3, 2 / Math.sqrt(H))) : 1, am = Math.sqrt(0.5 * (1 + 1 / Math.max(1, m || 1)));
+    return { ah, am, th: ah * am / 200 };
   }
   /* the load "units" of the model: every pattern, plus the load cases that are not a pattern's own case */
   function units(model) {
@@ -103,6 +110,25 @@
     add('SLS-QP', gT(1).concat(groups.flatMap(g => sc(g.alts[0], g.psi[2]))), 'quasi-permanent');
     if (set.slsW) ws.forEach(u => (set.windBoth ? [1, -1] : [1]).forEach(sg => add('SLS-W', [[u.name, sg]], `wind only, for drift: ${sg < 0 ? '−' : ''}${u.name}`)));
 
+    // imperfections: notional loads with every ULS combination (EN 1992-1-1 5.2, EN 1993-1-1 5.3.2)
+    const N = set.notional ? on.filter(u => A(u).k === 'N') : [];
+    if (N.length) {
+      const nOf = (base, dir) => N.find(u => A(u).base === base && (A(u).dir || 'X') === dir);
+      const dirs = ['X', 'Y'].filter(d => N.some(u => (A(u).dir || 'X') === d));
+      const kOf = n => (A(us.find(u => u.name === n) || { name: n }) || {}).k;
+      const res = [];
+      out.forEach(c => {
+        if (c.kind !== 'ULS') return res.push(c);
+        const grav = c.items.filter(([n]) => ['G', 'Q'].includes(kOf(n)));
+        const w = c.items.find(([n]) => kOf(n) === 'W');
+        const variants = w ? [[A(us.find(u => u.name === w[0])).dir || 'X', Math.sign(w[1])]] : dirs.flatMap(d => [[d, 1], [d, -1]]);
+        variants.forEach(([d, sg]) => {
+          const extra = grav.map(([n, f]) => { const nu = nOf(n, d); return nu ? [nu.name, r3(f * sg)] : null; }).filter(Boolean);
+          res.push(Object.assign({}, c, { items: c.items.concat(extra), note: c.note + (extra.length ? ` · imperfection ${sg < 0 ? '−' : '+'}${d}` : '') }));
+        });
+      });
+      out.length = 0; res.forEach(c => out.push(c));
+    }
     // names, then envelopes
     const cnt = {};
     out.forEach(c => { cnt[c.kind] = (cnt[c.kind] || 0) + 1; c.name = `${set.prefix}${c.kind} ${String(cnt[c.kind]).padStart(2, '0')}`; c.type = 0; c.items = c.items.map(([n, f]) => [n, f, false]); });
@@ -138,7 +164,29 @@
   const sigOf = m => JSON.stringify([m.patterns.map(p => [p.name, p.type]), m.cases.map(c => [c.name, c.type])]);
   const managed = () => (S.model ? S.model.combos.filter(c => c.name.startsWith(P().set.prefix)) : []);
   /* the plan: missing standard patterns (when asked) and the model as it will be after writing */
-  const planned = () => (P().set.std && S.model ? STD.filter(([n]) => !S.model.patterns.some(p => p.name === n)).map(([name, type, sw]) => ({ name, type, sw, planned: true })) : []);
+  function planned() {
+    const L = P(); if (!S.model) return [];
+    const std = L.set.std ? STD.filter(([n]) => !S.model.patterns.some(p => p.name === n)).map(([name, type, sw]) => ({ name, type, sw, planned: true })) : [];
+    if (!L.set.notional) return std;
+    // one notional pattern per gravity pattern and direction: "N <pattern> X|Y", base = that pattern
+    const all = S.model.patterns.concat(std), have = new Set(all.map(p => p.name));
+    const grav = all.filter(p => p.type !== 12 && ['G', 'Q'].includes((L.act[p.name] || guess({ name: p.name, type: p.type, src: 'pattern' }, L.set)).k));
+    const nn = grav.flatMap(p => ['X', 'Y'].map(d => ({ name: `N ${p.name} ${d}`, type: 12, sw: 0, planned: true, base: p.name, dir: d }))).filter(p => !have.has(p.name));
+    nn.forEach(p => { L.act[p.name] = { k: 'N', base: p.base, dir: p.dir }; });
+    return std.concat(nn);
+  }
+  /* notional patterns to (re)define in ETABS: base pattern, ratio θi, direction */
+  function notionalDefs(after) {
+    const L = P(); if (!L.set.notional) return [];
+    const t = theta(nHeight(), L.set.nM).th;
+    return after.patterns.filter(p => (L.act[p.name] || {}).k === 'N').map(p => ({ name: p.name, base: L.act[p.name].base, dir: L.act[p.name].dir || 'X', ratio: t }));
+  }
+  /* height of the structure: the input, else the top of the building read on Building checks */
+  function nHeight() {
+    const L = P(); if (+L.set.nH > 0) return +L.set.nH;
+    const b = api.proj().building, st = b && b.data && b.data.stories;
+    return st && st.length ? Math.max(...st.map(x => x.elev)) - Math.min(...st.map(x => x.elev - x.h)) : 0;
+  }
   function plan() {
     const pl = planned(), m = S.model;
     const after = { patterns: m.patterns.concat(pl), cases: m.cases.concat(pl.map(p => ({ name: p.name, type: 1, planned: true }))), combos: m.combos };
@@ -158,7 +206,8 @@
   }
   async function apply(unlock, withPatterns) {
     const L = P(), p = plan();
-    const r = await live().post('/loads/apply', { prefix: L.set.prefix, patterns: withPatterns ? p.pl.map(({ name, type, sw }) => ({ name, type, sw })) : [], combos: p.gen.map(c => ({ name: c.name, type: c.type, items: c.items })), unlock: !!unlock });
+    const r = await live().post('/loads/apply', { prefix: L.set.prefix, patterns: withPatterns ? p.pl.map(({ name, type, sw }) => ({ name, type, sw })) : [], combos: p.gen.map(c => ({ name: c.name, type: c.type, items: c.items })), unlock: !!unlock, notional: notionalDefs(p.after) });
+    S.nmsg = r.notional && r.notional.manual ? r.notional.manual : '';
     await readModel(); S.sig = sigOf(S.model); S.last = new Date().toLocaleTimeString();
     return (r.patterns_created.length ? `${r.patterns_created.length} load pattern(s) created · ` : '') + `${r.combos} combination(s) written to ETABS`;
   }
@@ -208,7 +257,7 @@
     const tabBar = `<div class="tabs ld-tabs">${tabs.map(([k, l, n, ch]) => `<button class="${S.tab === k ? 'active' : ''}" data-ldtab="${k}">${l}<span class="badge">${n}</span>${ch ? `<span class="badge ld-ch">${ch} to write</span>` : ''}</button>`).join('')}</div>`;
     const actCell = u => { const a = L.act[u.name] || { k: 'off' };
       return `<td><select class="ctl" data-ldk="${esc(u.name)}">${Object.keys(KIND).map(k => `<option value="${k}" ${a.k === k ? 'selected' : ''}>${KIND[k]}</option>`).join('')}</select></td>
-        <td>${a.k === 'Q' ? `<select class="ctl" data-ldcat="${esc(u.name)}">${Object.keys(CATS).map(c => `<option value="${c}" ${(a.cat || s.cat) === c ? 'selected' : ''}>${CATS[c][0]}</option>`).join('')}</select>` : a.k === 'W' || a.k === 'E' ? `<select class="ctl" data-lddir="${esc(u.name)}">${['X', 'Y'].map(d => `<option ${a.dir === d ? 'selected' : ''}>${d}</option>`).join('')}</select>${a.k === 'E' ? ` <small class="muted">${u.type === 4 ? 'response spectrum' : 'static ±'}</small>` : ''}` : ''}</td>`; };
+        <td>${a.k === 'N' ? `<small>θ<sub>i</sub> × <b>${esc(a.base || '?')}</b> · ${esc(a.dir || 'X')}</small>` : a.k === 'Q' ? `<select class="ctl" data-ldcat="${esc(u.name)}">${Object.keys(CATS).map(c => `<option value="${c}" ${(a.cat || s.cat) === c ? 'selected' : ''}>${CATS[c][0]}</option>`).join('')}</select>` : a.k === 'W' || a.k === 'E' ? `<select class="ctl" data-lddir="${esc(u.name)}">${['X', 'Y'].map(d => `<option ${a.dir === d ? 'selected' : ''}>${d}</option>`).join('')}</select>${a.k === 'E' ? ` <small class="muted">${u.type === 4 ? 'response spectrum' : 'static ±'}</small>` : ''}` : ''}</td>`; };
     const psiOf = u => { const a = L.act[u.name] || { k: 'off' }; const p = a.k === 'Q' ? CATS[a.cat || s.cat].slice(1) : PSI[a.k]; return p ? p.join(' · ') : '–'; };
     let body = '';
     if (S.tab === 'patterns') {
@@ -248,7 +297,17 @@
       <label class="bc-in"><span>SDL pattern</span><select class="ctl" id="ldSdlPat">${S.model.patterns.map(p => `<option ${/SDL|super/i.test(p.name) || p.type === 2 ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
       <label class="bc-in"><span>Imposed-load pattern</span><select class="ctl" id="ldQPat">${S.model.patterns.map(p => `<option ${p.type === 3 || p.type === 4 ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label></div>
       <div class="etabs-btns" style="padding:0 16px 14px"><button class="btn" data-ld="assign" ${S.busy || S.demo ? 'disabled' : ''}>${ic('download')}Assign to the slabs selected in ETABS</button><small class="muted">Select floor slabs in the ETABS window first (walls are skipped). Replaces the previous value of these two patterns on those slabs.</small></div></div>`;
-    return head + status + prev + opts + loadsCard;
+    const H = nHeight(), T = theta(H, s.nM), nN = P0.after.patterns.filter(p => (L.act[p.name] || {}).k === 'N').length;
+    const impCard = `<div class="card"><div class="card-h"><b>Imperfections - notional loads</b><small>EN 1992-1-1 5.2 · EN 1993-1-1 5.3.2 · θ<sub>i</sub> = θ<sub>0</sub>·α<sub>h</sub>·α<sub>m</sub></small></div>
+      <div class="ld-chks" style="padding-top:2px">${chk('notional', 'Add notional loads to every ULS combination (one notional pattern per gravity pattern and direction, factored like its base pattern)')}</div>
+      ${s.notional ? `<div class="bc-inputs">
+        <label class="bc-in"><span>Height of the structure l (m)</span><input class="ctl" type="number" step="0.1" data-ldset="nH" value="${esc(s.nH || '')}" placeholder="${H ? api.fmt(H, 1) + ' from Building checks' : 'enter'}"><small>${+s.nH > 0 ? 'input' : H ? 'from the storeys read on Building checks' : 'enter the height'}</small></label>
+        <label class="bc-in"><span>m - vertical members contributing</span><input class="ctl" type="number" step="1" min="1" data-ldset="nM" value="${esc(s.nM)}"><small>EC2: members carrying ≥ 50 % of the average load · EC3: columns in a row with N ≥ 50 % of the average</small></label></div>
+        <div class="bc-verdict ok">α<sub>h</sub> = 2/√${api.fmt(H, 1)} = <b>${api.fmt(T.ah, 3)}</b> (2/3 … 1) · α<sub>m</sub> = √(0.5·(1 + 1/${s.nM})) = <b>${api.fmt(T.am, 3)}</b> · θ<sub>i</sub> = α<sub>h</sub>·α<sub>m</sub>/200 = <b>${api.fmt(T.th, 5)}</b> = 1/${api.fmt(1 / T.th, 0)}
+          <br>Notional force at each floor H<sub>i</sub> = θ<sub>i</sub>·N<sub>Ed</sub> of the floor, in ±X and ±Y; with leading or accompanying wind it acts in the wind's direction (${nN} notional pattern${nN === 1 ? '' : 's'}).</div>
+        ${S.nmsg ? `<div class="etabs-msg info" style="margin:0 16px 12px">ETABS did not take the notional settings automatically (${esc(S.nmsg)}). Set them by hand: <b>Define → Load Patterns</b> → each “N … X/Y” pattern → <b>Modify Lateral Load</b>: base load pattern as in its name, load ratio <b>${api.fmt(T.th, 5)}</b>, direction X or Y.</div>` : ''}
+        <p class="muted bc-pad">EN 1993-1-1 5.3.2(4): sway imperfections may be neglected when H<sub>Ed</sub> ≥ 0.15·V<sub>Ed</sub> (e.g. with wind); EN 1992-1-1 5.2(6): for a bracing system l = height of the building and m = number of vertical members contributing. Notional loads are not used in the seismic combinations.</p>` : ''}</div>`;
+    return head + status + prev + opts + impCard + loadsCard;
   }
 
   function mount(root) {

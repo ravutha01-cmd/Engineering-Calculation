@@ -12,12 +12,12 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] Base shear, storey shear and overturning moment profiles; overturning stability (EQU)
 - [x] Global buckling αcr from the ETABS buckling case and sway amplification - EN 1993-1-1 5.2.1 / 5.2.2, EN 1992-1-1 5.8.2
 - [x] P-Δ design of the ETABS-linked members: seismic governing case × 1/(1−θ) of its storey (EN 1998-1 4.4.2.2(3)), lateral non-seismic case × 1/(1−1/αcr) (EN 1993-1-1 5.2.2(5)B), gravity-only cases not amplified; kept through ETABS re-reads and removable
+- [x] Modal check: periods, participating mass ≥ 90 % per direction, modes > 5 % included, alternative k ≥ 3√n and T_k ≤ 0.20 s, torsional first mode flagged - EN 1998-1 4.3.3.3.1
 
 ## Fixes
 - [x] 2026-10-11 · Building checks: Print opened the print dialog twice (the page and the app both handled the click)
 
 ## Next
-- [ ] Modal check: periods, mass participation ≥ 90 % / all modes > 5 % - EN 1998-1 4.3.3.3.1
 - [ ] Base shear check: response spectrum vs lateral force method, T1 vs Ct·H^¾ - EN 1998-1 4.3.3.2
 - [ ] Soft storey: lateral stiffness of each storey vs the storey above (regularity in elevation) - EN 1998-1 4.2.3.3
 - [ ] Weak storey: storey shear strength ratio

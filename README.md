@@ -64,6 +64,7 @@ Pro accounts with registration come later.
 | Wind drift (SLS) | storey drift ≤ h/500 (editable) |
 | Base shear & overturning moment | storey shear and overturning-moment profiles, V/W per combination, overturning stability W·B/2 ÷ M (EQU) |
 | Global buckling | α_cr from a linear buckling case: ≥ 10 first order; ≥ 3 sway effects × 1/(1−1/α_cr) (EN 1993-1-1 5.2.2(5)B); < 3 second-order analysis |
+| Modal analysis | EN 1998-1 4.3.3.3.1: periods and participating mass of every mode; Σ effective mass ≥ 90 % in X and Y and every mode with > 5 % included, or k ≥ 3√n with T_k ≤ 0.20 s; a torsional first mode is flagged (4.2.3.2(6)) |
 | P-Δ design of the linked members | each ETABS-linked beam, column, wall, steel member and footing gets the factor of its storey: seismic governing case × 1/(1−θ), lateral (wind / notional) case × 1/(1−1/α_cr), gravity-only case none. **Apply** multiplies its M and V; the ETABS values are kept, re-reads keep the factor, **Remove** restores them |
 
 Each combination gets a role (Seismic, Wind SLS, ULS, not used); inputs and the last ETABS read are kept with the project. Planned checks: `tools/etabs_bridge/BUILDING_CHECKS_ROADMAP.md`.

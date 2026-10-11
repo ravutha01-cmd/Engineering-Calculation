@@ -76,7 +76,36 @@
     const bf = d.buckling.filter(r => r.factor > 0).sort((a, c) => a.factor - c.factor);
     out.buck = bf;
     if (bf.length) { const a = bf[0].factor; out.acr = { a, U: 3 / a, k: a > 1 ? 1 / (1 - 1 / a) : Infinity, note: a >= 10 ? 'first-order analysis is sufficient (αcr ≥ 10)' : a >= 3 ? `amplify the sway (horizontal) effects by 1/(1−1/αcr) = ${api.fmt(1 / (1 - 1 / a), 3)}` : 'αcr < 3: full second-order analysis required' }; }
+    // 6. modal response - EN 1998-1 4.3.3.3.1
+    const md = (d.modal || []).slice().sort((a, c) => a.mode - c.mode);
+    if (md.length) {
+      const last = md[md.length - 1], n = st.length;
+      const sum = { X: last.SumUx, Y: last.SumUy };
+      const big = dir => md.filter(m => (dir === 'X' ? m.Ux : m.Uy) > 0.05);
+      const tail = { X: last.Ux > 0.05, Y: last.Uy > 0.05 };   // the last mode still carries > 5 %: more modes may exist
+      const kMin = Math.ceil(3 * Math.sqrt(n)), alt = md.length >= kMin && last.T <= 0.20;
+      const dom = m => { const v = { X: m.Ux, Y: m.Uy, 'torsion (RZ)': m.Rz }; return Object.keys(v).reduce((a, k) => (v[k] > v[a] ? k : a), 'X'); };
+      const first = md[0];
+      out.modal = { md, n, sum, big, tail, kMin, alt, dom, torsFirst: dom(first) === 'torsion (RZ)',
+        U: Math.max(...['X', 'Y'].map(dir => (sum[dir] >= 0.9 || alt ? 0.9 / Math.max(sum[dir], 0.9) : 0.9 / Math.max(sum[dir], 1e-6)))),
+        T1: first.T };
+    }
     return out;
+  }
+
+  /* cumulative participating mass vs mode number (X, Y) with the 90 % line */
+  function cumChart(md) {
+    const W = 380, Hh = 220, l = 44, r = 16, t = 12, bt = 34, n = md.length;
+    const X = i => l + (n > 1 ? (i / (n - 1)) : 0.5) * (W - l - r), Y = v => t + (1 - v) * (Hh - t - bt);
+    const ser = [['ΣU_X', '--s1', 'SumUx'], ['ΣU_Y', '--s2', 'SumUy']];
+    return `<figure class="bc-chart"><svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Cumulative participating mass by mode">
+      ${[0, 0.25, 0.5, 0.75, 1].map(v => `<line x1="${l}" x2="${W - r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grid)"/><text x="${l - 6}" y="${Y(v) + 4}" text-anchor="end" class="ax">${Math.round(v * 100)}%</text>`).join('')}
+      <line x1="${l}" x2="${W - r}" y1="${Y(0.9)}" y2="${Y(0.9)}" stroke="var(--ink-2)" stroke-dasharray="4 3"/><text x="${W - r}" y="${Y(0.9) + 13}" text-anchor="end" class="ax lim">90 %</text>
+      ${md.map((m, i) => (n <= 15 || i % Math.ceil(n / 15) === 0) ? `<text x="${X(i)}" y="${Hh - bt + 14}" text-anchor="middle" class="ax">${m.mode}</text>` : '').join('')}
+      ${ser.map(([nm, c, k]) => `<polyline points="${md.map((m, i) => X(i).toFixed(1) + ',' + Y(Math.min(1, m[k])).toFixed(1)).join(' ')}" fill="none" stroke="var(${c})" stroke-width="2" stroke-linejoin="round"/>` +
+        md.map((m, i) => `<g class="pt"><circle cx="${X(i).toFixed(1)}" cy="${Y(Math.min(1, m[k])).toFixed(1)}" r="4" fill="var(${c})" stroke="var(--surface)" stroke-width="2"/><circle cx="${X(i).toFixed(1)}" cy="${Y(Math.min(1, m[k])).toFixed(1)}" r="10" fill="transparent"><title>Mode ${m.mode} · T = ${api.fmt(m.T, 3)} s · ${nm} = ${api.fmt(m[k] * 100, 1)} %</title></circle></g>`).join('')).join('')}
+      <text x="${(l + W - r) / 2}" y="${Hh - 4}" text-anchor="middle" class="ax">mode</text></svg>
+      <figcaption class="legend"><span><i style="background:var(--s1)"></i>ΣU<sub>X</sub></span><span><i style="background:var(--s2)"></i>ΣU<sub>Y</sub></span><span>┆ 90 %</span></figcaption></figure>`;
   }
 
   /* ---------- P-Δ / sway design of the ETABS-linked members ----------
@@ -184,6 +213,7 @@
       ${sumCard('torsion', 'Torsion Δ<sub>max</sub>/Δ<sub>avg</sub>', R.tors.length ? qU : null, R.tors.length ? `max ratio ${fmt(rMax, 2)} (1.4)` : '')}
       ${sumCard('wind', 'Wind drift', R.wind.length ? wU : null, `drift ÷ h/${s.windLim}`)}
       ${sumCard('base', 'Overturning', R.base.some(x => Number.isFinite(x.fos)) ? oU : null, 'required ÷ provided safety')}
+      ${sumCard('modal', 'Modal mass participation', R.modal ? R.modal.U : null, R.modal ? `ΣU<sub>X</sub> ${fmt(R.modal.sum.X * 100, 1)} % · ΣU<sub>Y</sub> ${fmt(R.modal.sum.Y * 100, 1)} % · T<sub>1</sub> ${fmt(R.modal.T1, 2)} s` : '')}
       ${sumCard('buckling', 'Global buckling α<sub>cr</sub>', R.acr ? R.acr.U : null, R.acr ? `α<sub>cr</sub> = ${fmt(R.acr.a, 2)}${R.acr.a >= 10 ? ' ≥ 10: 1st order' : R.acr.a >= 3 ? ` · sway × ${fmt(R.acr.k, 3)}` : ' < 3'}` : '')}</div>`;
     const ser = (rows, key) => ['X', 'Y'].map((d, i) => ({ n: 'Direction ' + d, c: i ? '--s2' : '--s1', pts: rows.filter(r => r.dir === d).map(r => ({ story: r.story, z: r.z, v: r[key] })) })).filter(x => x.pts.length);
     const card = (k, title, ref, sub, body) => `<section class="card bc-card" id="bc-${k}"><div class="card-h"><b>${title}</b><small>${ref}${sub ? ' · ' + sub : ''}</small></div>${body}</section>`;
@@ -216,6 +246,17 @@
       R.buck.length ? `${tbl([['Case', r => esc(r.case)], ['Mode', r => r.mode, 'num'], ['α<sub>cr</sub>', r => fmt(r.factor, 2), 'num'], ['Sway amplification 1/(1−1/α<sub>cr</sub>)', r => r.factor > 1 ? fmt(1 / (1 - 1 / r.factor), 3) : '∞', 'num']], R.buck.slice(0, 12))}
         <div class="bc-verdict ${R.acr.a >= 3 ? 'ok' : 'bad'}">α<sub>cr</sub> = <b>${fmt(R.acr.a, 2)}</b> → ${esc(R.acr.note)}${R.acr.a < 10 && R.acr.a >= 3 ? '. The P-Δ design: increase the horizontal loads (wind, notional, seismic) by this factor, or run ETABS with P-Delta on.' : ''}</div>`
         : '<p class="muted bc-pad">No buckling factors - add a linear buckling load case in ETABS (initial P-Delta from the ULS gravity combination), run it and read again.</p>');
+    if (R.modal) {
+      const M = R.modal, pc = v => fmt(v * 100, 1) + ' %';
+      const verdict = ['X', 'Y'].map(dir => M.sum[dir] >= 0.9 ? `${dir}: Σ = ${pc(M.sum[dir])} ≥ 90 % ✓` : M.alt ? `${dir}: Σ = ${pc(M.sum[dir])} < 90 %, but k = ${M.md.length} ≥ 3√n = ${M.kMin} and T<sub>k</sub> = ${fmt(M.md[M.md.length - 1].T, 3)} s ≤ 0.20 s (4.3.3.3.1(5)) ✓` : `${dir}: Σ = ${pc(M.sum[dir])} < 90 % ✗ - add modes (Ritz vectors) until ≥ 90 %`).join('<br>');
+      const notes = [];
+      ['X', 'Y'].forEach(dir => { if (M.tail[dir]) notes.push(`the last mode still carries > 5 % in ${dir}: ask for more modes so every mode with > 5 % is included (4.3.3.3.1(3))`); });
+      if (M.torsFirst) notes.push('the first mode is torsional: the building is torsionally flexible - check r ≥ l<sub>s</sub> (EN 1998-1 4.2.3.2(6)) and the behaviour factor of torsionally flexible systems (5.2.2.1(4)), or add stiffness at the perimeter');
+      html += card('modal', 'Modal analysis: periods and mass participation', 'EN 1998-1 4.3.3.3.1', `sum of effective modal masses ≥ 90 % in each direction, all modes with > 5 % included · n = ${M.n} storeys`,
+        `<div class="bc-split">${cumChart(M.md)}
+          ${tbl([['Mode', r => r.mode, 'num'], ['T s', r => fmt(r.T, 3), 'num'], ['f Hz', r => r.T > 0 ? fmt(1 / r.T, 2) : '–', 'num'], ['U<sub>X</sub>', r => pc(r.Ux), 'num'], ['U<sub>Y</sub>', r => pc(r.Uy), 'num'], ['R<sub>Z</sub>', r => pc(r.Rz), 'num'], ['ΣU<sub>X</sub>', r => pc(r.SumUx), 'num'], ['ΣU<sub>Y</sub>', r => pc(r.SumUy), 'num'], ['Dominant', r => esc(M.dom(r))]], M.md.slice(0, 30))}</div>
+        <div class="bc-verdict ${M.U <= 1 + 1e-9 ? 'ok' : 'bad'}">${verdict}</div>${notes.length ? `<p class="muted bc-pad">Note: ${notes.join('; ')}.</p>` : ''}`);
+    }
     const MF = memberFactors(b, R), nAmp = MF.filter(m => m.k && m.k > 1).length, nOn = MF.filter(m => m.applied).length;
     html += card('members', 'P-Δ design of the ETABS-linked members', 'EN 1998-1 4.4.2.2(3) · EN 1993-1-1 5.2.2(5)B', 'seismic governing case × 1/(1−θ) of its storey · other cases × 1/(1−1/α<sub>cr</sub>) · M and V amplified',
       MF.length ? `${tbl([['Mark', r => `<a href="#/el/${r.e.id}" class="mark">${esc(r.e.mark)}</a>`], ['Design', r => esc(EC.modules[r.e.type].name)], ['Storey', r => esc(r.story || '')], ['Governing case', r => `<small>${esc(r.e.etabs.combo)}</small>`], ['Basis', r => `<small>${r.basis}</small>`],
@@ -249,7 +290,7 @@
         if (!cs.length) { err = 'Give at least one combination a role (Seismic, Wind SLS or ULS).'; return rer(); }
         busy = 'read'; err = ''; rer();
         EC.etabs.live.get('/building?' + cs.map(c => 'c=' + encodeURIComponent(c)).join('&')).then(j => {
-          b.data = { stories: j.stories || [], drifts: j.drifts || [], forces: j.forces || [], torsion: j.torsion || [], base: j.base || [], buckling: j.buckling || [] };
+          b.data = { stories: j.stories || [], drifts: j.drifts || [], forces: j.forces || [], torsion: j.torsion || [], base: j.base || [], buckling: j.buckling || [], modal: j.modal || [] };
           b.file = String(j.file || '').split(/[\\/]/).pop(); b.at = Date.now();
           if (j.plan && b.set.Bx === DEF.Bx && b.set.By === DEF.By) { b.set.Bx = j.plan.Bx; b.set.By = j.plan.By; }
           if (!b.data.stories.length) throw new Error('ETABS returned no storeys.');

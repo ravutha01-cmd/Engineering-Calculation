@@ -395,6 +395,26 @@ def building_from_model(m, combos, cset):
             buck = [{'case': case[i], 'mode': int(num[i]), 'factor': fac[i]} for i in range(nr)]
     except BridgeError:
         pass
+    # modal: periods and participating mass ratios of every modal case
+    modal = []
+    try:
+        setup.DeselectAllCasesAndCombosForOutput()
+        mcases = []
+        for c in ok(m.LoadCases.GetNameList(0, []), 'LoadCases.GetNameList')[1] or []:
+            try:
+                if int(ok(m.LoadCases.GetTypeOAPI(c, 0, 0), 'GetTypeOAPI')[0]) == 3:   # eLoadCaseType.Modal
+                    mcases.append(c)
+                    setup.SetCaseSelectedForOutput(c, True)
+            except BridgeError:
+                pass
+        if mcases:
+            r = ok(m.Results.ModalParticipatingMassRatios(0, [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], []),
+                   'Results.ModalParticipatingMassRatios')
+            nr, case, _st, num, T, Ux, Uy, _Uz, SUx, SUy, _SUz, _Rx, _Ry, Rz, _SRx, _SRy, SRz = r[:17]
+            modal = [{'case': case[i], 'mode': int(num[i]), 'T': T[i], 'Ux': Ux[i], 'Uy': Uy[i], 'Rz': Rz[i],
+                      'SumUx': SUx[i], 'SumUy': SUy[i], 'SumRz': SRz[i]} for i in range(nr)]
+    except BridgeError:
+        pass
     # storey forces and max / average displacements through the display tables
     forces, torsion = [], []
     try:
@@ -420,7 +440,7 @@ def building_from_model(m, combos, cset):
                 break
     except Exception as e:
         print('display tables not available:', e)
-    return {'stories': stories, 'drifts': drifts, 'forces': forces, 'torsion': torsion, 'base': base_r, 'buckling': buck}
+    return {'stories': stories, 'drifts': drifts, 'forces': forces, 'torsion': torsion, 'base': base_r, 'buckling': buck, 'modal': modal}
 
 
 class Mock:
@@ -493,7 +513,14 @@ class Mock:
             base.append({'combo': c, 'step': step, 'FX': -V if d == 'X' else 0, 'FY': -V if d == 'Y' else 0, 'FZ': g * W * len(st),
                          'MX': Mb if d == 'Y' else 0, 'MY': Mb if d == 'X' else 0, 'MZ': 0})
         buck = [{'case': 'Buckling', 'mode': i + 1, 'factor': f} for i, f in enumerate([8.4, 9.1, 13.7, 21.5, 24.0, 33.2])]
-        return {'file': self.status()['file'], 'stories': st, 'drifts': drifts, 'forces': forces, 'torsion': torsion, 'base': base, 'buckling': buck,
+        # 12 modes: Y, X, torsion, then the higher modes (participating mass ratios)
+        mm = [(1.12, 0, .742, .004), (1.01, .728, 0, .006), (.86, .003, .004, .731), (.36, 0, .121, .002), (.33, .128, 0, .001), (.28, .002, .001, .119),
+              (.20, 0, .044, .001), (.18, .047, 0, 0), (.16, .001, .001, .043), (.14, 0, .021, 0), (.12, .022, 0, 0), (.11, 0, 0, .019)]
+        modal, sx, sy, sr = [], 0, 0, 0
+        for i, (T, ux, uy, rz) in enumerate(mm):
+            sx, sy, sr = sx + ux, sy + uy, sr + rz
+            modal.append({'case': 'Modal', 'mode': i + 1, 'T': T, 'Ux': ux, 'Uy': uy, 'Rz': rz, 'SumUx': sx, 'SumUy': sy, 'SumRz': sr})
+        return {'file': self.status()['file'], 'stories': st, 'drifts': drifts, 'forces': forces, 'torsion': torsion, 'base': base, 'buckling': buck, 'modal': modal,
                 'plan': {'Bx': 24, 'By': 18}}
 
     def selection(self):

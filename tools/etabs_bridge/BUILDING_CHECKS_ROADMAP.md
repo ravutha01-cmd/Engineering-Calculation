@@ -23,6 +23,7 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] Base shear check: modal T1 vs Ct·H^¾ (EN 1998-1 4.3.3.2.2(3)), lateral force method applicability T1 ≤ min(4TC, 2 s) (4.3.3.2.1), Fb = Sd(T1)·m·λ (4.3.3.2.2(1)) with the EC8 spectrum of Loads & combinations, compared with the response-spectrum base shear (V_RS/Fb plausibility ≥ 0.8)
 - [x] Soft storey: storey stiffness k_i = V_i/(d_r,i·h_i) from the seismic case with the largest base shear per direction, k_i/k_i+1 and k_i/mean(3 above) against 0.7 / 0.8 (soft) and 0.6 / 0.7 (extreme, ASCE 7 Table 12.3-2) for the EN 1998-1 4.2.3.3(3) criterion; consequence stated (4.2.3.1, Table 4.1, 5.2.2.2(3))
 - [x] Weak storey: storey shear resistance V_Rd,i from the ETABS columns and walls (bridge `/strength`: section size, material, local-axis angle, wall length / angle), V_Rd,i/V_Rd,i+1 against 0.8 (weak) / 0.65 (extreme, ASCE 7 Table 12.3-2) and the resistance-to-demand ratio Ω_i against the storey above (≤ 30 % drop, prEN 1998-1-2) for EN 1998-1 4.2.3.3(4)
+- [x] Mass irregularity: storey masses from the ETABS “Mass Summary by Story” table (fallback “Centers Of Mass And Rigidity”, diaphragms summed) read with the building, m_i against 1.5 × the lighter adjacent storey (ASCE 7 Table 12.3-2 type 2, lighter roof excluded) for EN 1998-1 4.2.3.3(3); storeys > 10 % heavier than the one below noted
 
 ## Fixes
 - [x] 2026-10-11 · Notional loads asked the user to set them by hand when the notional table was not found (it was searched only among the tables that already had data). Now fully automatic: all tables searched (also empty ones, fields read with GetAllFieldsInTable); without such a table, a gravity analysis gives N per floor and H_i = θi·N is applied as storey joint loads (EN 1992-1-1 5.2(8))
@@ -32,7 +33,6 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] 2026-10-11 · Soft storey cited EN 1998-1 4.2.3.3(4)P for the stiffness criterion - it is 4.2.3.3(3) (4.2.3.3(4) is the storey resistance ratio, now the weak-storey check)
 
 ## Next
-- [ ] Mass irregularity: storey mass vs adjacent storeys - EN 1998-1 4.2.3.3(3) (ASCE 7 Table 12.3-2 type 2: > 150 %)
 - [ ] Torsional radius r vs radius of gyration ls and eccentricity e0 ≤ 0.3 r - EN 1998-1 4.2.3.2(6)
 - [ ] Accidental torsion e_ai = ±0.05 L_i and the δ = 1 + 0.6 x/L_e factor - EN 1998-1 4.3.2, 4.3.3.2.4
 - [ ] Wind-induced top acceleration / occupant comfort (ISO 10137)

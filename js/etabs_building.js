@@ -57,6 +57,8 @@
     d.modal = [[1.12, 0, .742, .004], [1.01, .728, 0, .006], [.86, .003, .004, .731], [.36, 0, .121, .002], [.33, .128, 0, .001], [.28, .002, .001, .119],
       [.20, 0, .044, .001], [.18, .047, 0, 0], [.16, .001, .001, .043], [.14, 0, .021, 0], [.12, .022, 0, 0], [.11, 0, 0, .019]]
       .map(([T, ux, uy, rz], i) => { sx += ux; sy += uy; sr += rz; return { case: 'Modal', mode: i + 1, T, Ux: ux, Uy: uy, Rz: rz, SumUx: sx, SumUy: sy, SumRz: sr }; });
+    // storey masses, t: thicker slab at Story1, plant floor at Story6, light roof (same as the --mock bridge)
+    d.masses = st.map((x, i) => ({ story: x.name, mx: [430, 405, 405, 405, 405, 470, 405, 405, 405, 330][i], my: [430, 405, 405, 405, 405, 470, 405, 405, 405, 330][i] }));
     return d;
   }
 
@@ -193,6 +195,23 @@
           r.oflag = r.o1 != null && r.o1 < 0.7 && i + 2 < rows.length;   // not against the roof storey (its demand is one floor)
           out.weak.push(r);
         });
+      });
+    }
+    // 10. mass irregularity - EN 1998-1 4.2.3.3(3) (storey mass constant or reducing gradually upwards); limit of
+    //     ASCE 7 Table 12.3-2 type 2: m_i > 1.5 × an adjacent storey (a roof lighter than the floor below is not considered)
+    out.mass = [];
+    const ms = st.map(x => { const r = (d.masses || []).find(q => q.story === x.name); return r ? { story: x.name, z: x.elev, m: Math.max(+r.mx || 0, +r.my || 0) } : null; });
+    if (ms.every(x => x && x.m > 0)) {
+      ms.forEach((r, i) => {
+        const lo = ms[i - 1], up = i + 1 < ms.length ? ms[i + 1] : null;
+        // the storey below the roof is not compared with a lighter roof (ASCE 7 Table 12.3-2 type 2)
+        const cmp = [lo, up].filter(Boolean).filter(a => !(a === up && i + 2 === ms.length && up.m < r.m));
+        r.adj = cmp.length ? Math.min(...cmp.map(a => a.m)) : null;
+        r.ratio = r.adj ? r.m / r.adj : null;
+        r.up = lo ? r.m / lo.m : null;      // vs the storey below: > 1 = heavier upwards
+        r.cls = r.ratio == null ? '–' : r.ratio > 1.5 ? 'Mass irregular' : r.up != null && r.up > 1.1 ? 'Heavier than below' : 'Regular';
+        r.U = r.ratio == null ? 0 : r.ratio / 1.5;
+        out.mass.push(r);
       });
     }
     return out;
@@ -457,6 +476,7 @@
       ${sumCard('base', 'Overturning', R.base.some(x => Number.isFinite(x.fos)) ? oU : null, 'required ÷ provided safety')}
       ${sumCard('modal', 'Modal mass participation', R.modal ? R.modal.U : null, R.modal ? `ΣU<sub>X</sub> ${fmt(R.modal.sum.X * 100, 1)} % · ΣU<sub>Y</sub> ${fmt(R.modal.sum.Y * 100, 1)} % · T<sub>1</sub> ${fmt(R.modal.T1, 2)} s` : '')}
       ${R.soft.length ? sumCard('soft', 'Soft storey k<sub>i</sub>/k<sub>i+1</sub>', Umax(R.soft), (() => { const w = R.soft.filter(r => r.r1 != null).reduce((a, r) => (!a || r.r1 < a.r1 ? r : a), null); return w ? `min ${fmt(w.r1, 2)} at ${esc(w.story)} ${w.dir} (0.7)` : ''; })()) : ''}
+      ${R.mass.length ? sumCard('mass', 'Mass irregularity m<sub>i</sub>/m<sub>adj</sub>', Umax(R.mass), (() => { const w = R.mass.reduce((a, r) => (r.ratio != null && (!a || r.ratio > a.ratio) ? r : a), null); return w ? `max ${fmt(w.ratio, 2)} at ${esc(w.story)} (1.5)` : ''; })()) : ''}
       ${R.weak.length ? sumCard('weak', 'Weak storey V<sub>Rd,i</sub>/V<sub>Rd,i+1</sub>', Umax(R.weak), (() => { const w = R.weak.filter(r => r.r1 != null).reduce((a, r) => (!a || r.r1 < a.r1 ? r : a), null); return w ? `min ${fmt(w.r1, 2)} at ${esc(w.story)} ${w.dir} (0.8)` : ''; })()) : ''}
       ${R.bs ? `<a class="card bc-sum" href="#bc-bshear"><div class="label">Base shear V<sub>RS</sub> / F<sub>b</sub></div><div class="value">${R.bs.map(r => (r.ratio != null ? fmt(r.ratio, 2) : '–')).join(' · ')} <small>X · Y</small></div><div class="foot">${R.bs.every(r => r.ratio == null || r.ratio >= 0.8) ? '<span class="res ok">✓ OK</span>' : '<span class="res bad">! Check</span>'} <span>T<sub>1</sub> ${R.bs.map(r => fmt(r.T1, 2)).join(' / ')} s vs C<sub>t</sub>H<sup>¾</sup> ${fmt(R.bs[0].Tct, 2)} s</span></div></a>` : ''}
       ${MC ? `<a class="card bc-sum" href="#bc-mods"><div class="label">Stiffness modifiers</div><div class="value">${MC.filter(r => r.st === 'bad').length} <small>of ${MC.length} properties flagged</small></div><div class="foot">${MC.some(r => r.st === 'bad') ? '<span class="res bad">✗ Revise</span>' : MC.some(r => r.st === 'warn') ? '<span class="res ok">✓ OK</span> <span>with notes</span>' : '<span class="res ok">✓ OK</span>'} <span>${PURPOSE[s.kPurpose][0].split(' (')[0]}</span></div></a>` : ''}
@@ -510,6 +530,14 @@
         ${tbl([['Storey', r => esc(r.story)], ['Dir.', r => r.dir], ['V<sub>i</sub> kN', r => fmt(r.V, 0), 'num'], ['d<sub>r</sub> mm', r => fmt(r.d * 1000, 2), 'num'], ['k<sub>i</sub> kN/m', r => r.k ? fmt(r.k, 0) : '–', 'num'], ['k<sub>i</sub>/k<sub>i+1</sub>', r => r.r1 != null ? fmt(r.r1, 2) : '–', 'num'], ['k<sub>i</sub>/k̄<sub>3 above</sub>', r => r.r3 != null ? fmt(r.r3, 2) : '–', 'num'], ['Class', r => esc(r.cls)], ['U', r => r.r1 != null ? api.ubar(r.U) : '']], top(R.soft))}</div>
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(r => `${esc(r.story)} ${r.dir}: ${esc(r.cls).toLowerCase()} (k<sub>i</sub>/k<sub>i+1</sub> = ${fmt(r.r1, 2)})`).join(' · ')} → the building is not regular in elevation (EN 1998-1 4.2.3.1): use the modal response spectrum analysis (Table 4.1) and reduce q<sub>0</sub> by 20 % (5.2.2.2(3)); better, stiffen the soft storey.` : 'Stiffness constant or reducing gradually upwards in X and Y: regular in elevation for the stiffness criterion (EN 1998-1 4.2.3.3(3)).'}</div>
         <p class="muted bc-pad">k<sub>i</sub> from the seismic case with the largest base shear in each direction (storey shear and storey drift of the same case). EN 1998-1 gives the criterion without numbers; the ASCE 7 limits are a common quantification.</p>`);
+    }
+    if (R.mass.length) {
+      const bad = R.mass.filter(r => r.cls === 'Mass irregular'), heavy = R.mass.filter(r => r.cls === 'Heavier than below'), tot = R.mass.reduce((a, r) => a + r.m, 0);
+      html += card('mass', 'Mass irregularity: storey mass', 'EN 1998-1 4.2.3.3(3)', 'mass constant or reducing gradually upwards · irregular if m<sub>i</sub> &gt; 1.5·m of an adjacent storey (limit of ASCE 7 Table 12.3-2, type 2; a lighter roof is not considered)',
+        `<div class="bc-split">${profile([{ n: 'Storey mass', c: '--s1', pts: R.mass.map(r => ({ story: r.story, z: r.z, v: r.m })) }], { title: 'Storey mass', xlabel: 'storey mass t', unit: 't', fmt: v => fmt(v, 0) })}
+        ${tbl([['Storey', r => esc(r.story)], ['m<sub>i</sub> t', r => fmt(r.m, 1), 'num'], ['m<sub>i</sub>/m<sub>i−1</sub>', r => r.up != null ? fmt(r.up, 2) : '–', 'num'], ['m<sub>i</sub>/m<sub>adj,min</sub>', r => r.ratio != null ? fmt(r.ratio, 2) : '–', 'num'], ['Class', r => esc(r.cls)], ['U', r => r.ratio != null ? api.ubar(r.U) : '']], R.mass.slice().sort((a, c) => c.z - a.z))}</div>
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(r => `${esc(r.story)}: m = ${fmt(r.m, 0)} t = ${fmt(r.ratio, 2)} × the lighter adjacent storey`).join(' · ')} → not regular in elevation (EN 1998-1 4.2.3.1): modal response spectrum analysis (Table 4.1), q<sub>0</sub> − 20 % (5.2.2.2(3)); check the heavy storey's columns for the extra inertia force.` : 'Storey masses within 1.5 × the adjacent storeys: regular in elevation for the mass criterion.'}${heavy.length ? `<br>Heavier than the storey below by more than 10 %: ${heavy.map(r => `${esc(r.story)} (× ${fmt(r.up, 2)})`).join(', ')} - mass should reduce gradually upwards (4.2.3.3(3)); acceptable within 1.5, but keep the extra mass (plant, storage) in the seismic mass G + ψ<sub>E</sub>·Q.` : ''}</div>
+        <p class="muted bc-pad">Storey masses from the ETABS “Mass Summary by Story” table (mass source of the model) · total ${fmt(tot, 0)} t = ${fmt(tot * 9.81, 0)} kN. EN 1998-1 gives the criterion without a number; the ASCE 7 ratio is a common quantification.</p>`);
     }
     if (R.weak.length) {
       const bad = R.weak.filter(r => /weak/i.test(r.cls)), om = R.weak.filter(r => r.oflag);
@@ -585,7 +613,7 @@
         if (!cs.length) { err = 'Give at least one combination a role (Seismic, Wind SLS or ULS).'; return rer(); }
         busy = 'read'; err = ''; rer();
         EC.etabs.live.get('/building?' + cs.map(c => 'c=' + encodeURIComponent(c)).join('&')).then(j => {
-          b.data = { stories: j.stories || [], drifts: j.drifts || [], forces: j.forces || [], torsion: j.torsion || [], base: j.base || [], buckling: j.buckling || [], modal: j.modal || [] };
+          b.data = { stories: j.stories || [], drifts: j.drifts || [], forces: j.forces || [], torsion: j.torsion || [], base: j.base || [], buckling: j.buckling || [], modal: j.modal || [], masses: j.masses || [] };
           b.file = String(j.file || '').split(/[\\/]/).pop(); b.at = Date.now(); b.demo = false;
           if (j.plan && b.set.Bx === DEF.Bx && b.set.By === DEF.By) { b.set.Bx = j.plan.Bx; b.set.By = j.plan.By; }
           if (!b.data.stories.length) throw new Error('ETABS returned no storeys.');

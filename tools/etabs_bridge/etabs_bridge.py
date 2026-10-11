@@ -19,7 +19,7 @@ Endpoints (JSON):
     GET /model                     load combinations and load cases
     GET /selection                 members selected in ETABS now (beams, columns, braces, piers, joints)
     GET /building?c=<combo>&c=...  global building checks: stories, storey drifts, storey forces,
-                                   max / average displacement ratios, base reactions, buckling factors
+                                   max / average displacement ratios, base reactions, buckling factors, modes, storey masses
     GET /results?c=<combo>&c=...&k=beams&k=columns&k=braces&k=piers&k=reactions[&sel=1]
                                    results as ETABS-style tables (header row, units row, rows);
                                    sel=1: only the members selected in ETABS
@@ -50,7 +50,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.8'
+VERSION = '1.9'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -475,7 +475,23 @@ def building_from_model(m, combos, cset):
                 break
     except Exception as e:
         print('display tables not available:', e)
-    return {'stories': stories, 'drifts': drifts, 'forces': forces, 'torsion': torsion, 'base': base_r, 'buckling': buck, 'modal': modal}
+    # storey masses (t with kN, m units): Mass Summary by Story, or the Centers of Mass and Rigidity table
+    masses, names_ = [], {x['name'] for x in stories}
+    for key in ('Mass Summary by Story', 'Centers Of Mass And Rigidity'):
+        try:
+            for r in table(m, key):
+                if pick(r, 'Story') in names_:
+                    mx, my = pick(r, 'UX', 'MassX', default=0), pick(r, 'UY', 'MassY', default=0)
+                    old_ = next((x for x in masses if x['story'] == r['Story']), None)
+                    if old_:   # several diaphragms on one storey
+                        old_['mx'] += mx; old_['my'] += my
+                    else:
+                        masses.append({'story': r['Story'], 'mx': mx, 'my': my})
+        except Exception:
+            continue
+        if masses:
+            break
+    return {'stories': stories, 'drifts': drifts, 'forces': forces, 'torsion': torsion, 'base': base_r, 'buckling': buck, 'modal': modal, 'masses': masses}
 
 
 COMBO_TYPES = {0: 'Linear Add', 1: 'Envelope', 2: 'Absolute Add', 3: 'SRSS', 4: 'Range Add'}
@@ -809,6 +825,7 @@ def modifiers_from_model(m):
     return {'props': out}
 
 
+MOCK_MASS = [430, 405, 405, 405, 405, 470, 405, 405, 405, 330]      # demo storey masses, t
 SEC_RECT, SEC_CIRCLE = 8, 9                                  # eFramePropType
 
 
@@ -1062,8 +1079,10 @@ class Mock:
         for i, (T, ux, uy, rz) in enumerate(mm):
             sx, sy, sr = sx + ux, sy + uy, sr + rz
             modal.append({'case': 'Modal', 'mode': i + 1, 'T': T, 'Ux': ux, 'Uy': uy, 'Rz': rz, 'SumUx': sx, 'SumUy': sy, 'SumRz': sr})
+        # storey masses, t: thicker transfer slab at Story1, plant floor at Story6, light roof (same as the page demo)
+        masses = [{'story': s['name'], 'mx': mt, 'my': mt} for s, mt in zip(st, MOCK_MASS)]
         return {'file': self.status()['file'], 'stories': st, 'drifts': drifts, 'forces': forces, 'torsion': torsion, 'base': base, 'buckling': buck, 'modal': modal,
-                'plan': {'Bx': 24, 'By': 18}}
+                'masses': masses, 'plan': {'Bx': 24, 'By': 18}}
 
     def selection(self):
         return {'items': [{'kind': 'beams', 'story': b[0], 'label': b[1]} for b in self.BEAMS if b[2] in self.SEL['frames']] +

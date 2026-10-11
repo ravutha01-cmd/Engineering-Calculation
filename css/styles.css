@@ -70,6 +70,19 @@ h1, h2, h3 { margin: 0; line-height: 1.25; }
 .nav .sub a { padding-left: 34px; font-size: 13px; }
 .nav .count { margin-left: auto; font-size: 11px; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 0 7px; }
 .nav h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 16px 10px 6px; }
+.nav h4.tool { color: var(--accent); border-top: 1px solid var(--border); padding-top: 12px; margin-top: 14px; }
+.nav h4.tool small { display: block; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.tool-tag { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); margin-bottom: 4px; }
+.tool-tag .icon { width: 14px; height: 14px; }
+.tool-card { padding: 14px 16px; cursor: pointer; transition: border-color .15s; display: flex; flex-direction: column; gap: 12px; }
+.tool-card:hover { border-color: var(--accent); }
+.tool-card .top { display: flex; align-items: center; gap: 12px; }
+.tool-card .ic { width: 40px; height: 40px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex: none; }
+.tool-card h3 { font-size: 15px; }
+.tool-card .meta { color: var(--muted); font-size: 12px; }
+.tool-card .n { margin-left: auto; font-size: 24px; text-align: right; line-height: 1; }
+.tool-card .n small { display: block; font-size: 11px; font-weight: 500; color: var(--muted); margin-top: 3px; }
+.tool-card .foot { display: flex; gap: 8px; flex-wrap: wrap; }
 .main { overflow: auto; padding: 22px 26px 60px; }
 .icon { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 

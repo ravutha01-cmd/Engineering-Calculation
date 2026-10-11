@@ -27,6 +27,7 @@ Endpoints (JSON):
                                    sel=1: only the members selected in ETABS
     GET /modifiers                 stiffness / mass modifiers of the frame and area properties (and per-object overrides),
                                    with the material and what each property is used for (columns, beams, walls, slabs)
+    GET /supports?c=<combo>&c=...  restrained joints (plan x, y) with their reactions for the combinations (uplift / pile tension)
     GET /strength                  columns and wall panels of every storey with section size, material strength and
                                    shear areas (storey shear resistance for the weak-storey check)
     GET /loads                     load patterns, load cases and load combinations (with their cases)
@@ -45,6 +46,7 @@ import argparse
 import csv
 import io
 import json
+import re
 import math
 import subprocess
 import sys
@@ -52,7 +54,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.11'
+VERSION = '1.12'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -235,6 +237,18 @@ class Etabs:
 
     def modifiers(self):
         return modifiers_from_model(self.attach())
+
+    def supports(self, combos):
+        m = self.attach()
+        if not combos:
+            raise BridgeError('Select at least one load combination')
+        cset = set(self.model_info()['combos'])
+        old = m.GetPresentUnits()
+        m.SetPresentUnits(KN_M_C)
+        try:
+            return supports_from_model(m, combos, cset)
+        finally:
+            m.SetPresentUnits(old)
 
     def strength(self):
         m = self.attach()
@@ -864,6 +878,55 @@ def modifiers_from_model(m):
     return {'props': out}
 
 
+def supports_from_model(m, combos, cset):
+    """restrained joints with plan coordinates and their reactions (kN, kN-m) for the requested combinations / cases"""
+    setup = m.Results.Setup
+    setup.DeselectAllCasesAndCombosForOutput()
+    for c in combos:
+        ok(setup.SetComboSelectedForOutput(c, True) if c in cset else setup.SetCaseSelectedForOutput(c, True), 'select ' + c)
+    r = ok(m.Results.JointReact('All', 2, 0, [], [], [], [], [], [], [], [], [], [], []), 'Results.JointReact')
+    n, obj, _elm, case, step_type, _step_num, F1, F2, F3, M1, M2, M3 = r
+    out = {}
+    for i in range(n or 0):
+        nm = obj[i]
+        if nm not in out:
+            try:
+                if not any(ok(m.PointObj.GetRestraint(nm, []), 'PointObj.GetRestraint')[0] or []):
+                    out[nm] = None
+                    continue
+                label, story = ok(m.PointObj.GetLabelFromName(nm, '', ''), 'PointObj.GetLabelFromName')[:2]
+                x, y, z = ok(m.PointObj.GetCoordCartesian(nm, 0, 0, 0), 'PointObj.GetCoordCartesian')[:3]
+            except Exception:
+                out[nm] = None
+                continue
+            out[nm] = {'name': nm, 'label': label, 'story': story, 'x': x, 'y': y, 'z': z, 'rows': []}
+        if out[nm] is None:
+            continue
+        out[nm]['rows'].append({'combo': case[i], 'step': step_type[i], 'FX': F1[i], 'FY': F2[i], 'FZ': F3[i], 'MX': M1[i], 'MY': M2[i], 'MZ': M3[i]})
+    return {'supports': [v for v in out.values() if v]}
+
+
+def mock_supports(combos, base_fn):
+    """demo supports: 20 columns on the 6 m grid of the 24 x 18 m demo building; FZ = tributary gravity + overturning
+    shared by the columns (frame action): ΔFZ = M·(x - x_c) / Σ(x - x_c)² (same as the Building checks demo)"""
+    pts = [(x, y) for y in (0, 6, 12, 18) for x in (0, 6, 12, 18, 24)]
+    trib = lambda x, y: (3 if x in (0, 24) else 6) * (3 if y in (0, 18) else 6)
+    sxx, syy = sum((x - 12) ** 2 for x, _ in pts), sum((y - 9) ** 2 for _, y in pts)
+    out = []
+    for k, (x, y) in enumerate(pts):
+        rows = []
+        for c in combos:
+            b = base_fn(c)
+            if not b:
+                continue
+            g = b['FZ'] / 432.0
+            for step, sg in (('Max', 1), ('Min', -1)) if b.get('step') == 'Max' or re.search(r'\+E[XY]$', c) else (('', 1),):   # seismic: ±E
+                fz = g * trib(x, y) + sg * (b['MY'] * (x - 12) / sxx + b['MX'] * (y - 9) / syy)
+                rows.append({'combo': c, 'step': step, 'FX': b['FX'] / 20, 'FY': b['FY'] / 20, 'FZ': round(fz, 1), 'MX': 0, 'MY': 0, 'MZ': 0})
+        out.append({'name': str(400 + k), 'label': 'C%d' % (k + 1), 'story': 'Base', 'x': x, 'y': y, 'z': 0, 'rows': rows})
+    return {'supports': out}
+
+
 MOCK_MASS = [430, 405, 405, 405, 405, 470, 405, 405, 405, 330]      # demo storey masses, t
 SEC_RECT, SEC_CIRCLE = 8, 9                                  # eFramePropType
 
@@ -992,6 +1055,12 @@ class Mock:
             {'kind': 'frame', 'name': 'HEB300', 'mat': 'Steel', 'use': {'braces': 8}, 'mods': F(), 'over': []},
             {'kind': 'area', 'name': 'W250 C40', 'mat': 'Concrete', 'use': {'walls': 40}, 'mods': A(f22=0.7, f12=0.7, m11=0.7, m22=0.7), 'over': []},
             {'kind': 'area', 'name': 'S200 C30', 'mat': 'Concrete', 'use': {'slabs': 60}, 'mods': A(m11=0.25, m22=0.25, m12=0.25, Mass=0.9), 'over': []}]}
+
+    def supports(self, combos):
+        if not combos:
+            raise BridgeError('Select at least one load combination')
+        base = {r['combo']: r for r in self.building(combos)['base']}
+        return mock_supports(combos, base.get)
 
     def strength(self):
         """the demo building: 20 columns on a 6 m grid (C600 C40 storeys 1-3, C500 C35 4-7, C400 C30 8-10) and a core of
@@ -1220,6 +1289,8 @@ def make_handler(src, origins):
                     return self.send(200, src.modifiers())
                 if u.path == '/loads':
                     return self.send(200, src.loads())
+                if u.path == '/supports':
+                    return self.send(200, src.supports(q.get('c', [])))
                 if u.path == '/strength':
                     return self.send(200, src.strength())
                 if u.path == '/building':

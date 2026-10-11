@@ -10,7 +10,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ROLES = { seis: 'Seismic', wind: 'Wind SLS', uls: 'ULS', off: 'Not used' };
   const ROLE_ORDER = ['seis', 'wind', 'uls', 'off'];
-  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075 };
+  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0 };
   let busy = '', err = '';
 
   const B = () => { const p = api.proj(); p.building = p.building || {}; const b = p.building; b.set = Object.assign({}, DEF, b.set || {}); b.roles = b.roles || {}; return b; };
@@ -63,6 +63,17 @@
     d.plan_cm = d.masses.map((r, i) => ({ story: r.story, diaph: 'D1', m: r.mx, mmi: r.mx * (24 * 24 + 18 * 18) / 12, xcm: 12, ycm: 9, xcr: Math.round((13.6 + 0.09 * i) * 100) / 100, ycr: Math.round((9.3 + 0.02 * i) * 100) / 100 }));
     d.rs_ecc = [{ case: 'EQX RS', ecc: 0.05, dirs: ['U1'] }, { case: 'EQY RS', ecc: 0.05, dirs: ['U2'] }];
     return d;
+  }
+
+  /* demo supports: 20 columns on the 6 m grid; FZ = tributary gravity + overturning shared by the columns
+     ΔFZ = M·(x − x_c)/Σ(x − x_c)² (same as the --mock bridge /supports) */
+  function demoSupports(d) {
+    const pts = []; [0, 6, 12, 18].forEach(y => [0, 6, 12, 18, 24].forEach(x => pts.push([x, y])));
+    const trib = (x, y) => ((x === 0 || x === 24) ? 3 : 6) * ((y === 0 || y === 18) ? 3 : 6);
+    const sxx = pts.reduce((a, p) => a + (p[0] - 12) ** 2, 0), syy = pts.reduce((a, p) => a + (p[1] - 9) ** 2, 0);
+    return pts.map(([x, y], k) => ({ name: String(400 + k), label: 'C' + (k + 1), story: 'Base', x, y, z: 0,
+      rows: [].concat(...d.base.map(b => (b.step === 'Max' || /\+E[XY]$/.test(b.combo) ? [['Max', 1], ['Min', -1]] : [['', 1]]).map(([step, sg]) => ({ combo: b.combo, step, FX: b.FX / 20, FY: b.FY / 20,
+        FZ: Math.round((b.FZ / 432 * trib(x, y) + sg * (b.MY * (x - 12) / sxx + b.MX * (y - 9) / syy)) * 10) / 10, MX: 0, MY: 0, MZ: 0 })))) }));
   }
 
   /* ---------- checks ---------- */
@@ -267,7 +278,36 @@
       const wcase = wb.filter(r => Math.abs(dir === 'X' ? r.FX : r.FY) === Vas).map(r => r.combo)[0] || '';
       out.wc.push({ dir, H, bw, dw, nst: st.length, rho: mt > 0 && H > 0 ? mt * 1000 / (bw * dw * H) : null, n1: 1 / m1.T, mode: m1.mode, Vas: Vas > 0 ? Vas : null, Mas: Mas > 0 ? Mas : null, wcase });
     });
+    // 14. support uplift / pile tension - EN 1997-1 7.6.3.1(2): F_t;d ≤ R_t;d (eq. 7.12). F_t;d = −FZ_min − 0.9·W_f
+    //     (foundation weight favourable, γ_G,inf = 0.9) over the ULS and seismic combinations carrying vertical load
+    out.sup = { list: [], skipped: [] };
+    if ((d.supports || []).length) {
+      const fzOf = c => { const r = d.base.find(q => q.combo === c); return r ? Math.abs(r.FZ) : 0; };
+      const cs = [...new Set(d.supports.flatMap(p => p.rows.map(r => r.combo)))].filter(c => role(c) === 'uls' || role(c) === 'seis');
+      const use = cs.filter(c => fzOf(c) > 1); out.sup.skipped = cs.filter(c => fzOf(c) <= 1);
+      const Wf = +s.Wf || 0, Rt = +s.Rtd || 0;
+      d.supports.forEach(p => {
+        const rs = p.rows.filter(r => use.includes(r.combo)); if (!rs.length) return;
+        const mn = rs.reduce((a, r) => (r.FZ < a.FZ ? r : a)), mx = rs.reduce((a, r) => (r.FZ > a.FZ ? r : a));
+        const T = Math.max(0, -mn.FZ - 0.9 * Wf);
+        out.sup.list.push({ name: p.name, label: p.label, x: +p.x, y: +p.y, min: mn, max: mx, T, U: T > 0 ? (Rt > 0 ? T / Rt : 9.99) : 0,
+          cls: T > 0 ? (Rt > 0 && T <= Rt ? 'Tension ≤ R_t,d' : 'Uplift') : mn.FZ < 0 ? 'Uplift held by W_f' : 'Compression' });
+      });
+    }
     return out;
+  }
+
+  /* support plan (true scale): FZ,min at each support - compression filled, tension outlined in the critical colour */
+  function supPlan(list) {
+    if (!list.length) return '';
+    const xs = list.map(p => p.x), ys = list.map(p => p.y), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const W = 380, pad = 26, sc = Math.min((W - 2 * pad) / Math.max(x1 - x0, 1), 300 / Math.max(y1 - y0, 1)), Hh = (y1 - y0) * sc + 2 * pad + 18;
+    const X = x => pad + (x - x0) * sc, Y = y => Hh - 18 - pad - (y - y0) * sc, fmax = Math.max(...list.map(p => Math.abs(p.min.FZ)), 1);
+    const dots = list.map(p => { const r = 4 + 9 * Math.sqrt(Math.abs(p.min.FZ) / fmax), t = p.min.FZ < 0;
+      return `<g class="pt"><circle cx="${X(p.x).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="${r.toFixed(1)}" fill="${t ? 'var(--surface)' : 'var(--s1)'}" stroke="${t ? 'var(--critical)' : 'var(--surface)'}" stroke-width="${t ? 2.5 : 1.5}"><title>${esc(p.label)} (${api.fmt(p.x, 2)}, ${api.fmt(p.y, 2)}) · FZ,min = ${api.fmt(p.min.FZ, 0)} kN (${esc(p.min.combo)}) · FZ,max = ${api.fmt(p.max.FZ, 0)} kN</title></circle></g>`; }).join('');
+    return `<figure class="bc-chart"><svg viewBox="0 0 ${W} ${Hh.toFixed(0)}" role="img" aria-label="Support reactions in plan">
+      <line x1="${X(x0)}" x2="${X(x1)}" y1="${Hh - 10}" y2="${Hh - 10}" stroke="var(--axis)"/><text x="${(X(x0) + X(x1)) / 2}" y="${Hh - 13}" text-anchor="middle" class="ax">${api.fmt(x1 - x0, 2)} m</text>
+      ${dots}</svg><figcaption class="legend"><span><i style="background:var(--s1)"></i>compression (FZ,min)</span><span><i style="background:var(--surface);box-shadow:inset 0 0 0 2px var(--critical)"></i>uplift</span><span>size ∝ |FZ,min|</span></figcaption></figure>`;
   }
 
   /* storey shear resistance of one vertical member along X and Y, kN (a resistance index for comparing storeys):
@@ -566,6 +606,7 @@
       ${sumCard('base', 'Overturning', R.base.some(x => Number.isFinite(x.fos)) ? oU : null, 'required ÷ provided safety')}
       ${sumCard('modal', 'Modal mass participation', R.modal ? R.modal.U : null, R.modal ? `ΣU<sub>X</sub> ${fmt(R.modal.sum.X * 100, 1)} % · ΣU<sub>Y</sub> ${fmt(R.modal.sum.Y * 100, 1)} % · T<sub>1</sub> ${fmt(R.modal.T1, 2)} s` : '')}
       ${R.soft.length ? sumCard('soft', 'Soft storey k<sub>i</sub>/k<sub>i+1</sub>', Umax(R.soft), (() => { const w = R.soft.filter(r => r.r1 != null).reduce((a, r) => (!a || r.r1 < a.r1 ? r : a), null); return w ? `min ${fmt(w.r1, 2)} at ${esc(w.story)} ${w.dir} (0.7)` : ''; })()) : ''}
+      ${R.sup.list.length ? sumCard('sup', 'Support uplift F<sub>t,d</sub>/R<sub>t,d</sub>', Umax(R.sup.list), (() => { const w = R.sup.list.reduce((a, p) => (!a || p.min.FZ < a.min.FZ ? p : a), null); return `FZ<sub>min</sub> = ${fmt(w.min.FZ, 0)} kN at ${esc(w.label)}`; })()) : ''}
       ${(() => { const rs = R.wc.map(w => wcResult(wcEl(w.dir))).filter(x => x && x.U != null); return R.wc.length ? sumCard('wcomf', 'Wind comfort a<sub>peak</sub>/a<sub>lim</sub>', rs.length ? Math.max(...rs.map(x => x.U)) : null, rs.length ? `top acceleration ${R.wc.map(w => { const x = wcResult(wcEl(w.dir)); return w.dir + ' ' + (x && x.a ? x.a : '–'); }).join(' · ')}` : '') : ''; })()}
       ${R.acc.cases.some(c => c.U != null) ? sumCard('acc', 'Accidental eccentricity 0.05 / e', Umax(R.acc.cases), R.acc.cases.map(c => `${esc(c.case)} ${c.ecc != null ? fmt(c.ecc, 3) : '–'}`).join(' · ')) : ''}
       ${R.plan.length ? sumCard('plan', 'Torsional radius e<sub>0</sub>/0.3r · l<sub>s</sub>/r', Umax(R.plan), `r<sub>x</sub>/l<sub>s</sub> = ${fmt(R.planModes.rho.X, 2)} · r<sub>y</sub>/l<sub>s</sub> = ${fmt(R.planModes.rho.Y, 2)} (≥ 1)`) : ''}
@@ -623,6 +664,15 @@
         ${tbl([['Storey', r => esc(r.story)], ['Dir.', r => r.dir], ['V<sub>i</sub> kN', r => fmt(r.V, 0), 'num'], ['d<sub>r</sub> mm', r => fmt(r.d * 1000, 2), 'num'], ['k<sub>i</sub> kN/m', r => r.k ? fmt(r.k, 0) : '–', 'num'], ['k<sub>i</sub>/k<sub>i+1</sub>', r => r.r1 != null ? fmt(r.r1, 2) : '–', 'num'], ['k<sub>i</sub>/k̄<sub>3 above</sub>', r => r.r3 != null ? fmt(r.r3, 2) : '–', 'num'], ['Class', r => esc(r.cls)], ['U', r => r.r1 != null ? api.ubar(r.U) : '']], top(R.soft))}</div>
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(r => `${esc(r.story)} ${r.dir}: ${esc(r.cls).toLowerCase()} (k<sub>i</sub>/k<sub>i+1</sub> = ${fmt(r.r1, 2)})`).join(' · ')} → the building is not regular in elevation (EN 1998-1 4.2.3.1): use the modal response spectrum analysis (Table 4.1) and reduce q<sub>0</sub> by 20 % (5.2.2.2(3)); better, stiffen the soft storey.` : 'Stiffness constant or reducing gradually upwards in X and Y: regular in elevation for the stiffness criterion (EN 1998-1 4.2.3.3(3)).'}</div>
         <p class="muted bc-pad">k<sub>i</sub> from the seismic case with the largest base shear in each direction (storey shear and storey drift of the same case). EN 1998-1 gives the criterion without numbers; the ASCE 7 limits are a common quantification.</p>`);
+    }
+    if (R.sup.list.length) {
+      const L = R.sup.list, up = L.filter(p => p.T > 0), bad = up.filter(p => p.U > 1 + 1e-9), crit = L.slice().sort((a, c) => a.min.FZ - c.min.FZ).slice(0, 12);
+      html += card('sup', 'Support uplift and pile tension', 'EN 1997-1 7.6.3.1(2) · EN 1990 6.4.3', `F<sub>t;d</sub> = −FZ<sub>min</sub> − 0.9·W<sub>f</sub> ≤ R<sub>t;d</sub> (7.12) · ${L.length} supports · ULS and seismic combinations with vertical load`,
+        `<div class="bc-inputs">${num('Rtd', 'R<sub>t;d</sub> tension resistance per support', 'kN', '10', 'piles / anchors; 0 = none')}${num('Wf', 'W<sub>f</sub> foundation weight per support', 'kN', '10', 'pile cap / footing + soil, × 0.9')}</div>
+        <div class="bc-split">${supPlan(L)}
+        ${tbl([['Support', p => esc(p.label)], ['x m', p => fmt(p.x, 2), 'num'], ['y m', p => fmt(p.y, 2), 'num'], ['FZ<sub>min</sub> kN', p => `${fmt(p.min.FZ, 0)} <small class="muted">${esc(p.min.combo)}${p.min.step ? ' ' + esc(p.min.step) : ''}</small>`, 'num'], ['FZ<sub>max</sub> kN', p => fmt(p.max.FZ, 0), 'num'], ['F<sub>t;d</sub> kN', p => (p.T > 0 ? fmt(p.T, 0) : '–'), 'num'], ['Class', p => esc(p.cls)], ['U', p => (p.T > 0 ? api.ubar(Math.min(p.U, 9.99)) : '')]], crit)}</div>
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `Uplift at ${bad.length} support(s) (${bad.slice(0, 8).map(p => `${esc(p.label)} ${fmt(p.T, 0)} kN`).join(', ')}${bad.length > 8 ? ', …' : ''}) ${+s.Rtd > 0 ? `&gt; R<sub>t;d</sub> = ${fmt(+s.Rtd, 0)} kN` : 'with no tension resistance'} → tension piles or ground anchors (EN 1997-1 7.6.3, 8), a heavier pile cap / raft, or tie the supports together; the column splice and the base connection carry the tension too.` : up.length ? `Tension at ${up.length} support(s), F<sub>t;d</sub> ≤ R<sub>t;d</sub> = ${fmt(+s.Rtd, 0)} kN.` : 'All supports in compression for the ULS and seismic combinations: no uplift.'}</div>
+        <p class="muted bc-pad">The 12 supports with the lowest FZ are listed; hover a support in the plan for its reactions. ${R.sup.skipped.length ? `Not used (no vertical load, lateral cases alone): ${R.sup.skipped.map(esc).join(', ')}. ` : ''}FZ from the ETABS joint reactions (positive = compression on the foundation). Seismic combinations: the foundation design forces include the capacity-design factors of EN 1998-1 4.4.2.6 / 5.8 - check them in the footing / pile cap elements.</p>`);
     }
     if (R.wc.length) {
       const rows = R.wc.map(w => Object.assign({}, w, { e: wcEl(w.dir) })).map(w => Object.assign(w, { r: wcResult(w.e) }));
@@ -711,7 +761,7 @@
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
       if (d.bc === 'demo') {
-        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength();
+        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data);
         b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
         Object.assign(b.roles, DEMO_ROLES); Object.assign(b.set, { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, Bx: 24, By: 18, fos: 1.0 });
         let n = 0;   // demo ETABS-linked members (beams, columns, footings) for the P-Δ member design
@@ -745,6 +795,7 @@
           if (!b.data.stories.length) throw new Error('ETABS returned no storeys.');
           return EC.etabs.live.get('/modifiers').then(mj => { b.data.mods = mj.props || []; }, () => { b.data.mods = []; })
             .then(() => EC.etabs.live.get('/strength').then(sj => { b.data.strength = sj.elements || []; }, () => { b.data.strength = []; }))
+            .then(() => EC.etabs.live.get('/supports?' + cs.filter(c => b.roles[c] === 'uls' || b.roles[c] === 'seis').map(c => 'c=' + encodeURIComponent(c)).join('&')).then(sj => { b.data.supports = sj.supports || []; }, () => { b.data.supports = []; }))
             .then(() => readNotional(b).catch(() => { b.data.nf = null; b.data.ncombos = null; }));
         }).then(() => {
           busy = ''; api.save(); api.toast('Building read from ETABS'); rer();
@@ -762,5 +813,5 @@
     };
   }
 
-  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => Object.assign(demoBuilding(), { strength: demoStrength() }), _demoRoles: DEMO_ROLES };
+  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); return d; }, _demoRoles: DEMO_ROLES };
 })();

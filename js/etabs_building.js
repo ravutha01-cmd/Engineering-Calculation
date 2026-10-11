@@ -10,7 +10,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ROLES = { seis: 'Seismic', wind: 'Wind SLS', uls: 'ULS', off: 'Not used' };
   const ROLE_ORDER = ['seis', 'wind', 'uls', 'off'];
-  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis' };
+  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075 };
   let busy = '', err = '';
 
   const B = () => { const p = api.proj(); p.building = p.building || {}; const b = p.building; b.set = Object.assign({}, DEF, b.set || {}); b.roles = b.roles || {}; return b; };
@@ -32,7 +32,7 @@
     const st = []; let z = 0;
     for (let i = 0; i < 10; i++) { const h = i ? 3.2 : 3.4; z += h; st.push({ name: 'Story' + (i + 1), elev: Math.round(z * 100) / 100, h }); }
     const W = 9.2 * 24 * 18, n = st.length;
-    const lat = { 'EQX RS': ['X', 0.045, 1.0], 'EQY RS': ['Y', 0.042, 1.15], 'G+0.3Q+EX': ['X', 0.045, 1.0], 'G+0.3Q+EY': ['Y', 0.042, 1.15], 'WX SLS': ['X', 0.010, 0.35], 'WY SLS': ['Y', 0.013, 0.42], 'ULS2 1.35G+1.05Q+1.5W': ['X', 0.016, 0.5] };
+    const lat = { 'EQX RS': ['X', 0.051, 1.0], 'EQY RS': ['Y', 0.047, 1.15], 'G+0.3Q+EX': ['X', 0.051, 1.0], 'G+0.3Q+EY': ['Y', 0.047, 1.15], 'WX SLS': ['X', 0.010, 0.35], 'WY SLS': ['Y', 0.013, 0.42], 'ULS2 1.35G+1.05Q+1.5W': ['X', 0.016, 0.5] };
     const grav = { 'ULS1 1.35G+1.5Q': 1.42, 'ULS2 1.35G+1.05Q+1.5W': 1.3, 'G+0.3Q+EX': 1, 'G+0.3Q+EY': 1 };
     const d = { stories: st, drifts: [], forces: [], torsion: [], base: [], buckling: [], modal: [] };
     Object.keys(DEMO_ROLES).filter(c => DEMO_ROLES[c] !== 'off').forEach(c => {
@@ -127,6 +127,22 @@
       out.modal = { md, n, sum, big, tail, kMin, alt, dom, torsFirst: dom(first) === 'torsion (RZ)',
         U: Math.max(...['X', 'Y'].map(dir => (sum[dir] >= 0.9 || alt ? 0.9 / Math.max(sum[dir], 0.9) : 0.9 / Math.max(sum[dir], 1e-6)))),
         T1: first.T };
+    }
+    // 7. base shear - EN 1998-1 4.3.3.2: T1 ≈ Ct·H^¾, lateral force Fb = Sd(T1)·m·λ, compared with the response-spectrum base shear
+    if (md.length && EC.loads && EC.loads.settings) {
+      const ls = EC.loads.settings(), SP = EC.loads._spectrum(ls), Ct = +s.ct || 0.075, Hh = out.H;
+      const Tct = Ct * Math.pow(Hh, 0.75);
+      const W = Math.max(0, ...d.base.filter(r => role(r.combo) === 'seis').map(r => Math.abs(r.FZ)));
+      out.bs = ['X', 'Y'].map(dir => {
+        const m1 = md.filter(m => (dir === 'X' ? m.Ux : m.Uy) > 0).reduce((a, m) => (!a || (dir === 'X' ? m.Ux : m.Uy) > (dir === 'X' ? a.Ux : a.Uy) ? m : a), null);
+        const T1 = m1 ? m1.T : Tct, lam = T1 <= 2 * SP.TC && st.length > 2 ? 0.85 : 1.0;
+        const sd = SP.sd(T1), Fb = sd * W * lam;
+        const Vrs = Math.max(0, ...d.base.filter(r => role(r.combo) === 'seis').map(r => Math.abs(dir === 'X' ? r.FX : r.FY)));
+        const lfm = T1 <= Math.min(4 * SP.TC, 2.0);
+        const ratio = Fb > 0 ? Vrs / Fb : null;
+        return { dir, mode: m1 ? m1.mode : null, mass: m1 ? (dir === 'X' ? m1.Ux : m1.Uy) : null, T1, Tct, rT: T1 / Tct, lam, sd, W, Fb, Vrs, ratio, lfm, U: ratio ? 0.8 / ratio : 0 };
+      });
+      out.bsSP = SP; out.bsCt = Ct;
     }
     return out;
   }
@@ -365,6 +381,7 @@
       ${sumCard('wind', 'Wind drift', R.wind.length ? wU : null, `drift ÷ h/${s.windLim}`)}
       ${sumCard('base', 'Overturning', R.base.some(x => Number.isFinite(x.fos)) ? oU : null, 'required ÷ provided safety')}
       ${sumCard('modal', 'Modal mass participation', R.modal ? R.modal.U : null, R.modal ? `ΣU<sub>X</sub> ${fmt(R.modal.sum.X * 100, 1)} % · ΣU<sub>Y</sub> ${fmt(R.modal.sum.Y * 100, 1)} % · T<sub>1</sub> ${fmt(R.modal.T1, 2)} s` : '')}
+      ${R.bs ? `<a class="card bc-sum" href="#bc-bshear"><div class="label">Base shear V<sub>RS</sub> / F<sub>b</sub></div><div class="value">${R.bs.map(r => (r.ratio != null ? fmt(r.ratio, 2) : '–')).join(' · ')} <small>X · Y</small></div><div class="foot">${R.bs.every(r => r.ratio == null || r.ratio >= 0.8) ? '<span class="res ok">✓ OK</span>' : '<span class="res bad">! Check</span>'} <span>T<sub>1</sub> ${R.bs.map(r => fmt(r.T1, 2)).join(' / ')} s vs C<sub>t</sub>H<sup>¾</sup> ${fmt(R.bs[0].Tct, 2)} s</span></div></a>` : ''}
       ${MC ? `<a class="card bc-sum" href="#bc-mods"><div class="label">Stiffness modifiers</div><div class="value">${MC.filter(r => r.st === 'bad').length} <small>of ${MC.length} properties flagged</small></div><div class="foot">${MC.some(r => r.st === 'bad') ? '<span class="res bad">✗ Revise</span>' : MC.some(r => r.st === 'warn') ? '<span class="res ok">✓ OK</span> <span>with notes</span>' : '<span class="res ok">✓ OK</span>'} <span>${PURPOSE[s.kPurpose][0].split(' (')[0]}</span></div></a>` : ''}
       ${sumCard('buckling', 'Global buckling α<sub>cr</sub>', R.acr ? R.acr.U : null, R.acr ? `α<sub>cr</sub> = ${fmt(R.acr.a, 2)}${R.acr.a >= 10 ? ' ≥ 10: 1st order' : R.acr.a >= 3 ? ` · sway × ${fmt(R.acr.k, 3)}` : ' < 3'}` : '')}</div>`;
     const ser = (rows, key) => ['X', 'Y'].map((d, i) => ({ n: 'Direction ' + d, c: i ? '--s2' : '--s1', pts: rows.filter(r => r.dir === d).map(r => ({ story: r.story, z: r.z, v: r[key] })) })).filter(x => x.pts.length);
@@ -408,6 +425,19 @@
         `<div class="bc-split">${cumChart(M.md)}
           ${tbl([['Mode', r => r.mode, 'num'], ['T s', r => fmt(r.T, 3), 'num'], ['f Hz', r => r.T > 0 ? fmt(1 / r.T, 2) : '–', 'num'], ['U<sub>X</sub>', r => pc(r.Ux), 'num'], ['U<sub>Y</sub>', r => pc(r.Uy), 'num'], ['R<sub>Z</sub>', r => pc(r.Rz), 'num'], ['ΣU<sub>X</sub>', r => pc(r.SumUx), 'num'], ['ΣU<sub>Y</sub>', r => pc(r.SumUy), 'num'], ['Dominant', r => esc(M.dom(r))]], M.md.slice(0, 30))}</div>
         <div class="bc-verdict ${M.U <= 1 + 1e-9 ? 'ok' : 'bad'}">${verdict}</div>${notes.length ? `<p class="muted bc-pad">Note: ${notes.join('; ')}.</p>` : ''}`);
+    }
+    if (R.bs) {
+      const SP = R.bsSP, tmax = Math.max(4, ...R.bs.map(x => x.T1 * 1.2)), ts = SP.T.filter(t => t <= tmax), ymax = Math.max(...ts.map(t => SP.sd(t))) * 1.1;
+      const vline = (t, key) => ({ p: { y: ['v', 'Y_' + key] }, d: { x: [t, t], y: [0, ymax], ls: 'Dash' } });
+      const marks = [vline(R.bs[0].T1, 'T1,X modal'), vline(R.bs[1].T1, 'T1,Y modal'), vline(R.bs[0].Tct, 'Ct·H^¾')];
+      const chart = EC.mrender ? EC.mrender.plot({ tr: [{ y: ['v', 'Y_Design spectrum Sd/g'] }].concat(marks.map(m => m.p)) }, { tr: [{ x: ts, y: ts.map(t => SP.sd(t)), xu: ['u', 's'], ls: 'Solid' }].concat(marks.map(m => m.d)) }, {}) : '';
+      const CT = [[0.085, 'Steel moment frames · 0.085'], [0.075, 'RC moment frames, steel EBF · 0.075'], [0.05, 'Other (walls, dual) · 0.050']];
+      html += card('bshear', 'Base shear: response spectrum vs lateral force method', 'EN 1998-1 4.3.3.2', `T<sub>1</sub> ≈ C<sub>t</sub>·H<sup>3/4</sup> (4.3.3.2.2(3)) · F<sub>b</sub> = S<sub>d</sub>(T<sub>1</sub>)·m·λ (4.3.3.2.2(1)) · spectrum from Loads &amp; combinations (a<sub>g</sub> = ${fmt(SP.ag, 3)} g, T<sub>C</sub> = ${SP.TC} s)`,
+        `<div class="bc-inputs" style="grid-template-columns:minmax(0,360px)"><label class="bc-in"><span>C<sub>t</sub> structural system</span><select class="ctl" data-bcct>${CT.map(([v, l]) => `<option value="${v}" ${+s.ct === v ? 'selected' : ''}>${l}</option>`).join('')}</select><small>H = ${fmt(R.H, 2)} m → C<sub>t</sub>·H<sup>3/4</sup> = ${fmt(R.bs[0].Tct, 3)} s</small></label></div>
+        <div class="bc-split"><div class="ld-rs" style="padding:0">${chart}</div>
+        ${tbl([['Dir.', r => r.dir], ['Mode', r => r.mode != null ? `${r.mode} <small class="muted">${fmt(r.mass * 100, 0)} %</small>` : '–', 'num'], ['T<sub>1</sub> modal s', r => fmt(r.T1, 3), 'num'], ['T<sub>1</sub>/C<sub>t</sub>H<sup>¾</sup>', r => fmt(r.rT, 2), 'num'], ['S<sub>d</sub>(T<sub>1</sub>)/g', r => fmt(r.sd, 4), 'num'], ['λ', r => r.lam, 'num'], ['W kN', r => fmt(r.W, 0), 'num'], ['F<sub>b</sub> kN', r => fmt(r.Fb, 0), 'num'], ['V<sub>RS</sub> kN', r => fmt(r.Vrs, 0), 'num'], ['V<sub>RS</sub>/F<sub>b</sub>', r => r.ratio != null ? fmt(r.ratio, 2) : '–', 'num']], R.bs)}</div>
+        ${R.bs.map(r => `<div class="bc-verdict ${r.ratio == null || r.ratio >= 0.8 ? 'ok' : 'bad'}">${r.dir}: ${r.lfm ? `T<sub>1</sub> = ${fmt(r.T1, 2)} s ≤ min(4T<sub>C</sub>, 2 s) = ${fmt(Math.min(4 * SP.TC, 2), 2)} s - the lateral force method may also be used (with regularity in elevation, 4.3.3.2.1)` : `T<sub>1</sub> = ${fmt(r.T1, 2)} s > min(4T<sub>C</sub>, 2 s): modal response spectrum analysis required (4.3.3.2.1)`}; V<sub>RS</sub>/F<sub>b</sub> = ${r.ratio != null ? fmt(r.ratio, 2) : '–'}${r.ratio != null && r.ratio < 0.8 ? ' - the response-spectrum base shear is well below the lateral force; check the seismic mass, the modes and the stiffness modifiers' : ''}${r.rT > 1.5 ? ` · modal T<sub>1</sub> is ${fmt(r.rT, 1)} × C<sub>t</sub>H<sup>¾</sup>: the model may be too flexible` : r.rT < 0.6 ? ` · modal T<sub>1</sub> is only ${fmt(r.rT, 1)} × C<sub>t</sub>H<sup>¾</sup>: check the mass and the stiffness` : ''}</div>`).join('')}
+        <p class="muted bc-pad">m = seismic weight W/g from the base reaction of G + ψ<sub>E</sub>·Q; λ = 0.85 for T<sub>1</sub> ≤ 2T<sub>C</sub> and more than two storeys. EN 1998-1 has no minimum ratio between the modal and the lateral-force base shear; 0.8 is used here as a plausibility check of the model.</p>`);
     }
     if (MC) {
       const modTxt = r => { const M = r.p.mods, ks = r.p.kind === 'frame' ? ['I33', 'I22', 'As2', 'As3', 'A', 'J', 'Mass', 'Weight'] : ['f11', 'f22', 'f12', 'm11', 'm22', 'm12', 'Mass', 'Weight'];
@@ -476,6 +506,7 @@
     root.onchange = ev => {
       const t = ev.target;
       if (t.dataset.bcpurpose !== undefined) { B().set.kPurpose = t.value; api.save(); return rer(); }
+      if (t.dataset.bcct !== undefined) { B().set.ct = +t.value; api.save(); return rer(); }
       if (t.dataset.bcset === undefined) return;
       if (t.type === 'checkbox') { B().set[t.dataset.bcset] = t.checked; api.save(); return rer(); }
       const v = parseFloat(t.value); if (!Number.isFinite(v)) return;

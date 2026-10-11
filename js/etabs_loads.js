@@ -397,5 +397,5 @@
     };
   }
 
-  EC.loads = { install(a) { api = a; }, view, mount, _spectrum: spectrum, _generate: generate, _diff: diff, _state: S, _units: units, _guess: guess, CATS };
+  EC.loads = { install(a) { api = a; }, view, mount, settings: () => P().set, _spectrum: spectrum, _generate: generate, _diff: diff, _state: S, _units: units, _guess: guess, CATS };
 })();

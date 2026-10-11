@@ -47,7 +47,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.6'
+VERSION = '1.7'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -517,7 +517,7 @@ def apply_loads(m, body):
         if not old:
             break
     spectrum = set_spectrum(m, body.get('spectrum'))
-    notional = set_notional(m, body.get('notional', []))
+    notional = set_notional(m, body.get('notional', []), bool(body.get('notional_run')))
     n = 0
     for c in body.get('combos', []):
         if not str(c['name']).startswith(prefix):
@@ -529,43 +529,151 @@ def apply_loads(m, body):
     return {'patterns_created': made, 'combos': n, 'removed_left': old, 'notional': notional, 'spectrum': spectrum}
 
 
-def set_notional(m, items):
-    """base load pattern, ratio and direction of ETABS notional load patterns, through the editable
-    database table of notional loads (its field names are discovered, so ETABS versions may differ)"""
+def set_notional(m, items, allow_run=False):
+    """notional (imperfection) loads, fully automatic:
+    1. through ETABS's own notional load patterns (base pattern, ratio, direction) in the editable database
+       table - searched among ALL tables, also the empty ones, field names discovered;
+    2. otherwise, on a manual write (allow_run), as explicit storey forces H_i = ratio * N_i (EN 1992-1-1 5.2(8)):
+       a gravity-only analysis gives each floor's vertical load N_i per base pattern, and H_i is applied as
+       horizontal point loads on the joints of that storey, in the notional pattern (made an 'Other' pattern)."""
     if not items:
         return {'set': 0}
-    dt = m.DatabaseTables
+    why = notional_by_table(m, items)
+    if why is None:
+        return {'set': len(items), 'mode': 'table'}
+    if not allow_run:
+        return {'set': 0, 'pending': True, 'why': why}
     try:
-        n, keys, names, _imp = ok(dt.GetAvailableTables(0, [], [], []), 'GetAvailableTables')[:4]
-        key = next((k for k in (keys or []) if 'notional' in k.lower()), None)
-        if not key:
-            return {'set': 0, 'manual': 'this ETABS version has no editable notional-load table'}
-        ver, fields, data = None, None, None
-        out = ok(dt.GetTableForEditingArray(key, 'All', 0, [], 0, []), 'GetTableForEditingArray')
-        ver, fields, nrec, data = out[0], list(out[1] or []), out[2], list(out[3] or [])
-        f = lambda *w: next((i for i, k in enumerate(fields) if all(x in k.lower() for x in w)), None)
-        i_name, i_base, i_ratio, i_dir = f('name'), f('base'), f('ratio'), f('dir')
-        if None in (i_name, i_base, i_ratio, i_dir):
-            return {'set': 0, 'manual': 'unexpected notional-load table fields: ' + ', '.join(fields)}
-        nf = len(fields)
-        rows = [data[r * nf:(r + 1) * nf] for r in range(nrec or 0)]
-        want = {it['name']: it for it in items}
-        rows = [r for r in rows if r[i_name] not in want]
-        for it in items:
-            r = [''] * nf
-            r[i_name], r[i_base], r[i_ratio] = it['name'], it['base'], f"{float(it['ratio']):.6g}"
-            r[i_dir] = 'Global ' + it['dir'] if 'global' in ' '.join(x for x in data[i_dir::nf] if x).lower() else it['dir']
-            rows.append(r)
-        flat = [x for r in rows for x in r]
-        ok(dt.SetTableForEditingArray(key, ver, fields, len(rows), flat), 'SetTableForEditingArray')
-        # ApplyEditedTables -> [fatal errors, errors, warnings, info, import log, ret]
-        res = dt.ApplyEditedTables(True, 0, 0, 0, 0, '')
-        res = list(res) if isinstance(res, (list, tuple)) else [0, 0, 0, 0, '', res]
-        if (res[0] or 0) + (res[1] or 0):
-            return {'set': 0, 'manual': 'ETABS refused the notional-load table: ' + str(res[4])[:300]}
-        return {'set': len(items)}
+        r = notional_by_forces(m, items)
+        r['why_table'] = why
+        return r
     except Exception as e:
-        return {'set': 0, 'manual': f'{type(e).__name__}: {e}'}
+        traceback.print_exc()
+        return {'set': 0, 'error': f'notional loads not applied: {why}; storey forces: {type(e).__name__}: {e}'}
+
+
+def notional_by_table(m, items):
+    """None when done, else the reason it could not be done"""
+    dt = m.DatabaseTables
+    keys = []
+    for fn, args in (('GetAllTables', (0, [], [], [], [])), ('GetAvailableTables', (0, [], [], []))):
+        try:
+            keys = list(ok(getattr(dt, fn)(*args), fn)[1] or [])
+            if keys:
+                break
+        except Exception:
+            continue
+    cands = [k for k in keys if 'notional' in k.lower()]
+    if not cands:
+        return 'this ETABS version has no notional-load table'
+    last = ''
+    for key in cands:
+        try:
+            out = ok(dt.GetTableForEditingArray(key, 'All', 0, [], 0, []), 'GetTableForEditingArray')
+            ver, fields, nrec, data = out[0], list(out[1] or []), out[2] or 0, list(out[3] or [])
+            if not fields:   # empty table: ask for its importable fields
+                fo = ok(dt.GetAllFieldsInTable(key, 0, 0, [], [], [], [], []), 'GetAllFieldsInTable')
+                ver, fkeys, imp = fo[0], list(fo[2] or []), list(fo[6] or [])
+                fields = [k for k, i in zip(fkeys, imp) if i] or fkeys
+                nrec, data = 0, []
+            low = [k.lower() for k in fields]
+            pick = lambda test: next((i for i, k in enumerate(low) if test(k)), None)
+            i_base = pick(lambda k: 'base' in k)
+            i_name = pick(lambda k: ('name' in k or 'pattern' in k) and 'base' not in k)
+            i_ratio = pick(lambda k: 'ratio' in k or 'coef' in k)
+            i_dir = pick(lambda k: 'dir' in k)
+            if None in (i_name, i_base, i_ratio, i_dir):
+                last = f'{key}: unexpected fields ' + ', '.join(fields)
+                continue
+            nf = len(fields)
+            rows = [data[r * nf:(r + 1) * nf] for r in range(nrec)]
+            want = {it['name'] for it in items}
+            glob = any('global' in str(x).lower() for x in data[i_dir::nf])
+            rows = [r for r in rows if r[i_name] not in want]
+            for it in items:
+                r = [''] * nf
+                r[i_name], r[i_base], r[i_ratio] = it['name'], it['base'], f"{float(it['ratio']):.6g}"
+                r[i_dir] = ('Global ' if glob else '') + it['dir']
+                rows.append(r)
+            ok(dt.SetTableForEditingArray(key, ver, fields, len(rows), [x for r in rows for x in r]), 'SetTableForEditingArray')
+            res = dt.ApplyEditedTables(True, 0, 0, 0, 0, '')       # -> [fatal, errors, warnings, info, log, ret]
+            res = list(res) if isinstance(res, (list, tuple)) else [0, 0, 0, 0, '', res]
+            if (res[0] or 0) + (res[1] or 0):
+                last = f'{key}: ETABS refused it: ' + str(res[4])[:200]
+                continue
+            return None
+        except Exception as e:
+            last = f'{key}: {type(e).__name__}: {e}'
+    return last or 'notional-load table not editable'
+
+
+def notional_by_forces(m, items):
+    bases = sorted({it['base'] for it in items})
+    try:
+        _b, n, names, elev, hgt = ok(m.Story.GetStories_2(0, 0, [], [], [], [], [], [], [], []), 'Story.GetStories_2')[:5]
+    except Exception:
+        n, names, elev, hgt = ok(m.Story.GetStories(0, [], [], [], [], [], [], []), 'Story.GetStories')[:4]
+    stories = sorted([(names[i], elev[i]) for i in range(n) if hgt[i] > 0], key=lambda x: x[1])
+    old = m.GetPresentUnits()
+    m.SetPresentUnits(KN_M_C)
+    try:
+        # 1. gravity-only analysis of the base patterns -> axial load at the bottom of each storey
+        if m.GetModelIsLocked():
+            ok(m.SetModelIsLocked(False), 'SetModelIsLocked')
+        ok(m.Analyze.SetRunCaseFlag('', False, True), 'SetRunCaseFlag (all off)')
+        for b in bases:
+            ok(m.Analyze.SetRunCaseFlag(b, True, False), 'SetRunCaseFlag ' + b)
+        try:
+            ok(m.Analyze.RunAnalysis(), 'RunAnalysis')
+        except BridgeError as e:
+            raise BridgeError(f'{e} - save the ETABS model once (File > Save) so it can be analysed')
+        finally:
+            try:
+                m.Analyze.SetRunCaseFlag('', True, True)   # all cases back to Run
+            except Exception:
+                pass
+        dt = m.DatabaseTables
+        dt.SetLoadCombinationsSelectedForDisplay([])
+        dt.SetLoadCasesSelectedForDisplay(bases)
+        Pbot = {}
+        for r in table(m, 'Story Forces'):
+            if 'bot' in str(pick(r, 'Location', default='Bottom')).lower():
+                Pbot[(pick(r, 'Story'), pick(r, 'OutputCase', 'LoadCase'))] = abs(float(pick(r, 'P', default=0) or 0))
+        # 2. unlock and apply H_i = ratio * (P_bottom(i) - P_bottom(i+1)) on the joints of storey i
+        ok(m.SetModelIsLocked(False), 'SetModelIsLocked')
+        pts = {}
+        for st, _z in stories:
+            try:
+                pts[st] = list(ok(m.PointObj.GetNameListOnStory(st, 0, []), 'PointObj.GetNameListOnStory')[1] or [])
+            except BridgeError:
+                pts[st] = []
+        applied, njoint = 0, 0
+        for it in items:
+            name, base, ratio, d = it['name'], it['base'], float(it['ratio']), it.get('dir', 'X')
+            try:   # a notional-type pattern cannot carry user loads: make it an 'Other' pattern of the same name
+                if int(ok(m.LoadPatterns.GetLoadType(name, 0), 'GetLoadType')[0]) == 12:
+                    try:
+                        ok(m.LoadPatterns.SetLoadType(name, 8), 'SetLoadType')
+                    except BridgeError:
+                        ok(m.LoadPatterns.Delete(name), 'LoadPatterns.Delete')
+                        ok(m.LoadPatterns.Add(name, 8, 0, True), 'LoadPatterns.Add')
+            except BridgeError:
+                ok(m.LoadPatterns.Add(name, 8, 0, True), 'LoadPatterns.Add')
+            for i, (st, _z) in enumerate(stories):
+                above = stories[i + 1][0] if i + 1 < len(stories) else None
+                Ni = Pbot.get((st, base), 0.0) - (Pbot.get((above, base), 0.0) if above else 0.0)
+                js = pts.get(st) or []
+                if not js:
+                    continue
+                f = ratio * max(Ni, 0.0) / len(js)
+                v = [f, 0, 0, 0, 0, 0] if d == 'X' else [0, f, 0, 0, 0, 0]
+                for j in js:
+                    ok(m.PointObj.SetLoadForce(j, name, v, True, 'Global', 0), 'PointObj.SetLoadForce')
+                njoint += len(js)
+            applied += 1
+    finally:
+        m.SetPresentUnits(old)
+    return {'set': applied, 'mode': 'forces', 'stories': len(stories), 'joints': njoint}
 
 
 def set_spectrum(m, sp):
@@ -734,7 +842,18 @@ class Mock:
         self.combos = [c for c in self.combos if not c['name'].startswith(prefix)]
         new = [{'name': c['name'], 'type': int(c.get('type', 0)), 'items': [list(i) for i in c['items']]} for c in body.get('combos', []) if c['name'].startswith(prefix)]
         self.combos += new
-        self.notional = {it['name']: it for it in body.get('notional', [])}
+        # the mock behaves like an ETABS without a notional-load table: storey forces on a manual write
+        items = body.get('notional', [])
+        if items and body.get('notional_run'):
+            self.notional = {it['name']: dict(it, mode='forces') for it in items}
+            for p in self.patterns:
+                if p['name'] in self.notional:
+                    p['type'] = 8
+            nres = {'set': len(items), 'mode': 'forces', 'stories': 10, 'joints': 10 * 24 * len(items), 'why_table': 'this ETABS version has no notional-load table'}
+        elif items:
+            nres = {'set': 0, 'pending': True, 'why': 'this ETABS version has no notional-load table'}
+        else:
+            nres = {'set': 0}
         sp, spr = body.get('spectrum'), None
         if sp:
             self.spectrum = sp
@@ -742,7 +861,7 @@ class Mock:
                 if c['name'] not in {x['name'] for x in self.extra_cases}:
                     self.extra_cases.append({'name': c['name'], 'type': 4})
             spr = {'function': sp['func'], 'cases': [c['name'] for c in sp['cases']], 'warnings': []}
-        return {'patterns_created': made, 'combos': len(new), 'removed_left': [], 'notional': {'set': len(self.notional)}, 'spectrum': spr}
+        return {'patterns_created': made, 'combos': len(new), 'removed_left': [], 'notional': nres, 'spectrum': spr}
 
     def assign_loads(self, body):
         if self.locked and not body.get('unlock'):

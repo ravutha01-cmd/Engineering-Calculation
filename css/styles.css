@@ -867,3 +867,4 @@ tr.ld-removed td { opacity: .75; }
 @media (max-width: 760px) { .list-tools .cg-search { max-width: none; flex-basis: 100%; } .list-n { margin-left: 0; } .bulk-bar .btn:last-child { margin-left: 0; } }
 @media print { .bulk-bar, .list-tools { display: none !important; } }
 .bulk-form .fu { text-transform: none; letter-spacing: 0; font-size: 12.5px; } .sel-tbl td.num { white-space: nowrap; }
+.etabs-msg.info.ld-ok::before { content: '✓'; width: 20px; height: 20px; border: 0; background: var(--accent); color: var(--surface); animation: none; font-size: 12px; }

@@ -29,6 +29,7 @@
   function guess(u, set) {
     const dir = /Y/.test(u.name.replace(/[a-z]/g, '')) ? 'Y' : 'X';   // "Wind Y", "EQY RS", "EY" → Y
     if (u.src === 'case') return u.type === 4 ? { k: 'E', dir, rs: true } : { k: 'off' };
+    if (u.type === 8 && /^N\s.+\s[XY]$/.test(u.name)) return { k: 'N', dir, base: u.name.replace(/^N\s+/, '').replace(/\s+[XY]$/, '') };   // notional loads applied as storey forces
     if (u.type === 12) return { k: 'N', dir, base: u.name.replace(/^N(otional)?[\s_-]+/i, '').replace(/[\s_-]+[XY]$/i, '') };   // "N Dead X" → base Dead
     return ({ 1: { k: 'G' }, 2: { k: 'G' }, 3: { k: 'Q', cat: set.cat }, 4: { k: 'Q', cat: set.cat }, 5: { k: 'E', dir }, 6: { k: 'W', dir }, 7: { k: 'S' }, 10: { k: 'T' }, 11: { k: 'Q', cat: 'H' } })[u.type] || { k: 'off' };
   }
@@ -231,10 +232,14 @@
   }
   async function apply(unlock, withPatterns) {
     const L = P(), p = plan();
-    const r = await live().post('/loads/apply', { prefix: L.set.prefix, patterns: withPatterns ? p.pl.map(({ name, type, sw }) => ({ name, type, sw })) : [], combos: p.gen.map(c => ({ name: c.name, type: c.type, items: c.items })), unlock: !!unlock, notional: notionalDefs(p.after), spectrum: withPatterns && L.set.rs ? spectrumDef() : undefined });
+    const r = await live().post('/loads/apply', { prefix: L.set.prefix, patterns: withPatterns ? p.pl.map(({ name, type, sw }) => ({ name, type, sw })) : [], combos: p.gen.map(c => ({ name: c.name, type: c.type, items: c.items })), unlock: !!unlock, notional: notionalDefs(p.after), notional_run: !!withPatterns, spectrum: withPatterns && L.set.rs ? spectrumDef() : undefined });
     S.rsmsg = r.spectrum && r.spectrum.warnings && r.spectrum.warnings.length ? r.spectrum.warnings.join('; ') : '';
     if (r.spectrum) L.rsSig = rsSig();   // ETABS cannot report the function back: remember what was written to this model
-    S.nmsg = r.notional && r.notional.manual ? r.notional.manual : '';
+    const nr = r.notional || {};
+    S.nmsg = nr.error || nr.manual || '';
+    if (nr.mode === 'table') S.ninfo = `Notional loads set in ETABS: ${nr.set} notional pattern(s) with base pattern, ratio θ<sub>i</sub> and direction.`;
+    else if (nr.mode === 'forces') S.ninfo = `ETABS has no editable notional-load table, so the link applied the notional loads itself: a gravity analysis gave each floor's load N per base pattern, and H<sub>i</sub> = θ<sub>i</sub>·N was put on the ${nr.stories} storeys as horizontal joint loads (${nr.set} pattern(s), ${nr.joints} joint loads). Run the analysis again; write again after changing the gravity loads.`;
+    else if (nr.pending && !S.ninfo) S.ninfo = 'The notional loads are applied on the next Write to ETABS.';
     await readModel(); S.sig = sigOf(S.model); S.last = new Date().toLocaleTimeString();
     return (r.patterns_created.length ? `${r.patterns_created.length} load pattern(s) created · ` : '') + `${r.combos} combination(s) written to ETABS`;
   }
@@ -334,7 +339,7 @@
         <label class="bc-in"><span>m - vertical members contributing</span><input class="ctl" type="number" step="1" min="1" data-ldset="nM" value="${esc(s.nM)}"><small>EC2: members carrying ≥ 50 % of the average load · EC3: columns in a row with N ≥ 50 % of the average</small></label></div>
         <div class="bc-verdict ok">α<sub>h</sub> = 2/√${api.fmt(H, 1)} = <b>${api.fmt(T.ah, 3)}</b> (2/3 … 1) · α<sub>m</sub> = √(0.5·(1 + 1/${s.nM})) = <b>${api.fmt(T.am, 3)}</b> · θ<sub>i</sub> = α<sub>h</sub>·α<sub>m</sub>/200 = <b>${api.fmt(T.th, 5)}</b> = 1/${api.fmt(1 / T.th, 0)}
           <br>Notional force at each floor H<sub>i</sub> = θ<sub>i</sub>·N<sub>Ed</sub> of the floor, in ±X and ±Y; with leading or accompanying wind it acts in the wind's direction (${nN} notional pattern${nN === 1 ? '' : 's'}).</div>
-        ${S.nmsg ? `<div class="etabs-msg info" style="margin:0 16px 12px">ETABS did not take the notional settings automatically (${esc(S.nmsg)}). Set them by hand: <b>Define → Load Patterns</b> → each “N … X/Y” pattern → <b>Modify Lateral Load</b>: base load pattern as in its name, load ratio <b>${api.fmt(T.th, 5)}</b>, direction X or Y.</div>` : ''}
+        ${S.ninfo ? `<div class="etabs-msg info ld-ok" style="margin:0 16px 12px">${S.ninfo}</div>` : ''}${S.nmsg ? `<div class="etabs-msg" style="margin:0 16px 12px">Notional loads: ${esc(S.nmsg)}</div>` : ''}
         <p class="muted bc-pad">EN 1993-1-1 5.3.2(4): sway imperfections may be neglected when H<sub>Ed</sub> ≥ 0.15·V<sub>Ed</sub> (e.g. with wind); EN 1992-1-1 5.2(6): for a bracing system l = height of the building and m = number of vertical members contributing. Notional loads are not used in the seismic combinations.</p>` : ''}</div>`;
     const SP = spectrum(s), ICL = [[0.8, 'I'], [1.0, 'II'], [1.2, 'III'], [1.4, 'IV']];
     const tmax = 4, pts = SP.T.filter(t => t <= tmax), ymax = Math.max(...SP.v) * 1.1;

@@ -21,6 +21,7 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] Stiffness modifiers: frame / shell property modifiers and object overrides read from ETABS, by use (columns, beams, braces, walls, slabs) and material, checked against the purpose of the model - seismic EN 1998-1 4.3.1(7), wind SLS (≈ 1.4 × cracked), P-Δ / αcr EN 1992-1-1 5.8.7.2; steel unreduced; mass, weight, axial area 1.0
 
 ## Fixes
+- [x] 2026-10-11 · Notional loads asked the user to set them by hand when the notional table was not found (it was searched only among the tables that already had data). Now fully automatic: all tables searched (also empty ones, fields read with GetAllFieldsInTable); without such a table, a gravity analysis gives N per floor and H_i = θi·N is applied as storey joint loads (EN 1992-1-1 5.2(8))
 - [x] 2026-10-11 · Building checks guessed EN 1990 EQU combinations (CS-EQU) as seismic - now ULS
 - [x] 2026-10-11 · P-Δ θ was divided by the storey height twice (d_r already a drift ratio) - θ came out ~h times too small (unconservative). Now θ = P·(d_r/h)/V
 - [x] 2026-10-11 · Building checks: Print opened the print dialog twice (the page and the app both handled the click)

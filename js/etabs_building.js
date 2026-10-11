@@ -59,6 +59,8 @@
       .map(([T, ux, uy, rz], i) => { sx += ux; sy += uy; sr += rz; return { case: 'Modal', mode: i + 1, T, Ux: ux, Uy: uy, Rz: rz, SumUx: sx, SumUy: sy, SumRz: sr }; });
     // storey masses, t: thicker slab at Story1, plant floor at Story6, light roof (same as the --mock bridge)
     d.masses = st.map((x, i) => ({ story: x.name, mx: [430, 405, 405, 405, 405, 470, 405, 405, 405, 330][i], my: [430, 405, 405, 405, 405, 470, 405, 405, 405, 330][i] }));
+    // centre of mass at the plan centre, core 1.6-2.4 m off in X, MMI of a uniform 24 × 18 m floor (same as the --mock bridge)
+    d.plan_cm = d.masses.map((r, i) => ({ story: r.story, diaph: 'D1', m: r.mx, mmi: r.mx * (24 * 24 + 18 * 18) / 12, xcm: 12, ycm: 9, xcr: Math.round((13.6 + 0.09 * i) * 100) / 100, ycr: Math.round((9.3 + 0.02 * i) * 100) / 100 }));
     return d;
   }
 
@@ -212,6 +214,28 @@
         r.cls = r.ratio == null ? '–' : r.ratio > 1.5 ? 'Mass irregular' : r.up != null && r.up > 1.1 ? 'Heavier than below' : 'Regular';
         r.U = r.ratio == null ? 0 : r.ratio / 1.5;
         out.mass.push(r);
+      });
+    }
+    // 11. torsional radius and eccentricity - EN 1998-1 4.2.3.2(6): e_0x ≤ 0.30·r_x and r_x ≥ l_s (and in Y).
+    //     r/l_s from the modes (uncoupled: ω_θ/ω_Y = r_x/l_s → r_x/l_s = T_Y/T_θ), l_s = √(MMI/m) of the floor,
+    //     e_0 = distance between the centres of mass and rigidity of ETABS
+    out.plan = []; out.planModes = null;
+    const mdP = (d.modal || []).slice().sort((a, c) => a.mode - c.mode), domOf = r => (r.Rz > r.Ux && r.Rz > r.Uy ? 'R' : r.Ux >= r.Uy ? 'X' : 'Y');
+    const mX = mdP.find(r => domOf(r) === 'X'), mY = mdP.find(r => domOf(r) === 'Y'), mR = mdP.find(r => domOf(r) === 'R');
+    const pcm = d.plan_cm || [];
+    if (mX && mY && mR && pcm.length) {
+      const rho = { X: mY.T / mR.T, Y: mX.T / mR.T };   // r_x / l_s (lateral stiffness in Y) and r_y / l_s
+      out.planModes = { mX, mY, mR, rho };
+      st.forEach(x => {
+        const p = pcm.filter(q => q.story === x.name).sort((a, c) => (c.m || 0) - (a.m || 0))[0]; if (!p) return;
+        const lsFrom = p.mmi > 0 && p.m > 0 ? 'MMI' : 'plan', ls = lsFrom === 'MMI' ? Math.sqrt(p.mmi / p.m) : Math.sqrt((s.Bx * s.Bx + s.By * s.By) / 12);
+        const hasCR = Number.isFinite(+p.xcr) && Number.isFinite(+p.xcm) && p.xcr !== null && p.xcm !== null;
+        ['X', 'Y'].forEach(dir => {
+          const r = rho[dir] * ls, e0 = hasCR ? Math.abs(dir === 'X' ? p.xcr - p.xcm : p.ycr - p.ycm) : null;
+          const Ue = e0 != null ? e0 / (0.3 * r) : 0, Ur = ls / r;
+          out.plan.push({ story: x.name, z: x.elev, dir, ls, lsFrom, r, rl: rho[dir], e0, Ue, Ur, U: Math.max(Ue, Ur),
+            cls: Ur > 1 ? 'Torsionally flexible' : Ue > 1 ? 'Not regular in plan' : 'Regular' });
+        });
       });
     }
     return out;
@@ -476,6 +500,7 @@
       ${sumCard('base', 'Overturning', R.base.some(x => Number.isFinite(x.fos)) ? oU : null, 'required ÷ provided safety')}
       ${sumCard('modal', 'Modal mass participation', R.modal ? R.modal.U : null, R.modal ? `ΣU<sub>X</sub> ${fmt(R.modal.sum.X * 100, 1)} % · ΣU<sub>Y</sub> ${fmt(R.modal.sum.Y * 100, 1)} % · T<sub>1</sub> ${fmt(R.modal.T1, 2)} s` : '')}
       ${R.soft.length ? sumCard('soft', 'Soft storey k<sub>i</sub>/k<sub>i+1</sub>', Umax(R.soft), (() => { const w = R.soft.filter(r => r.r1 != null).reduce((a, r) => (!a || r.r1 < a.r1 ? r : a), null); return w ? `min ${fmt(w.r1, 2)} at ${esc(w.story)} ${w.dir} (0.7)` : ''; })()) : ''}
+      ${R.plan.length ? sumCard('plan', 'Torsional radius e<sub>0</sub>/0.3r · l<sub>s</sub>/r', Umax(R.plan), `r<sub>x</sub>/l<sub>s</sub> = ${fmt(R.planModes.rho.X, 2)} · r<sub>y</sub>/l<sub>s</sub> = ${fmt(R.planModes.rho.Y, 2)} (≥ 1)`) : ''}
       ${R.mass.length ? sumCard('mass', 'Mass irregularity m<sub>i</sub>/m<sub>adj</sub>', Umax(R.mass), (() => { const w = R.mass.reduce((a, r) => (r.ratio != null && (!a || r.ratio > a.ratio) ? r : a), null); return w ? `max ${fmt(w.ratio, 2)} at ${esc(w.story)} (1.5)` : ''; })()) : ''}
       ${R.weak.length ? sumCard('weak', 'Weak storey V<sub>Rd,i</sub>/V<sub>Rd,i+1</sub>', Umax(R.weak), (() => { const w = R.weak.filter(r => r.r1 != null).reduce((a, r) => (!a || r.r1 < a.r1 ? r : a), null); return w ? `min ${fmt(w.r1, 2)} at ${esc(w.story)} ${w.dir} (0.8)` : ''; })()) : ''}
       ${R.bs ? `<a class="card bc-sum" href="#bc-bshear"><div class="label">Base shear V<sub>RS</sub> / F<sub>b</sub></div><div class="value">${R.bs.map(r => (r.ratio != null ? fmt(r.ratio, 2) : '–')).join(' · ')} <small>X · Y</small></div><div class="foot">${R.bs.every(r => r.ratio == null || r.ratio >= 0.8) ? '<span class="res ok">✓ OK</span>' : '<span class="res bad">! Check</span>'} <span>T<sub>1</sub> ${R.bs.map(r => fmt(r.T1, 2)).join(' / ')} s vs C<sub>t</sub>H<sup>¾</sup> ${fmt(R.bs[0].Tct, 2)} s</span></div></a>` : ''}
@@ -530,6 +555,15 @@
         ${tbl([['Storey', r => esc(r.story)], ['Dir.', r => r.dir], ['V<sub>i</sub> kN', r => fmt(r.V, 0), 'num'], ['d<sub>r</sub> mm', r => fmt(r.d * 1000, 2), 'num'], ['k<sub>i</sub> kN/m', r => r.k ? fmt(r.k, 0) : '–', 'num'], ['k<sub>i</sub>/k<sub>i+1</sub>', r => r.r1 != null ? fmt(r.r1, 2) : '–', 'num'], ['k<sub>i</sub>/k̄<sub>3 above</sub>', r => r.r3 != null ? fmt(r.r3, 2) : '–', 'num'], ['Class', r => esc(r.cls)], ['U', r => r.r1 != null ? api.ubar(r.U) : '']], top(R.soft))}</div>
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(r => `${esc(r.story)} ${r.dir}: ${esc(r.cls).toLowerCase()} (k<sub>i</sub>/k<sub>i+1</sub> = ${fmt(r.r1, 2)})`).join(' · ')} → the building is not regular in elevation (EN 1998-1 4.2.3.1): use the modal response spectrum analysis (Table 4.1) and reduce q<sub>0</sub> by 20 % (5.2.2.2(3)); better, stiffen the soft storey.` : 'Stiffness constant or reducing gradually upwards in X and Y: regular in elevation for the stiffness criterion (EN 1998-1 4.2.3.3(3)).'}</div>
         <p class="muted bc-pad">k<sub>i</sub> from the seismic case with the largest base shear in each direction (storey shear and storey drift of the same case). EN 1998-1 gives the criterion without numbers; the ASCE 7 limits are a common quantification.</p>`);
+    }
+    if (R.plan.length) {
+      const PM = R.planModes, flex = R.plan.filter(r => r.Ur > 1), ecc = R.plan.filter(r => r.Ue > 1), noCR = R.plan.some(r => r.e0 == null);
+      const coup = [PM.mX, PM.mY].filter(m => m.Rz > 0.1 * Math.max(m.Ux, m.Uy));
+      html += card('plan', 'Torsional radius and eccentricity (regularity in plan)', 'EN 1998-1 4.2.3.2(6)', 'e<sub>0x</sub> ≤ 0.30·r<sub>x</sub> (4.1a) · r<sub>x</sub> ≥ l<sub>s</sub> (4.1b), and in Y · l<sub>s</sub> = √(I<sub>m</sub>/m) radius of gyration of the floor mass · r from the modes',
+        `<div class="bc-split">${profile(['X', 'Y'].map((dd, i) => ({ n: 'e0/0.3r ' + dd, c: i ? '--s2' : '--s1', pts: R.plan.filter(r => r.dir === dd && r.e0 != null).map(r => ({ story: r.story, z: r.z, v: r.Ue })) })).filter(x => x.pts.length).concat(['X', 'Y'].map((dd, i) => ({ n: 'l_s/r ' + dd, c: i ? '--s4' : '--s3', pts: R.plan.filter(r => r.dir === dd).map(r => ({ story: r.story, z: r.z, v: r.Ur })) }))), { title: 'Eccentricity and torsional radius ratios', xlabel: 'ratio (≤ 1)', limit: 1, fmt: v => fmt(v, 2) })}
+        ${tbl([['Storey', r => esc(r.story)], ['Dir.', r => r.dir], ['l<sub>s</sub> m', r => fmt(r.ls, 2) + (r.lsFrom === 'plan' ? ' <small class="muted">plan</small>' : ''), 'num'], ['r m', r => fmt(r.r, 2), 'num'], ['r/l<sub>s</sub>', r => fmt(r.rl, 2), 'num'], ['e<sub>0</sub> m', r => r.e0 != null ? fmt(r.e0, 2) : '–', 'num'], ['0.3r m', r => fmt(0.3 * r.r, 2), 'num'], ['e<sub>0</sub>/0.3r', r => r.e0 != null ? fmt(r.Ue, 2) : '–', 'num'], ['Class', r => esc(r.cls)], ['U', r => api.ubar(r.U)]], top(R.plan))}</div>
+        <div class="bc-verdict ${flex.length || ecc.length ? 'bad' : 'ok'}">${flex.length ? `r &lt; l<sub>s</sub> (${[...new Set(flex.map(r => r.dir))].join(', ')}): <b>torsionally flexible system</b> (EN 1998-1 5.2.2.1(4)) - q<sub>0</sub> = 2.0 (DCM) / 3.0 (DCH) for concrete (Table 5.1); add stiffness at the perimeter (walls, bracing) to raise r. ` : ''}${ecc.length ? `e<sub>0</sub> &gt; 0.3r at ${[...new Set(ecc.map(r => r.story + ' ' + r.dir))].join(', ')}: not regular in plan (4.2.3.2) - spatial model (4.3.1), α<sub>u</sub>/α<sub>1</sub> = average of 1.0 and the tabulated value (5.2.2.2(5)); bring the centre of rigidity closer to the centre of mass.` : ''}${!flex.length && !ecc.length ? 'e<sub>0</sub> ≤ 0.3r and r ≥ l<sub>s</sub> in X and Y: regular in plan for the torsion criteria (4.2.3.2(6)) - the other plan criteria (compact shape, rigid diaphragms, slenderness λ = L<sub>max</sub>/L<sub>min</sub> ≤ 4) are checked by the engineer.' : ''}</div>
+        <p class="muted bc-pad">Modes: T<sub>X</sub> = ${fmt(PM.mX.T, 3)} s (mode ${PM.mX.mode}), T<sub>Y</sub> = ${fmt(PM.mY.T, 3)} s (mode ${PM.mY.mode}), T<sub>θ</sub> = ${fmt(PM.mR.T, 3)} s (mode ${PM.mR.mode}) → r<sub>x</sub>/l<sub>s</sub> = T<sub>Y</sub>/T<sub>θ</sub> = ${fmt(PM.rho.X, 2)}, r<sub>y</sub>/l<sub>s</sub> = T<sub>X</sub>/T<sub>θ</sub> = ${fmt(PM.rho.Y, 2)} (exact for uncoupled modes${coup.length ? `; mode ${coup.map(m => m.mode).join(', ')} has ${coup.map(m => fmt(m.Rz * 100, 0) + ' %').join(', ')} torsional mass - coupled, the estimate is approximate` : ''}). l<sub>s</sub> from the ETABS “Mass Summary by Diaphragm” (MMI) or the plan B<sub>x</sub> × B<sub>y</sub>; e<sub>0</sub> from “Centers Of Mass And Rigidity”${noCR ? ' - <b>no centres of rigidity in ETABS</b>: tick “Calculate Diaphragm Centers of Rigidity” in the analysis options, run and read again' : ''}.</p>`);
     }
     if (R.mass.length) {
       const bad = R.mass.filter(r => r.cls === 'Mass irregular'), heavy = R.mass.filter(r => r.cls === 'Heavier than below'), tot = R.mass.reduce((a, r) => a + r.m, 0);
@@ -613,7 +647,7 @@
         if (!cs.length) { err = 'Give at least one combination a role (Seismic, Wind SLS or ULS).'; return rer(); }
         busy = 'read'; err = ''; rer();
         EC.etabs.live.get('/building?' + cs.map(c => 'c=' + encodeURIComponent(c)).join('&')).then(j => {
-          b.data = { stories: j.stories || [], drifts: j.drifts || [], forces: j.forces || [], torsion: j.torsion || [], base: j.base || [], buckling: j.buckling || [], modal: j.modal || [], masses: j.masses || [] };
+          b.data = { stories: j.stories || [], drifts: j.drifts || [], forces: j.forces || [], torsion: j.torsion || [], base: j.base || [], buckling: j.buckling || [], modal: j.modal || [], masses: j.masses || [], plan_cm: j.plan_cm || [] };
           b.file = String(j.file || '').split(/[\\/]/).pop(); b.at = Date.now(); b.demo = false;
           if (j.plan && b.set.Bx === DEF.Bx && b.set.By === DEF.By) { b.set.Bx = j.plan.Bx; b.set.By = j.plan.By; }
           if (!b.data.stories.length) throw new Error('ETABS returned no storeys.');

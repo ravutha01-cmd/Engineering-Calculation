@@ -19,7 +19,8 @@ Endpoints (JSON):
     GET /model                     load combinations and load cases
     GET /selection                 members selected in ETABS now (beams, columns, braces, piers, joints)
     GET /building?c=<combo>&c=...  global building checks: stories, storey drifts, storey forces,
-                                   max / average displacement ratios, base reactions, buckling factors, modes, storey masses
+                                   max / average displacement ratios, base reactions, buckling factors, modes, storey masses,
+                                   centres of mass / rigidity and mass moments of inertia
     GET /results?c=<combo>&c=...&k=beams&k=columns&k=braces&k=piers&k=reactions[&sel=1]
                                    results as ETABS-style tables (header row, units row, rows);
                                    sel=1: only the members selected in ETABS
@@ -50,7 +51,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.9'
+VERSION = '1.10'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -491,7 +492,27 @@ def building_from_model(m, combos, cset):
             continue
         if masses:
             break
-    return {'stories': stories, 'drifts': drifts, 'forces': forces, 'torsion': torsion, 'base': base_r, 'buckling': buck, 'modal': modal, 'masses': masses}
+    # plan: centre of mass, mass moment of inertia (l_s = sqrt(MMI / m)) and centre of rigidity per storey and diaphragm
+    plan = {}
+    try:
+        for r in table(m, 'Mass Summary by Diaphragm'):
+            if pick(r, 'Story') in names_:
+                plan[(r['Story'], pick(r, 'Diaphragm', default=''))] = {'story': r['Story'], 'diaph': pick(r, 'Diaphragm', default=''),
+                    'm': pick(r, 'MassX', 'UX', default=0), 'mmi': pick(r, 'MMI', 'MassMomentOfInertia', default=0),
+                    'xcm': pick(r, 'XCM', 'XMassCenter', 'X'), 'ycm': pick(r, 'YCM', 'YMassCenter', 'Y')}
+    except Exception:
+        pass
+    try:   # the centres of rigidity need "Calculate Diaphragm Centers of Rigidity" in the analysis options
+        for r in table(m, 'Centers Of Mass And Rigidity'):
+            if pick(r, 'Story') in names_:
+                k = (r['Story'], pick(r, 'Diaphragm', default=''))
+                p_ = plan.setdefault(k, {'story': k[0], 'diaph': k[1], 'm': pick(r, 'MassX', default=0), 'mmi': 0})
+                p_.update({'xcm': pick(r, 'XCM', default=p_.get('xcm')), 'ycm': pick(r, 'YCM', default=p_.get('ycm')),
+                           'xcr': pick(r, 'XCR'), 'ycr': pick(r, 'YCR')})
+    except Exception:
+        pass
+    return {'stories': stories, 'drifts': drifts, 'forces': forces, 'torsion': torsion, 'base': base_r, 'buckling': buck, 'modal': modal, 'masses': masses,
+            'plan_cm': list(plan.values())}
 
 
 COMBO_TYPES = {0: 'Linear Add', 1: 'Envelope', 2: 'Absolute Add', 3: 'SRSS', 4: 'Range Add'}
@@ -1081,8 +1102,11 @@ class Mock:
             modal.append({'case': 'Modal', 'mode': i + 1, 'T': T, 'Ux': ux, 'Uy': uy, 'Rz': rz, 'SumUx': sx, 'SumUy': sy, 'SumRz': sr})
         # storey masses, t: thicker transfer slab at Story1, plant floor at Story6, light roof (same as the page demo)
         masses = [{'story': s['name'], 'mx': mt, 'my': mt} for s, mt in zip(st, MOCK_MASS)]
+        # centre of mass at the plan centre, core (centre of rigidity) 1.6-2.4 m off in X; MMI of a uniform 24 x 18 m floor
+        plan_cm = [{'story': s['name'], 'diaph': 'D1', 'm': mt, 'mmi': mt * (24 ** 2 + 18 ** 2) / 12, 'xcm': 12.0, 'ycm': 9.0,
+                    'xcr': round(13.6 + 0.09 * i, 2), 'ycr': round(9.3 + 0.02 * i, 2)} for i, (s, mt) in enumerate(zip(st, MOCK_MASS))]
         return {'file': self.status()['file'], 'stories': st, 'drifts': drifts, 'forces': forces, 'torsion': torsion, 'base': base, 'buckling': buck, 'modal': modal,
-                'masses': masses, 'plan': {'Bx': 24, 'By': 18}}
+                'masses': masses, 'plan_cm': plan_cm, 'plan': {'Bx': 24, 'By': 18}}
 
     def selection(self):
         return {'items': [{'kind': 'beams', 'story': b[0], 'label': b[1]} for b in self.BEAMS if b[2] in self.SEL['frames']] +

@@ -30,6 +30,7 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] Support uplift and pile tension: bridge `/supports` (restrained joints, coordinates, JointReact for the chosen combinations), F_t;d = −FZ_min − 0.9·W_f ≤ R_t;d (EN 1997-1 7.6.3.1(2), eq. 7.12) over the ULS / seismic combinations with vertical load (lateral cases alone skipped), plan of the supports and the critical ones listed
 - [x] Axial shortening: bridge `/axial` (columns by label with FrameForce, wall piers with PierLabel.GetSectionProperties + PierForce, for the quasi-permanent combination), elastic + creep + shrinkage by EN 1992-1-1 3.1.4 / Table 3.1 cumulated up each stack, post-casting differential against the nearest stack ≤ L/limit
 - [x] Diaphragm forces, chords and collectors: γ_d = 1.3 / 1.1 (EN 1998-1 4.4.2.5(2)) on the floor forces, deep-beam chord force and reinforcement, edge shear flow, in-plane shear reinforcement and strut check (EN 1992-1-1 6.2.2(6), 6.2.3(3)); floor slab thickness and f_ck from ETABS (PropArea.GetSlab, bridge 1.14)
+- [x] Seismic joint / pounding: required gap √(d_s,1² + d_s,2²) per level (EN 1998-1 4.4.2.7(2)), d_s = q_d·d_e from the ETABS max corner displacements (torsion included), × 0.7 for equal floor levels (4.4.2.7(3)), adjacent unit linear up to its height or property line; joint widths provided checked
 
 ## Fixes
 - [x] 2026-10-11 · Notional loads asked the user to set them by hand when the notional table was not found (it was searched only among the tables that already had data). Now fully automatic: all tables searched (also empty ones, fields read with GetAllFieldsInTable); without such a table, a gravity analysis gives N per floor and H_i = θi·N is applied as storey joint loads (EN 1992-1-1 5.2(8))
@@ -39,7 +40,6 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] 2026-10-11 · Soft storey cited EN 1998-1 4.2.3.3(4)P for the stiffness criterion - it is 4.2.3.3(3) (4.2.3.3(4) is the storey resistance ratio, now the weak-storey check)
 
 ## Next
-- [ ] Seismic joint / pounding gap between adjacent blocks - EN 1998-1 4.4.2.7
 - [ ] Capacity design of beam-column joints: ΣM_Rc ≥ 1.3·ΣM_Rb at every frame joint from the ETABS sections and reinforcement (strong column / weak beam) - EN 1998-1 4.4.2.3(4), 5.2.3.3(2)
 - [ ] Ductile wall design envelope from ETABS pier forces: moment envelope with tension shift a1 and shear magnification ε (DCM 1.5) - EN 1998-1 5.4.2.4, 5.5.2.4.1
 - [ ] Foundation design forces from ETABS with capacity design: E_Fd = E_F,G + γ_Rd·Ω·E_F,E (γ_Rd = 1.2 / 1.0 for q ≤ 3, Ω from the linked elements) - EN 1998-1 4.4.2.6(2)-(4), 5.8.1

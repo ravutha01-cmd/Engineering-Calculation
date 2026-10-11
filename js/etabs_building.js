@@ -10,7 +10,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ROLES = { seis: 'Seismic', wind: 'Wind SLS', uls: 'ULS', off: 'Not used' };
   const ROLE_ORDER = ['seis', 'wind', 'uls', 'off'];
-  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500 };
+  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false };
   let busy = '', err = '';
 
   const B = () => { const p = api.proj(); p.building = p.building || {}; const b = p.building; b.set = Object.assign({}, DEF, b.set || {}); b.roles = b.roles || {}; return b; };
@@ -354,6 +354,30 @@
       });
       out.diaph = { rows, t, fck, tFrom: +s.slabT > 0 ? 'input' : slMin ? 'ETABS ' + slMin.prop : 'default', tRd, fyd, nu };
     }
+    // 17. seismic joint / pounding - EN 1998-1 4.4.2.7(2): gap ≥ √(d_s,1² + d_s,2²) at every level, d_s = q_d·d_e (4.3.4);
+    //     × 0.7 when the floor levels of both units coincide (4.4.2.7(3)). Own d_e = max corner displacement (Story Max
+    //     Over Avg Displacements, includes torsion) of the seismic cases, else the drifts summed up the height
+    out.pound = [];
+    ['X', 'Y'].forEach(dir => {
+      const tor = d.torsion.filter(r => r.dir === dir && role(r.combo) === 'seis');
+      let cum = 0;
+      const rows = st.map(x => {
+        let de = Math.max(0, ...tor.filter(r => r.story === x.name).map(r => Math.abs(+r.max || 0))), from = 'max corner';
+        const dr = Math.max(0, ...d.drifts.filter(r => r.story === x.name && r.dir === dir && role(r.combo) === 'seis').map(r => r.drift));
+        cum += dr * x.h;
+        if (!(de > 0)) { de = cum; from = 'Σ drifts'; }
+        return { story: x.name, z: x.elev, dir, de, from };
+      });
+      if (!rows.some(r => r.de > 0)) return;
+      const Hadj = +s.adjH > 0 ? +s.adjH : H, dTop = (dir === 'X' ? +s.adjX : +s.adjY) / 1000, gap = (dir === 'X' ? +s.gapX : +s.gapY) / 1000, f = s.sameLev && dTop > 0 ? 0.7 : 1;   // 0.7 only between two units, not at a property line
+      rows.forEach(r => {
+        r.ds = (+s.qd || 1) * r.de;
+        r.dadj = r.z <= Hadj + 1e-6 ? dTop * r.z / Hadj : null;   // adjacent unit: linear up to its height
+        r.req = r.dadj == null ? null : f * Math.sqrt(r.ds * r.ds + r.dadj * r.dadj);
+        r.gap = gap; r.U = r.req != null && gap > 0 ? r.req / gap : 0;
+        out.pound.push(r);
+      });
+    });
     return out;
   }
 
@@ -667,6 +691,9 @@
       ${sumCard('base', 'Overturning', R.base.some(x => Number.isFinite(x.fos)) ? oU : null, 'required ÷ provided safety')}
       ${sumCard('modal', 'Modal mass participation', R.modal ? R.modal.U : null, R.modal ? `ΣU<sub>X</sub> ${fmt(R.modal.sum.X * 100, 1)} % · ΣU<sub>Y</sub> ${fmt(R.modal.sum.Y * 100, 1)} % · T<sub>1</sub> ${fmt(R.modal.T1, 2)} s` : '')}
       ${R.soft.length ? sumCard('soft', 'Soft storey k<sub>i</sub>/k<sub>i+1</sub>', Umax(R.soft), (() => { const w = R.soft.filter(r => r.r1 != null).reduce((a, r) => (!a || r.r1 < a.r1 ? r : a), null); return w ? `min ${fmt(w.r1, 2)} at ${esc(w.story)} ${w.dir} (0.7)` : ''; })()) : ''}
+      ${R.pound.length ? (() => { const w = R.pound.filter(r => r.req != null).reduce((a, r) => (!a || r.req > a.req ? r : a), null), any = +s.gapX > 0 || +s.gapY > 0; if (!w) return '';
+        const txt = `required ${fmt(w.req * 1000, 0)} mm (${w.dir}, ${esc(w.story)})`;
+        return any ? sumCard('pound', 'Seismic joint required / provided', Umax(R.pound), txt) : `<a class="card bc-sum" href="#bc-pound"><div class="label">Seismic joint required</div><div class="value">${fmt(w.req * 1000, 0)} <small>mm</small></div><div class="foot"><span>${w.dir} at ${esc(w.story)} · enter the joint width provided</span></div></a>`; })() : ''}
       ${R.diaph ? sumCard('diaph', 'Diaphragm in-plane shear τ/τ<sub>Rd</sub>', Umax(R.diaph.rows), (() => { const w = R.diaph.rows.reduce((a, r) => (!a || r.T > a.T ? r : a), null); return `chord T<sub>max</sub> = ${fmt(w.T, 0)} kN (${esc(w.story)} ${w.dir}) · A<sub>s</sub> = ${fmt(w.As, 0)} mm²`; })()) : ''}
       ${R.short ? sumCard('short', 'Differential shortening Δ/L', Umax(R.short.stacks), (() => { const w = R.short.stacks.reduce((a, k) => (!a || k.tot > a.tot ? k : a), null); return `roof δ<sub>max</sub> = ${fmt(w.tot * 1000, 1)} mm (${esc(w.name)}) · limit L/${R.short.lim}`; })()) : ''}
       ${R.sup.list.length ? sumCard('sup', 'Support uplift F<sub>t,d</sub>/R<sub>t,d</sub>', Umax(R.sup.list), (() => { const w = R.sup.list.reduce((a, p) => (!a || p.min.FZ < a.min.FZ ? p : a), null); return `FZ<sub>min</sub> = ${fmt(w.min.FZ, 0)} kN at ${esc(w.label)}`; })()) : ''}
@@ -727,6 +754,17 @@
         ${tbl([['Storey', r => esc(r.story)], ['Dir.', r => r.dir], ['V<sub>i</sub> kN', r => fmt(r.V, 0), 'num'], ['d<sub>r</sub> mm', r => fmt(r.d * 1000, 2), 'num'], ['k<sub>i</sub> kN/m', r => r.k ? fmt(r.k, 0) : '–', 'num'], ['k<sub>i</sub>/k<sub>i+1</sub>', r => r.r1 != null ? fmt(r.r1, 2) : '–', 'num'], ['k<sub>i</sub>/k̄<sub>3 above</sub>', r => r.r3 != null ? fmt(r.r3, 2) : '–', 'num'], ['Class', r => esc(r.cls)], ['U', r => r.r1 != null ? api.ubar(r.U) : '']], top(R.soft))}</div>
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(r => `${esc(r.story)} ${r.dir}: ${esc(r.cls).toLowerCase()} (k<sub>i</sub>/k<sub>i+1</sub> = ${fmt(r.r1, 2)})`).join(' · ')} → the building is not regular in elevation (EN 1998-1 4.2.3.1): use the modal response spectrum analysis (Table 4.1) and reduce q<sub>0</sub> by 20 % (5.2.2.2(3)); better, stiffen the soft storey.` : 'Stiffness constant or reducing gradually upwards in X and Y: regular in elevation for the stiffness criterion (EN 1998-1 4.2.3.3(3)).'}</div>
         <p class="muted bc-pad">k<sub>i</sub> from the seismic case with the largest base shear in each direction (storey shear and storey drift of the same case). EN 1998-1 gives the criterion without numbers; the ASCE 7 limits are a common quantification.</p>`);
+    }
+    if (R.pound.length) {
+      const P = R.pound.filter(r => r.req != null), bad = P.filter(r => r.U > 1 + 1e-9), mm0 = v => fmt(v * 1000, 0);
+      const req = dd => P.filter(r => r.dir === dd).reduce((a, r) => Math.max(a, r.req), 0);
+      const chk = (k, l, hint) => `<label class="bc-in"><span>${l}</span><input type="checkbox" data-bcset="${k}" ${s[k] ? 'checked' : ''} style="width:20px;height:20px"><small>${hint}</small></label>`;
+      html += card('pound', 'Seismic joint: pounding between adjacent units', 'EN 1998-1 4.4.2.7 · 4.3.4', `gap ≥ √(d<sub>s,1</sub>² + d<sub>s,2</sub>²) at every level · d<sub>s</sub> = q<sub>d</sub>·d<sub>e</sub> = ${fmt(+s.qd, 2)}·d<sub>e</sub>${s.sameLev && (+s.adjX > 0 || +s.adjY > 0) ? ' · × 0.7, same floor levels (4.4.2.7(3))' : ''}`,
+        `<div class="bc-inputs">${num('gapX', 'Joint width provided, X side', 'mm', '5', 'gap normal to X')}${num('gapY', 'Joint width provided, Y side', 'mm', '5', 'gap normal to Y')}${num('adjX', 'Adjacent unit: top d<sub>s</sub> in X', 'mm', '5', '0 = property line / not known')}${num('adjY', 'Adjacent unit: top d<sub>s</sub> in Y', 'mm', '5', '0 = property line / not known')}${num('adjH', 'Adjacent unit height', 'm', '0.5', '0 = same as this building')}${chk('sameLev', 'Same floor levels', '× 0.7 between two units (4.4.2.7(3))')}</div>
+        <div class="bc-split">${profile(['X', 'Y'].map((dd, i) => ({ n: 'required gap ' + dd, c: i ? '--s2' : '--s1', pts: P.filter(r => r.dir === dd).map(r => ({ story: r.story, z: r.z, v: r.req * 1000 })) })).filter(x => x.pts.length).concat(['X', 'Y'].map((dd, i) => ({ n: 'd_s own ' + dd, c: i ? '--s4' : '--s3', pts: R.pound.filter(r => r.dir === dd).map(r => ({ story: r.story, z: r.z, v: r.ds * 1000 })) }))), { title: 'Required seismic joint by height', xlabel: 'mm', unit: 'mm', limit: (gs => (gs.length ? Math.min(...gs) : 0))([+s.gapX, +s.gapY].filter(v => v > 0)), fmt: v => fmt(v, 0) })}
+        ${tbl([['Storey', r => esc(r.story)], ['Dir.', r => r.dir], ['d<sub>e</sub> mm', r => `${fmt(r.de * 1000, 1)} <small class="muted">${esc(r.from)}</small>`, 'num'], ['d<sub>s</sub> own mm', r => fmt(r.ds * 1000, 1), 'num'], ['d<sub>s</sub> adjacent mm', r => (r.dadj != null ? fmt(r.dadj * 1000, 1) : '–'), 'num'], ['Required mm', r => (r.req != null ? fmt(r.req * 1000, 1) : '–'), 'num'], ['Provided mm', r => (r.gap > 0 ? fmt(r.gap * 1000, 0) : '–'), 'num'], ['U', r => (r.gap > 0 && r.req != null ? api.ubar(r.U) : '')]], top(R.pound))}</div>
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">Required joint: X ${mm0(req('X'))} mm, Y ${mm0(req('Y'))} mm${s.sameLev && (+s.adjX > 0 || +s.adjY > 0) ? ' (× 0.7, same floor levels)' : ''}. ${(() => { const miss = ['X', 'Y'].filter(dd => P.some(r => r.dir === dd) && !(+s['gap' + dd] > 0)); return miss.length && (+s.gapX > 0 || +s.gapY > 0) ? `No joint width entered for ${miss.join(', ')}. ` : ''; })()}${bad.length ? `The joint provided is too narrow at ${[...new Set(bad.map(r => r.dir + ' ' + r.story))].slice(0, 6).join(', ')} → widen the joint, stiffen the building or tie the units into one (then check them as one structure).` : +s.gapX > 0 || +s.gapY > 0 ? `The joint${[+s.gapX, +s.gapY].filter(v => v > 0).length > 1 ? 's' : ''} provided ${[+s.gapX, +s.gapY].filter(v => v > 0).length > 1 ? 'are' : 'is'} wide enough at every level (${['X', 'Y'].filter(dd => +s['gap' + dd] > 0).join(', ')}).` : 'Enter the joint widths provided to check them.'}${!(+s.adjX > 0 || +s.adjY > 0) ? ' Adjacent unit not given: the required gap is this building’s own d<sub>s</sub> (towards a property line; add the neighbour’s displacement when it is known - 4.4.2.7(2) needs both).' : ''}</div>
+        <p class="muted bc-pad">d<sub>e</sub> = the largest corner displacement of the seismic cases from the ETABS “Story Max Over Avg Displacements” table (torsion included), or the storey drifts summed up the height when that table is missing. The adjacent unit is taken as displacing linearly up to its height. Where the floors of the two units are at different levels, columns of one unit can be hit at mid-height - avoid it or check those columns for the impact.</p>`);
     }
     if (R.diaph) {
       const D = R.diaph, bad = D.rows.filter(r => r.U > 1 + 1e-9), wT = D.rows.reduce((a, r) => (!a || r.T > a.T ? r : a), null), wv = D.rows.reduce((a, r) => (!a || r.v > a.v ? r : a), null);

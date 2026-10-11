@@ -144,7 +144,7 @@
       });
       out.bsSP = SP; out.bsCt = Ct;
     }
-    // 8. soft storey - EN 1998-1 4.2.3.3(4)P (lateral stiffness constant or reducing gradually upwards); limits of
+    // 8. soft storey - EN 1998-1 4.2.3.3(3) (lateral stiffness constant or reducing gradually upwards); limits of
     //    ASCE 7 Table 12.3-2: k_i < 0.7·k_i+1 or < 0.8·mean(k_i+1..i+3) soft, < 0.6 / 0.7 extreme. k_i = V_i / (d_r,i·h_i)
     out.soft = [];
     ['X', 'Y'].forEach(dir => {
@@ -167,6 +167,58 @@
         out.soft.push(r);
       });
     });
+    // 9. weak storey - EN 1998-1 4.2.3.3(4): the ratio of the actual storey resistance to the required one should not
+    //    vary disproportionately between adjacent storeys. Storey shear resistance V_Rd,i = Σ of the columns and the
+    //    walls (in plane) of the storey; weak if V_Rd,i < 0.8·V_Rd,i+1, extreme < 0.65 (ASCE 7 Table 12.3-2, 5a / 5b);
+    //    Ω_i = V_Rd,i / V_Ed,i compared with the storey above (≤ 30 % variation, prEN 1998-1-2 regularity criterion)
+    out.weak = [];
+    const els = d.strength || [];
+    if (els.length) {
+      const R = {}; st.forEach(x => { R[x.name] = { X: 0, Y: 0, n: 0 }; });
+      els.forEach(e => { const r = R[e.story]; if (!r) return; const v = vrd(e); r.X += v.X; r.Y += v.Y; r.n++; });
+      ['X', 'Y'].forEach(dir => {
+        const seisC = [...new Set(fBot.filter(r => role(r.combo) === 'seis').map(r => r.combo))];
+        const c = seisC.map(c => [c, Math.max(0, ...fBot.filter(r => r.combo === c).map(r => Math.abs(dir === 'X' ? r.VX : r.VY)))]).sort((a, b2) => b2[1] - a[1])[0];
+        const rows = st.map(x => {
+          const f = c ? fBot.find(r => r.story === x.name && r.combo === c[0]) : null, V = f ? Math.abs(dir === 'X' ? f.VX : f.VY) : 0;
+          const Rd = R[x.name][dir];
+          return { story: x.name, z: x.elev, dir, combo: c ? c[0] : '', n: R[x.name].n, Rd, V, om: V > 0 && Rd > 0 ? Rd / V : null };
+        });
+        rows.forEach((r, i) => {
+          const up = rows[i + 1];
+          r.r1 = up && up.Rd > 0 && r.n ? r.Rd / up.Rd : null;
+          r.o1 = up && r.om != null && up.om != null ? r.om / up.om : null;
+          r.cls = r.r1 == null ? (r.n ? 'top storey' : 'no members read') : r.r1 < 0.65 ? 'Extreme weak storey' : r.r1 < 0.8 ? 'Weak storey' : 'Regular';
+          r.U = r.r1 == null ? 0 : 0.8 / r.r1;
+          r.oflag = r.o1 != null && r.o1 < 0.7 && i + 2 < rows.length;   // not against the roof storey (its demand is one floor)
+          out.weak.push(r);
+        });
+      });
+    }
+    return out;
+  }
+
+  /* storey shear resistance of one vertical member along X and Y, kN (a resistance index for comparing storeys):
+     concrete V_Rd,c,min = v_min·b_w·d, v_min = 0.035·k^1.5·√f_ck, k = 1 + √(200/d) ≤ 2 (EN 1992-1-1 6.2.2(1), no
+     shear reinforcement, no axial force); columns d = 0.9·h; walls in plane only, d = 0.8·l_w (projected on X / Y);
+     steel and other sections V_pl = A_v·f_y/√3 (EN 1993-1-1 6.2.6(2)) */
+  function vrd(e) {
+    const f = +e.f || 0;
+    const vc = (bw, dd) => { if (!(bw > 0 && dd > 0)) return 0; const k = Math.min(2, 1 + Math.sqrt(200 / (dd * 1000))); return 0.035 * Math.pow(k, 1.5) * Math.sqrt(f) * bw * dd * 1000; };
+    if (e.mat === 'Concrete' && e.shape === 'rect') return { X: vc(e.hy, 0.9 * e.hx), Y: vc(e.hx, 0.9 * e.hy) };
+    if (e.mat === 'Concrete' && e.shape === 'circle') { const v = vc(0.9 * e.D, 0.8 * e.D); return { X: v, Y: v }; }
+    if (e.shape === 'wall') { const v = e.mat === 'Steel' ? e.t * e.L * f / Math.sqrt(3) * 1000 : vc(e.t, 0.8 * e.L), a = (+e.ang || 0) * Math.PI / 180; return { X: v * Math.abs(Math.cos(a)), Y: v * Math.abs(Math.sin(a)) }; }
+    if (e.mat === 'Concrete') return { X: vc(Math.sqrt(e.Avx || 0), Math.sqrt(e.Avx || 0)), Y: vc(Math.sqrt(e.Avy || 0), Math.sqrt(e.Avy || 0)) };
+    return { X: (e.Avx || 0) * f / Math.sqrt(3) * 1000, Y: (e.Avy || 0) * f / Math.sqrt(3) * 1000 };
+  }
+  /* demo: same members as the --mock bridge (/strength) */
+  function demoStrength() {
+    const out = [];
+    for (let i = 0; i < 10; i++) {
+      const s = 'Story' + (i + 1), [c, f] = i < 3 ? [0.6, 40] : i < 7 ? [0.5, 35] : [0.4, 30], [t, fw] = i < 5 ? [0.25, 40] : [0.2, 30];
+      for (let k = 0; k < 20; k++) out.push({ story: s, obj: 'C' + (k + 1), sec: `C${c * 1000}x${c * 1000} C${f}`, kind: 'column', mat: 'Concrete', f, shape: 'rect', hx: c, hy: c });
+      [[0, 7], [0, 7], [90, 6], [90, 6]].forEach(([ang, L], k) => out.push({ story: s, obj: 'W' + (k + 1), sec: `W${t * 1000} C${fw}`, kind: 'wall', mat: 'Concrete', f: fw, shape: 'wall', L, t, ang }));
+    }
     return out;
   }
 
@@ -405,6 +457,7 @@
       ${sumCard('base', 'Overturning', R.base.some(x => Number.isFinite(x.fos)) ? oU : null, 'required ÷ provided safety')}
       ${sumCard('modal', 'Modal mass participation', R.modal ? R.modal.U : null, R.modal ? `ΣU<sub>X</sub> ${fmt(R.modal.sum.X * 100, 1)} % · ΣU<sub>Y</sub> ${fmt(R.modal.sum.Y * 100, 1)} % · T<sub>1</sub> ${fmt(R.modal.T1, 2)} s` : '')}
       ${R.soft.length ? sumCard('soft', 'Soft storey k<sub>i</sub>/k<sub>i+1</sub>', Umax(R.soft), (() => { const w = R.soft.filter(r => r.r1 != null).reduce((a, r) => (!a || r.r1 < a.r1 ? r : a), null); return w ? `min ${fmt(w.r1, 2)} at ${esc(w.story)} ${w.dir} (0.7)` : ''; })()) : ''}
+      ${R.weak.length ? sumCard('weak', 'Weak storey V<sub>Rd,i</sub>/V<sub>Rd,i+1</sub>', Umax(R.weak), (() => { const w = R.weak.filter(r => r.r1 != null).reduce((a, r) => (!a || r.r1 < a.r1 ? r : a), null); return w ? `min ${fmt(w.r1, 2)} at ${esc(w.story)} ${w.dir} (0.8)` : ''; })()) : ''}
       ${R.bs ? `<a class="card bc-sum" href="#bc-bshear"><div class="label">Base shear V<sub>RS</sub> / F<sub>b</sub></div><div class="value">${R.bs.map(r => (r.ratio != null ? fmt(r.ratio, 2) : '–')).join(' · ')} <small>X · Y</small></div><div class="foot">${R.bs.every(r => r.ratio == null || r.ratio >= 0.8) ? '<span class="res ok">✓ OK</span>' : '<span class="res bad">! Check</span>'} <span>T<sub>1</sub> ${R.bs.map(r => fmt(r.T1, 2)).join(' / ')} s vs C<sub>t</sub>H<sup>¾</sup> ${fmt(R.bs[0].Tct, 2)} s</span></div></a>` : ''}
       ${MC ? `<a class="card bc-sum" href="#bc-mods"><div class="label">Stiffness modifiers</div><div class="value">${MC.filter(r => r.st === 'bad').length} <small>of ${MC.length} properties flagged</small></div><div class="foot">${MC.some(r => r.st === 'bad') ? '<span class="res bad">✗ Revise</span>' : MC.some(r => r.st === 'warn') ? '<span class="res ok">✓ OK</span> <span>with notes</span>' : '<span class="res ok">✓ OK</span>'} <span>${PURPOSE[s.kPurpose][0].split(' (')[0]}</span></div></a>` : ''}
       ${sumCard('buckling', 'Global buckling α<sub>cr</sub>', R.acr ? R.acr.U : null, R.acr ? `α<sub>cr</sub> = ${fmt(R.acr.a, 2)}${R.acr.a >= 10 ? ' ≥ 10: 1st order' : R.acr.a >= 3 ? ` · sway × ${fmt(R.acr.k, 3)}` : ' < 3'}` : '')}</div>`;
@@ -452,11 +505,19 @@
     }
     if (R.soft.length) {
       const bad = R.soft.filter(r => r.cls !== 'Regular' && r.cls !== 'top storey');
-      html += card('soft', 'Soft storey: lateral stiffness by storey', 'EN 1998-1 4.2.3.3(4)P', 'k<sub>i</sub> = V<sub>i</sub>/(d<sub>r,i</sub>·h<sub>i</sub>) · soft if k<sub>i</sub> &lt; 0.7·k<sub>i+1</sub> or &lt; 0.8·mean of the 3 storeys above; extreme &lt; 0.6 / 0.7 (limits of ASCE 7 Table 12.3-2)',
+      html += card('soft', 'Soft storey: lateral stiffness by storey', 'EN 1998-1 4.2.3.3(3)', 'k<sub>i</sub> = V<sub>i</sub>/(d<sub>r,i</sub>·h<sub>i</sub>) · soft if k<sub>i</sub> &lt; 0.7·k<sub>i+1</sub> or &lt; 0.8·mean of the 3 storeys above; extreme &lt; 0.6 / 0.7 (limits of ASCE 7 Table 12.3-2)',
         `<div class="bc-split">${profile(ser(R.soft.filter(r => r.k), 'k'), { title: 'Storey stiffness', xlabel: 'storey stiffness kN/m', unit: 'kN/m', fmt: v => fmt(v, 0) })}
         ${tbl([['Storey', r => esc(r.story)], ['Dir.', r => r.dir], ['V<sub>i</sub> kN', r => fmt(r.V, 0), 'num'], ['d<sub>r</sub> mm', r => fmt(r.d * 1000, 2), 'num'], ['k<sub>i</sub> kN/m', r => r.k ? fmt(r.k, 0) : '–', 'num'], ['k<sub>i</sub>/k<sub>i+1</sub>', r => r.r1 != null ? fmt(r.r1, 2) : '–', 'num'], ['k<sub>i</sub>/k̄<sub>3 above</sub>', r => r.r3 != null ? fmt(r.r3, 2) : '–', 'num'], ['Class', r => esc(r.cls)], ['U', r => r.r1 != null ? api.ubar(r.U) : '']], top(R.soft))}</div>
-        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(r => `${esc(r.story)} ${r.dir}: ${esc(r.cls).toLowerCase()} (k<sub>i</sub>/k<sub>i+1</sub> = ${fmt(r.r1, 2)})`).join(' · ')} → the building is not regular in elevation (EN 1998-1 4.2.3.1): use the modal response spectrum analysis (Table 4.1) and reduce q<sub>0</sub> by 20 % (5.2.2.2(3)); better, stiffen the soft storey.` : 'Stiffness constant or reducing gradually upwards in X and Y: regular in elevation for the stiffness criterion (EN 1998-1 4.2.3.3(4)P).'}</div>
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(r => `${esc(r.story)} ${r.dir}: ${esc(r.cls).toLowerCase()} (k<sub>i</sub>/k<sub>i+1</sub> = ${fmt(r.r1, 2)})`).join(' · ')} → the building is not regular in elevation (EN 1998-1 4.2.3.1): use the modal response spectrum analysis (Table 4.1) and reduce q<sub>0</sub> by 20 % (5.2.2.2(3)); better, stiffen the soft storey.` : 'Stiffness constant or reducing gradually upwards in X and Y: regular in elevation for the stiffness criterion (EN 1998-1 4.2.3.3(3)).'}</div>
         <p class="muted bc-pad">k<sub>i</sub> from the seismic case with the largest base shear in each direction (storey shear and storey drift of the same case). EN 1998-1 gives the criterion without numbers; the ASCE 7 limits are a common quantification.</p>`);
+    }
+    if (R.weak.length) {
+      const bad = R.weak.filter(r => /weak/i.test(r.cls)), om = R.weak.filter(r => r.oflag);
+      html += card('weak', 'Weak storey: storey shear resistance', 'EN 1998-1 4.2.3.3(4)', 'V<sub>Rd,i</sub> = Σ columns + walls (in plane) · weak if V<sub>Rd,i</sub> &lt; 0.8·V<sub>Rd,i+1</sub>, extreme &lt; 0.65 (limits of ASCE 7 Table 12.3-2) · Ω<sub>i</sub> = V<sub>Rd,i</sub>/V<sub>Ed,i</sub>',
+        `<div class="bc-split">${profile([].concat(...['X', 'Y'].map((dd, i) => [{ n: 'V_Rd ' + dd, c: i ? '--s2' : '--s1', pts: R.weak.filter(r => r.dir === dd && r.n).map(r => ({ story: r.story, z: r.z, v: r.Rd })) }, { n: 'V_Ed ' + dd, c: i ? '--s4' : '--s3', pts: R.weak.filter(r => r.dir === dd && r.V > 0).map(r => ({ story: r.story, z: r.z, v: r.V })) }])).filter(x => x.pts.length), { title: 'Storey shear resistance and demand', xlabel: 'storey shear kN', unit: 'kN', fmt: v => fmt(v, 0) })}
+        ${tbl([['Storey', r => esc(r.story)], ['Dir.', r => r.dir], ['Members', r => r.n, 'num'], ['V<sub>Rd,i</sub> kN', r => fmt(r.Rd, 0), 'num'], ['V<sub>Rd,i</sub>/V<sub>Rd,i+1</sub>', r => r.r1 != null ? fmt(r.r1, 2) : '–', 'num'], ['V<sub>Ed,i</sub> kN', r => r.V > 0 ? fmt(r.V, 0) : '–', 'num'], ['Ω<sub>i</sub>', r => r.om != null ? fmt(r.om, 2) : '–', 'num'], ['Ω<sub>i</sub>/Ω<sub>i+1</sub>', r => r.o1 != null ? fmt(r.o1, 2) + (r.oflag ? ' <span class="res bad">!</span>' : '') : '–', 'num'], ['Class', r => esc(r.cls)], ['U', r => r.r1 != null ? api.ubar(r.U) : '']], top(R.weak))}</div>
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(r => `${esc(r.story)} ${r.dir}: ${esc(r.cls).toLowerCase()} (V<sub>Rd,i</sub>/V<sub>Rd,i+1</sub> = ${fmt(r.r1, 2)})`).join(' · ')} → not regular in elevation (EN 1998-1 4.2.3.1): modal response spectrum analysis (Table 4.1), q<sub>0</sub> − 20 % (5.2.2.2(3)); a storey mechanism can form here - strengthen the storey (ASCE 7 12.3.3.1 does not allow an extreme weak storey in high seismicity).` : 'Storey shear resistance constant or reducing gradually upwards in X and Y: no weak storey.'}${om.length ? `<br>Ω<sub>i</sub> drops by more than 30 % from the storey above at ${om.map(r => esc(r.story) + ' ' + r.dir).join(', ')}: the resistance-to-demand ratio varies disproportionately (4.2.3.3(4)) - check that storey's shear design.` : ''}</div>
+        <p class="muted bc-pad">V<sub>Rd</sub> is a resistance index read from the ETABS sections: concrete V<sub>Rd,c</sub> = v<sub>min</sub>·b<sub>w</sub>·d (EN 1992-1-1 6.2.2(1), no stirrups or axial force), steel V<sub>pl</sub> = A<sub>v</sub>f<sub>y</sub>/√3 (EN 1993-1-1 6.2.6); walls in plane only, braces not included. It compares storeys - the member shear design stays with the element checks. V<sub>Ed</sub> from the seismic case with the largest base shear; Ω<sub>i</sub> is not compared with the roof storey. EN 1998-1 gives the criterion without numbers: the ASCE 7 ratios and the 30 % of prEN 1998-1-2 are used.</p>`);
     }
     if (R.bs) {
       const SP = R.bsSP, tmax = Math.max(4, ...R.bs.map(x => x.T1 * 1.2)), ts = SP.T.filter(t => t <= tmax), ymax = Math.max(...ts.map(t => SP.sd(t))) * 1.1;
@@ -500,7 +561,7 @@
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
       if (d.bc === 'demo') {
-        b.data = demoBuilding(); b.data.mods = demoMods();
+        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength();
         b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
         Object.assign(b.roles, DEMO_ROLES); Object.assign(b.set, { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, Bx: 24, By: 18, fos: 1.0 });
         let n = 0;   // demo ETABS-linked members (beams, columns, footings) for the P-Δ member design
@@ -529,6 +590,7 @@
           if (j.plan && b.set.Bx === DEF.Bx && b.set.By === DEF.By) { b.set.Bx = j.plan.Bx; b.set.By = j.plan.By; }
           if (!b.data.stories.length) throw new Error('ETABS returned no storeys.');
           return EC.etabs.live.get('/modifiers').then(mj => { b.data.mods = mj.props || []; }, () => { b.data.mods = []; })
+            .then(() => EC.etabs.live.get('/strength').then(sj => { b.data.strength = sj.elements || []; }, () => { b.data.strength = []; }))
             .then(() => readNotional(b).catch(() => { b.data.nf = null; b.data.ncombos = null; }));
         }).then(() => {
           busy = ''; api.save(); api.toast('Building read from ETABS'); rer();
@@ -546,5 +608,5 @@
     };
   }
 
-  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R) };
+  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => Object.assign(demoBuilding(), { strength: demoStrength() }), _demoRoles: DEMO_ROLES };
 })();

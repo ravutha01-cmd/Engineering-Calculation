@@ -25,6 +25,8 @@ Endpoints (JSON):
                                    sel=1: only the members selected in ETABS
     GET /modifiers                 stiffness / mass modifiers of the frame and area properties (and per-object overrides),
                                    with the material and what each property is used for (columns, beams, walls, slabs)
+    GET /strength                  columns and wall panels of every storey with section size, material strength and
+                                   shear areas (storey shear resistance for the weak-storey check)
     GET /loads                     load patterns, load cases and load combinations (with their cases)
     POST /loads/apply              create missing load patterns and rebuild the managed combinations
                                    {prefix, patterns: [{name, type, sw}], combos: [{name, type, items: [[name, sf, isCombo]]}], unlock,
@@ -41,13 +43,14 @@ import argparse
 import csv
 import io
 import json
+import math
 import subprocess
 import sys
 import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.7'
+VERSION = '1.8'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -230,6 +233,15 @@ class Etabs:
 
     def modifiers(self):
         return modifiers_from_model(self.attach())
+
+    def strength(self):
+        m = self.attach()
+        old = m.GetPresentUnits()
+        m.SetPresentUnits(KN_M_C)
+        try:
+            return strength_from_model(m)
+        finally:
+            m.SetPresentUnits(old)
 
     def apply_loads(self, body):
         return apply_loads(self.attach(), body)
@@ -797,6 +809,104 @@ def modifiers_from_model(m):
     return {'props': out}
 
 
+SEC_RECT, SEC_CIRCLE = 8, 9                                  # eFramePropType
+
+
+def strength_from_model(m):
+    """vertical members of every storey (columns, wall panels) with what the storey shear resistance needs, in kN, m, MPa:
+    concrete rectangles {hx, hy} (plan size along X / Y), circles {D}, wall panels {L, t, ang}, other sections {Avx, Avy}
+    (shear areas along X / Y). A column / wall belongs to the storey at its top (ETABS label storey)."""
+    mats, secs, out = {}, {}, []
+
+    def material(name):
+        if name not in mats:
+            kind, f = 'Other', 0.0
+            try:
+                t = int(ok(m.PropMaterial.GetTypeOAPI(name, 0, 0), 'PropMaterial.GetTypeOAPI')[0])
+                kind = MAT.get(t, 'Other')
+                if kind == 'Concrete':
+                    f = ok(m.PropMaterial.GetOConcrete_1(name, 0, False, 0, 0, 0, 0, 0, 0, 0, 0), 'GetOConcrete_1')[0] / 1000
+                elif kind == 'Steel':
+                    f = ok(m.PropMaterial.GetOSteel_1(name, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), 'GetOSteel_1')[0] / 1000
+            except Exception:
+                pass
+            mats[name] = (kind, f)
+        return mats[name]
+
+    def section(name):
+        if name not in secs:
+            s = {'shape': 'other'}
+            try:
+                t = int(ok(m.PropFrame.GetTypeOAPI(name, 0), 'PropFrame.GetTypeOAPI')[0])
+                if t == SEC_RECT:
+                    r = ok(m.PropFrame.GetRectangle(name, '', '', 0, 0, 0, '', ''), 'PropFrame.GetRectangle')
+                    s = {'shape': 'rect', 'mat': r[1], 't3': r[2], 't2': r[3]}
+                elif t == SEC_CIRCLE:
+                    r = ok(m.PropFrame.GetCircle(name, '', '', 0, 0, '', ''), 'PropFrame.GetCircle')
+                    s = {'shape': 'circle', 'mat': r[1], 'D': r[2]}
+                else:
+                    s['mat'] = ok(m.PropFrame.GetMaterial(name, ''), 'PropFrame.GetMaterial')[0]
+                p = ok(m.PropFrame.GetSectProps(name, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), 'PropFrame.GetSectProps')
+                s['As2'], s['As3'] = p[1], p[2]
+            except Exception:
+                s = None
+            secs[name] = s
+        return secs[name]
+
+    def xy(pt):
+        return ok(m.PointObj.GetCoordCartesian(pt, 0, 0, 0), 'PointObj.GetCoordCartesian')[:3]
+
+    for n in ok(m.FrameObj.GetNameList(0, []), 'FrameObj.GetNameList')[1] or []:
+        try:
+            if int(ok(m.FrameObj.GetDesignOrientation(n, 0), 'GetDesignOrientation')[0]) != 1:   # columns only
+                continue
+            label, story = ok(m.FrameObj.GetLabelFromName(n, '', ''), 'FrameObj.GetLabelFromName')[:2]
+            sec = ok(m.FrameObj.GetSection(n, '', ''), 'FrameObj.GetSection')[0]
+            ang = ok(m.FrameObj.GetLocalAxes(n, 0, False), 'FrameObj.GetLocalAxes')[0]
+        except Exception:
+            continue
+        s = section(sec)
+        if not s:
+            continue
+        kind, f = material(s['mat'])
+        # vertical column, local axes angle 0: local 2 (depth t3, shear V2, As2) along global X
+        swap = abs(math.sin(math.radians(ang))) > 0.7071
+        e = {'story': story, 'obj': label, 'sec': sec, 'kind': 'column', 'mat': kind, 'f': f, 'shape': s['shape']}
+        if s['shape'] == 'rect' and kind == 'Concrete':
+            e['hx'], e['hy'] = (s['t2'], s['t3']) if swap else (s['t3'], s['t2'])
+        elif s['shape'] == 'circle' and kind == 'Concrete':
+            e['D'] = s['D']
+        else:
+            e['shape'] = 'other'
+            e['Avx'], e['Avy'] = (s['As3'], s['As2']) if swap else (s['As2'], s['As3'])
+        out.append(e)
+    walls = {}
+    for n in ok(m.AreaObj.GetNameList(0, []), 'AreaObj.GetNameList')[1] or []:
+        try:
+            if int(ok(m.AreaObj.GetDesignOrientation(n, 0), 'GetDesignOrientation')[0]) != 1:      # walls only
+                continue
+            label, story = ok(m.AreaObj.GetLabelFromName(n, '', ''), 'AreaObj.GetLabelFromName')[:2]
+            prop = ok(m.AreaObj.GetProperty(n, ''), 'AreaObj.GetProperty')[0]
+            if prop not in walls:
+                w = ok(m.PropArea.GetWall(prop, 0, 0, '', 0, 0, '', ''), 'PropArea.GetWall')
+                walls[prop] = (w[2], w[3])
+            mat, t = walls[prop]
+            pts = ok(m.AreaObj.GetPoints(n, 0, []), 'AreaObj.GetPoints')[1]
+            c = [xy(p) for p in pts]
+        except Exception:
+            continue
+        zmin = min(p[2] for p in c)
+        bot = [p for p in c if abs(p[2] - zmin) < 0.01]
+        (x0, y0), (x1, y1) = (bot[0][0], bot[0][1]), (bot[-1][0], bot[-1][1])
+        L = math.hypot(x1 - x0, y1 - y0)
+        if L < 0.05:
+            continue
+        kind, f = material(mat)
+        out.append({'story': story, 'obj': label, 'sec': prop, 'kind': 'wall', 'mat': kind, 'f': f, 'shape': 'wall',
+                    'L': L, 't': t, 'ang': math.degrees(math.atan2(y1 - y0, x1 - x0))})
+    return {'elements': out}
+
+
 class Mock:
     """Demo model with the same answers as a live ETABS (for testing without ETABS).
     The selection is B12 on Story3, column C3 on Story1 and support J1."""
@@ -826,6 +936,22 @@ class Mock:
             {'kind': 'frame', 'name': 'HEB300', 'mat': 'Steel', 'use': {'braces': 8}, 'mods': F(), 'over': []},
             {'kind': 'area', 'name': 'W250 C40', 'mat': 'Concrete', 'use': {'walls': 40}, 'mods': A(f22=0.7, f12=0.7, m11=0.7, m22=0.7), 'over': []},
             {'kind': 'area', 'name': 'S200 C30', 'mat': 'Concrete', 'use': {'slabs': 60}, 'mods': A(m11=0.25, m22=0.25, m12=0.25, Mass=0.9), 'over': []}]}
+
+    def strength(self):
+        """the demo building: 20 columns on a 6 m grid (C600 C40 storeys 1-3, C500 C35 4-7, C400 C30 8-10) and a core of
+        4 walls 7 m along X / 6 m along Y (250 mm C40 storeys 1-5, 200 mm C30 above) - same as the demo of the Building checks page"""
+        out = []
+        for i in range(10):
+            st = 'Story%d' % (i + 1)
+            col, f = (0.6, 40) if i < 3 else (0.5, 35) if i < 7 else (0.4, 30)
+            for k in range(20):
+                out.append({'story': st, 'obj': 'C%d' % (k + 1), 'sec': 'C%dx%d C%d' % (col * 1000, col * 1000, f), 'kind': 'column',
+                            'mat': 'Concrete', 'f': f, 'shape': 'rect', 'hx': col, 'hy': col})
+            t, fw = (0.25, 40) if i < 5 else (0.2, 30)
+            for k, (ang, L) in enumerate([(0, 7.0), (0, 7.0), (90, 6.0), (90, 6.0)]):
+                out.append({'story': st, 'obj': 'W%d' % (k + 1), 'sec': 'W%d C%d' % (t * 1000, fw), 'kind': 'wall', 'mat': 'Concrete',
+                            'f': fw, 'shape': 'wall', 'L': L, 't': t, 'ang': ang})
+        return {'elements': out}
 
     def loads(self):
         cases = [{'name': p['name'], 'type': 1} for p in self.patterns] + self.extra_cases
@@ -1032,6 +1158,8 @@ def make_handler(src, origins):
                     return self.send(200, src.modifiers())
                 if u.path == '/loads':
                     return self.send(200, src.loads())
+                if u.path == '/strength':
+                    return self.send(200, src.strength())
                 if u.path == '/building':
                     return self.send(200, src.building(q.get('c', [])))
                 if u.path == '/results':

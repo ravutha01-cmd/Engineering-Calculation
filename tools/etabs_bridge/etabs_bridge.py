@@ -26,7 +26,8 @@ Endpoints (JSON):
     GET /loads                     load patterns, load cases and load combinations (with their cases)
     POST /loads/apply              create missing load patterns and rebuild the managed combinations
                                    {prefix, patterns: [{name, type, sw}], combos: [{name, type, items: [[name, sf, isCombo]]}], unlock,
-                                    notional: [{name, base, ratio, dir}]}  (notional patterns: base pattern, load ratio, X / Y)
+                                    notional: [{name, base, ratio, dir}],   (notional patterns: base pattern, load ratio, X / Y)
+                                    spectrum: {func, T: [s], v: [Sd/g], damp, sf, modal, ecc, cases: [{name, dir: U1|U2}]}}
     POST /loads/assign             uniform area loads on the floor slabs selected in ETABS {items: [{pattern, value kN/m2}]}
 
 Writing: only POST with a JSON body from an allowed web page (checked Origin); the model is changed only
@@ -44,7 +45,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.4'
+VERSION = '1.5'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -510,6 +511,7 @@ def apply_loads(m, body):
         old = left
         if not old:
             break
+    spectrum = set_spectrum(m, body.get('spectrum'))
     notional = set_notional(m, body.get('notional', []))
     n = 0
     for c in body.get('combos', []):
@@ -519,7 +521,7 @@ def apply_loads(m, body):
         for name, sf, is_combo in c['items']:
             ok(m.RespCombo.SetCaseList(c['name'], 1 if is_combo else 0, name, float(sf)), 'RespCombo.SetCaseList ' + c['name'])
         n += 1
-    return {'patterns_created': made, 'combos': n, 'removed_left': old, 'notional': notional}
+    return {'patterns_created': made, 'combos': n, 'removed_left': old, 'notional': notional, 'spectrum': spectrum}
 
 
 def set_notional(m, items):
@@ -559,6 +561,34 @@ def set_notional(m, items):
         return {'set': len(items)}
     except Exception as e:
         return {'set': 0, 'manual': f'{type(e).__name__}: {e}'}
+
+
+def set_spectrum(m, sp):
+    """user response-spectrum function (period, Sd/g) and response-spectrum load cases using it"""
+    if not sp:
+        return None
+    warn = []
+    T, v = [float(x) for x in sp['T']], [float(x) for x in sp['v']]
+    ok(m.Func.FuncRS.SetUser(sp['func'], len(T), T, v, float(sp.get('damp', 0.05))), 'Func.FuncRS.SetUser')
+    rs = m.LoadCases.ResponseSpectrum
+    old = m.GetPresentUnits()
+    m.SetPresentUnits(KN_M_C)     # scale factor g in m/s2
+    try:
+        for c in sp.get('cases', []):
+            ok(rs.SetCase(c['name']), 'ResponseSpectrum.SetCase')
+            ok(rs.SetLoads(c['name'], 1, [c['dir']], [sp['func']], [float(sp.get('sf', 9.80665))], ['Global'], [0.0]), 'ResponseSpectrum.SetLoads')
+            for what, call in (('modal case', lambda: rs.SetModalCase(c['name'], sp.get('modal', 'Modal'))),
+                               ('CQC', lambda: rs.SetModalComb_1(c['name'], 1, 0.0, 0.0, 1, 0.0) if hasattr(rs, 'SetModalComb_1') else rs.SetModalComb(c['name'], 1, 0.0, 0.0, 0.0)),
+                               ('SRSS directions', lambda: rs.SetDirComb(c['name'], 1, 0.0)),
+                               ('accidental eccentricity', lambda: rs.SetEccentricity(c['name'], float(sp.get('ecc', 0.05)))),
+                               ('damping', lambda: rs.SetDampConstant(c['name'], float(sp.get('damp', 0.05))))):
+                try:
+                    ok(call(), what)
+                except Exception as e:
+                    warn.append(f"{c['name']}: {what} not set ({e})")
+    finally:
+        m.SetPresentUnits(old)
+    return {'function': sp['func'], 'cases': [c['name'] for c in sp.get('cases', [])], 'warnings': warn}
 
 
 def assign_slab_loads(m, body):
@@ -609,7 +639,7 @@ class Mock:
 
     def loads(self):
         cases = [{'name': p['name'], 'type': 1} for p in self.patterns] + self.extra_cases
-        return {'patterns': self.patterns, 'cases': cases, 'combos': self.combos, 'locked': self.locked, 'notional': list(getattr(self, 'notional', {}).values())}
+        return {'patterns': self.patterns, 'cases': cases, 'combos': self.combos, 'locked': self.locked, 'notional': list(getattr(self, 'notional', {}).values()), 'spectrum': getattr(self, 'spectrum', None)}
 
     def apply_loads(self, body):
         prefix = str(body.get('prefix') or 'CS-')
@@ -623,7 +653,14 @@ class Mock:
         new = [{'name': c['name'], 'type': int(c.get('type', 0)), 'items': [list(i) for i in c['items']]} for c in body.get('combos', []) if c['name'].startswith(prefix)]
         self.combos += new
         self.notional = {it['name']: it for it in body.get('notional', [])}
-        return {'patterns_created': made, 'combos': len(new), 'removed_left': [], 'notional': {'set': len(self.notional)}}
+        sp, spr = body.get('spectrum'), None
+        if sp:
+            self.spectrum = sp
+            for c in sp.get('cases', []):
+                if c['name'] not in {x['name'] for x in self.extra_cases}:
+                    self.extra_cases.append({'name': c['name'], 'type': 4})
+            spr = {'function': sp['func'], 'cases': [c['name'] for c in sp['cases']], 'warnings': []}
+        return {'patterns_created': made, 'combos': len(new), 'removed_left': [], 'notional': {'set': len(self.notional)}, 'spectrum': spr}
 
     def assign_loads(self, body):
         if self.locked and not body.get('unlock'):

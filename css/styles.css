@@ -782,3 +782,4 @@ svg.plot .ppt { stroke: var(--surface); stroke-width: 2; }
 .ld-tabs .ld-ch { background: var(--key-bg); color: var(--accent); border-color: var(--key-border); }
 .ld-filter { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 12px; }
 tr.ld-removed td { opacity: .75; }
+.ld-rs { padding: 4px 16px 8px; max-width: 760px; }

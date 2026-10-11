@@ -20,7 +20,8 @@
   const KIND = { G: 'Permanent G', Q: 'Imposed Q', S: 'Snow S', W: 'Wind W', E: 'Seismic E', T: 'Temperature T', N: 'Notional N (imperfection)', off: 'Not used' };
   const PT = { 1: 'Dead', 2: 'Super dead', 3: 'Live', 4: 'Reducible live', 5: 'Quake', 6: 'Wind', 7: 'Snow', 8: 'Other', 10: 'Temperature', 11: 'Roof live', 12: 'Notional' };
   const CT = { 1: 'Linear static', 3: 'Modal', 4: 'Response spectrum', 10: 'Buckling' };
-  const DEF = { expr: '6.10', gG: 1.35, gGinf: 1.0, gQ: 1.5, xi: 0.85, cat: 'B', windBoth: true, e30: true, equ: true, slsW: true, prefix: 'CS-', auto: false, sdl: 1.5, std: true, notional: false, nH: 0, nM: 10 };
+  const DEF = { expr: '6.10', gG: 1.35, gGinf: 1.0, gQ: 1.5, xi: 0.85, cat: 'B', windBoth: true, e30: true, equ: true, slsW: true, prefix: 'CS-', auto: false, sdl: 1.5, std: true, notional: false, nH: 0, nM: 10,
+    rs: false, agR: 0.16, gI: 1.0, ground: 'C', stype: 1, q: 3.9, beta: 0.2, rsFunc: 'CS-EC8', rsX: 'EQX RS', rsY: 'EQY RS', rsModal: 'Modal', ecc: 0.05 };
 
   const P = () => { const p = api.proj(); p.loads = p.loads || {}; const L = p.loads; L.set = Object.assign({}, DEF, L.set || {}); L.act = L.act || {}; L.qk = Object.assign({}, QK, L.qk || {}); return L; };
 
@@ -36,6 +37,21 @@
   function theta(H, m) {
     const ah = H > 0 ? Math.min(1, Math.max(2 / 3, 2 / Math.sqrt(H))) : 1, am = Math.sqrt(0.5 * (1 + 1 / Math.max(1, m || 1)));
     return { ah, am, th: ah * am / 200 };
+  }
+  /* EN 1998-1 3.2.2.2 Tables 3.2 (Type 1) / 3.3 (Type 2): S, TB, TC, TD by ground type */
+  const EC8 = {
+    1: { A: [1.0, 0.15, 0.4, 2.0], B: [1.2, 0.15, 0.5, 2.0], C: [1.15, 0.20, 0.6, 2.0], D: [1.35, 0.20, 0.8, 2.0], E: [1.4, 0.15, 0.5, 2.0] },
+    2: { A: [1.0, 0.05, 0.25, 1.2], B: [1.35, 0.05, 0.25, 1.2], C: [1.5, 0.10, 0.25, 1.2], D: [1.8, 0.10, 0.30, 1.2], E: [1.6, 0.05, 0.25, 1.2] }
+  };
+  /* design spectrum for elastic analysis, EN 1998-1 3.2.2.5(4), as Sd/g; ag = γI·agR */
+  function spectrum(set) {
+    const [S, TB, TC, TD] = EC8[set.stype][set.ground], ag = set.gI * set.agR, q = set.q, b = set.beta;
+    const sd = T => T <= TB ? ag * S * (2 / 3 + T / TB * (2.5 / q - 2 / 3)) : T <= TC ? ag * S * 2.5 / q
+      : T <= TD ? Math.max(ag * S * 2.5 / q * TC / T, b * ag) : Math.max(ag * S * 2.5 / q * TC * TD / (T * T), b * ag);
+    const Ts = new Set([0, TB, TC, TD, 4, 5, 6, 8, 10]);
+    for (let t = 0.05; t < 4; t += t < 1 ? 0.05 : 0.1) Ts.add(Math.round(t * 1000) / 1000);
+    const T = [...Ts].sort((a, c) => a - c);
+    return { S, TB, TC, TD, ag, T, v: T.map(t => Math.round(sd(t) * 1e5) / 1e5), sd, plateau: ag * S * 2.5 / q };
   }
   /* the load "units" of the model: every pattern, plus the load cases that are not a pattern's own case */
   function units(model) {
@@ -181,6 +197,11 @@
     const t = theta(nHeight(), L.set.nM).th;
     return after.patterns.filter(p => (L.act[p.name] || {}).k === 'N').map(p => ({ name: p.name, base: L.act[p.name].base, dir: L.act[p.name].dir || 'X', ratio: t }));
   }
+  const rsSig = () => JSON.stringify([live().L.st && live().L.st.file, spectrumDef()]);
+  function spectrumDef() {
+    const s = P().set, sp = spectrum(s);
+    return { func: s.rsFunc, T: sp.T, v: sp.v, damp: 0.05, sf: 9.80665, modal: s.rsModal, ecc: s.ecc, cases: [[s.rsX, 'U1'], [s.rsY, 'U2']].filter(([n]) => n).map(([name, dir]) => ({ name, dir })) };
+  }
   /* height of the structure: the input, else the top of the building read on Building checks */
   function nHeight() {
     const L = P(); if (+L.set.nH > 0) return +L.set.nH;
@@ -189,10 +210,14 @@
   }
   function plan() {
     const pl = planned(), m = S.model;
-    const after = { patterns: m.patterns.concat(pl), cases: m.cases.concat(pl.map(p => ({ name: p.name, type: 1, planned: true }))), combos: m.combos };
+    const L0 = P(), rsc = L0.set.rs ? [[L0.set.rsX, 'X'], [L0.set.rsY, 'Y']].filter(([n]) => n) : [];
+    rsc.forEach(([n, d]) => { L0.act[n] = { k: 'E', dir: d, rs: true }; });
+    const newRS = rsc.filter(([n]) => !m.cases.some(c => c.name === n)).map(([name]) => ({ name, type: 4, planned: true, rsdef: true }));
+    const cases = m.cases.map(c => (rsc.some(([n]) => n === c.name) ? Object.assign({}, c, { rsdef: true }) : c));
+    const after = { patterns: m.patterns.concat(pl), cases: cases.concat(pl.map(p => ({ name: p.name, type: 1, planned: true })), newRS), combos: m.combos };
     defaults(after);
     const L = P(), gen = generate(units(after), L.act, L.set);
-    return { pl, after, gen, diff: diff(gen) };
+    return { pl, after, gen, diff: diff(gen), nRS: rsc.length, newRS: newRS.length };
   }
   const norm = items => JSON.stringify(items.map(i => [i[0], Math.round(i[1] * 1000) / 1000, !!i[2]]).sort((a, b) => (a[0] + a[2]).localeCompare(b[0] + b[2])));
   /* combination by combination: what writing will do to ETABS */
@@ -206,7 +231,9 @@
   }
   async function apply(unlock, withPatterns) {
     const L = P(), p = plan();
-    const r = await live().post('/loads/apply', { prefix: L.set.prefix, patterns: withPatterns ? p.pl.map(({ name, type, sw }) => ({ name, type, sw })) : [], combos: p.gen.map(c => ({ name: c.name, type: c.type, items: c.items })), unlock: !!unlock, notional: notionalDefs(p.after) });
+    const r = await live().post('/loads/apply', { prefix: L.set.prefix, patterns: withPatterns ? p.pl.map(({ name, type, sw }) => ({ name, type, sw })) : [], combos: p.gen.map(c => ({ name: c.name, type: c.type, items: c.items })), unlock: !!unlock, notional: notionalDefs(p.after), spectrum: withPatterns && L.set.rs ? spectrumDef() : undefined });
+    S.rsmsg = r.spectrum && r.spectrum.warnings && r.spectrum.warnings.length ? r.spectrum.warnings.join('; ') : '';
+    if (r.spectrum) L.rsSig = rsSig();   // ETABS cannot report the function back: remember what was written to this model
     S.nmsg = r.notional && r.notional.manual ? r.notional.manual : '';
     await readModel(); S.sig = sigOf(S.model); S.last = new Date().toLocaleTimeString();
     return (r.patterns_created.length ? `${r.patterns_created.length} load pattern(s) created · ` : '') + `${r.combos} combination(s) written to ETABS`;
@@ -242,14 +269,16 @@
     const sel = (k, opts, v) => `<select class="ctl" data-ldset="${k}">${opts.map(([val, l]) => `<option value="${val}" ${String(v) === String(val) ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
     const chk = (k, l) => `<label class="ld-chk"><input type="checkbox" data-ldset="${k}" ${s[k] ? 'checked' : ''}>${l}</label>`;
     const num = (k, l, step) => `<label class="bc-in"><span>${l}</span><input class="ctl" type="number" step="${step}" data-ldset="${k}" value="${esc(s[k])}"></label>`;
-    const upToDate = D.upToDate && !nPl;
+    const rsDue = s.rs && (P0.newRS > 0 || L.rsSig !== rsSig());
+    const nRS = S.demo || !rsDue ? 0 : P0.nRS;   // response-spectrum cases (re)defined on a manual write
+    const upToDate = D.upToDate && !nPl && !nRS;
     const lockMsg = S.locked && !S.demo ? `<div class="etabs-msg info" style="margin:0 16px 12px">The ETABS model is analysed (locked). Writing unlocks it and <b>deletes the analysis results</b> - run the analysis again afterwards.</div>` : '';
-    const summary = [nPl ? `${nPl} load pattern${nPl > 1 ? 's' : ''} new` : '', D.n.new ? `${D.n.new} combination${D.n.new > 1 ? 's' : ''} new` : '', D.n.changed ? `${D.n.changed} changed` : '', D.n.removed ? `${D.n.removed} removed` : '', D.n.same ? `${D.n.same} unchanged` : ''].filter(Boolean).join(' · ');
+    const summary = [nPl ? `${nPl} load pattern${nPl > 1 ? 's' : ''} new` : '', rsDue ? `spectrum ${s.rsFunc} + ${P0.nRS} response-spectrum case${P0.nRS > 1 ? 's' : ''} (${P0.newRS} new)` : '', D.n.new ? `${D.n.new} combination${D.n.new > 1 ? 's' : ''} new` : '', D.n.changed ? `${D.n.changed} changed` : '', D.n.removed ? `${D.n.removed} removed` : '', D.n.same ? `${D.n.same} unchanged` : ''].filter(Boolean).join(' · ');
 
     const status = `<div class="card etabs-live ${S.demo ? '' : 'on'}"><div class="card-h"><b>${S.demo ? `${ic('layers')}Demo model (preview only)` : `<i class="dot"></i>${esc(String(ln.st.file).split(/[\\/]/).pop())}`}</b><small>${S.model.patterns.length} load patterns · ${S.model.cases.length} load cases · ${S.model.combos.length} combinations (${managed().length} managed “${esc(pre)}”)${S.last ? ' · last written ' + S.last : ''}</small>${S.demo ? `<span class="etabs-hbtn"><button class="btn sm primary" data-ld="connect">Connect to ETABS…</button></span>` : ''}</div>
       ${lockMsg}${S.err ? `<div class="etabs-msg" style="margin:0 16px 12px">${esc(S.err)}</div>` : ''}
       <div class="ld-sum"><b>${upToDate ? '✓ ETABS is up to date' : 'Writing will:'}</b> ${upToDate ? `${gen.length} combinations match the rules` : esc(summary)}</div>
-      <div class="etabs-btns" style="padding:0 16px 14px"><button class="btn primary" data-ld="apply" ${S.busy || upToDate || S.demo ? 'disabled' : ''}>${ic('check')}${S.busy === 'apply' ? 'Writing to ETABS…' : upToDate ? 'Up to date' : S.demo ? 'Connect to ETABS to write' : `Write to ETABS (${[nPl ? nPl + (nPl > 1 ? ' patterns' : ' pattern') : '', writeN ? writeN + (writeN > 1 ? ' combination changes' : ' combination change') : ''].filter(Boolean).join(', ')})`}</button>
+      <div class="etabs-btns" style="padding:0 16px 14px"><button class="btn primary" data-ld="apply" ${S.busy || upToDate || S.demo ? 'disabled' : ''}>${ic('check')}${S.busy === 'apply' ? 'Writing to ETABS…' : upToDate ? 'Up to date' : S.demo ? 'Connect to ETABS to write' : `Write to ETABS (${[nPl ? nPl + (nPl > 1 ? ' patterns' : ' pattern') : '', nRS ? 'spectrum' : '', writeN ? writeN + (writeN > 1 ? ' combination changes' : ' combination change') : ''].filter(Boolean).join(', ')})`}</button>
         <label class="ld-chk ld-auto"><input type="checkbox" data-ldset="auto" ${s.auto ? 'checked' : ''} ${S.demo ? 'disabled' : ''}><span><b>Auto-update</b> · rebuild the combinations when the building's loads change in ETABS or a rule changes here (never creates or deletes load patterns)</span></label></div></div>`;
 
     // preview tabs
@@ -270,7 +299,7 @@
       const pn = new Set(P0.after.patterns.map(p => p.name));
       body = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Status</th><th>Load case</th><th>Case type</th><th>From</th><th>Action</th><th>Category / direction</th><th class="num">ψ0 · ψ1 · ψ2</th></tr></thead><tbody>
         ${P0.after.cases.map(c => { const own = pn.has(c.name); const u = us.find(x => x.name === c.name) || { name: c.name, type: c.type };
-          return `<tr class="${c.planned ? 'ld-new' : ''}"><td>${pill(c.planned ? 'new' : 'exist')}</td><td class="mark">${esc(c.name)}</td><td><small>${esc(CT[c.type] || 'Load case')}</small></td><td><small>${own ? 'its load pattern' : 'load case'}</small></td>${own ? `<td colspan="2"><small class="muted">action set on its load pattern: ${esc(KIND[(L.act[c.name] || { k: 'off' }).k])}</small></td><td class="num">${psiOf(u)}</td>` : `${actCell(u)}<td class="num">${psiOf(u)}</td>`}</tr>`; }).join('')}</tbody></table></div>
+          return `<tr class="${c.planned ? 'ld-new' : ''}"><td>${pill(c.planned ? 'new' : c.rsdef && rsDue ? 'changed' : 'exist')}</td><td class="mark">${esc(c.name)}</td><td><small>${esc(CT[c.type] || 'Load case')}</small></td><td><small>${own ? 'its load pattern' : c.rsdef ? `spectrum ${esc(s.rsFunc)} × g · ${(L.act[c.name] || {}).dir === 'Y' ? 'U2' : 'U1'} · CQC · e = ${s.ecc}` : 'load case'}</small></td>${own ? `<td colspan="2"><small class="muted">action set on its load pattern: ${esc(KIND[(L.act[c.name] || { k: 'off' }).k])}</small></td><td class="num">${psiOf(u)}</td>` : `${actCell(u)}<td class="num">${psiOf(u)}</td>`}</tr>`; }).join('')}</tbody></table></div>
         <p class="muted bc-pad" style="padding-top:10px">Combinations use the load cases. Response-spectrum cases (EQX / EQY) enter the seismic combinations; modal and buckling cases are analysis cases and are not combined.</p>`;
     } else {
       const F = ['all', 'new', 'changed', 'removed', 'same', 'kept'];
@@ -307,7 +336,25 @@
           <br>Notional force at each floor H<sub>i</sub> = θ<sub>i</sub>·N<sub>Ed</sub> of the floor, in ±X and ±Y; with leading or accompanying wind it acts in the wind's direction (${nN} notional pattern${nN === 1 ? '' : 's'}).</div>
         ${S.nmsg ? `<div class="etabs-msg info" style="margin:0 16px 12px">ETABS did not take the notional settings automatically (${esc(S.nmsg)}). Set them by hand: <b>Define → Load Patterns</b> → each “N … X/Y” pattern → <b>Modify Lateral Load</b>: base load pattern as in its name, load ratio <b>${api.fmt(T.th, 5)}</b>, direction X or Y.</div>` : ''}
         <p class="muted bc-pad">EN 1993-1-1 5.3.2(4): sway imperfections may be neglected when H<sub>Ed</sub> ≥ 0.15·V<sub>Ed</sub> (e.g. with wind); EN 1992-1-1 5.2(6): for a bracing system l = height of the building and m = number of vertical members contributing. Notional loads are not used in the seismic combinations.</p>` : ''}</div>`;
-    return head + status + prev + opts + impCard + loadsCard;
+    const SP = spectrum(s), ICL = [[0.8, 'I'], [1.0, 'II'], [1.2, 'III'], [1.4, 'IV']];
+    const tmax = 4, pts = SP.T.filter(t => t <= tmax), ymax = Math.max(...SP.v) * 1.1;
+    const chart = EC.mrender ? EC.mrender.plot({ tr: [{ y: ['v', 'Y_Design spectrum Sd/g'] }, { y: ['v', 'Y_Lower bound β·ag/g'] }, { y: ['v', 'Y_TB'] }, { y: ['v', 'Y_TC'] }, { y: ['v', 'Y_TD'] }] },
+      { tr: [{ x: pts, y: pts.map(t => SP.sd(t)), xu: ['u', 's'], ls: 'Solid' }, { x: [0, tmax], y: [s.beta * SP.ag, s.beta * SP.ag], ls: 'Dash' },
+        { x: [SP.TB, SP.TB], y: [0, ymax], ls: 'Dash' }, { x: [SP.TC, SP.TC], y: [0, ymax], ls: 'Dash' }, { x: [SP.TD, SP.TD], y: [0, ymax], ls: 'Dash' }] }, {}) : '';
+    const rsCard = `<div class="card"><div class="card-h"><b>Seismic design spectrum</b><small>EN 1998-1 3.2.2.5(4) · written to ETABS as a response-spectrum function with the EX / EY cases</small></div>
+      <div class="ld-chks" style="padding-top:2px">${chk('rs', `Create / update the spectrum function “${esc(s.rsFunc)}” and the response-spectrum cases ${esc(s.rsX)} (U1) and ${esc(s.rsY)} (U2) on the next write`)}</div>
+      ${s.rs ? `<div class="bc-inputs">
+        ${num('agR', 'a<sub>gR</sub> reference ground acceleration (× g)', '0.01')}
+        <label class="bc-in"><span>Importance class γ<sub>I</sub> (EN 1998-1 4.2.5)</span>${sel('gI', ICL.map(([v, c]) => [v, `${c} · γI = ${v}`]), s.gI)}</label>
+        <label class="bc-in"><span>Ground type (Table 3.1)</span>${sel('ground', ['A', 'B', 'C', 'D', 'E'].map(g => [g, g]), s.ground)}</label>
+        <label class="bc-in"><span>Spectrum type</span>${sel('stype', [[1, 'Type 1 · Ms > 5.5'], [2, 'Type 2 · Ms ≤ 5.5']], s.stype)}</label>
+        ${num('q', 'q behaviour factor', '0.1')}${num('beta', 'β lower-bound factor', '0.05')}${num('ecc', 'Accidental eccentricity (4.3.2)', '0.01')}
+        <label class="bc-in"><span>Modal case used</span><input class="ctl" data-ldset="rsModal" value="${esc(s.rsModal)}"></label></div>
+        <div class="bc-verdict ok">a<sub>g</sub> = γ<sub>I</sub>·a<sub>gR</sub> = <b>${api.fmt(SP.ag, 3)} g</b> · S = ${SP.S} · T<sub>B</sub> = ${SP.TB} s · T<sub>C</sub> = ${SP.TC} s · T<sub>D</sub> = ${SP.TD} s · plateau a<sub>g</sub>·S·2.5/q = <b>${api.fmt(SP.plateau, 4)} g</b> · lower bound β·a<sub>g</sub> = ${api.fmt(s.beta * SP.ag, 4)} g</div>
+        <div class="ld-rs">${chart}</div>
+        ${S.rsmsg ? `<div class="etabs-msg info" style="margin:0 16px 12px">Spectrum written, but ETABS did not take: ${esc(S.rsmsg)} - set these in the response-spectrum case.</div>` : ''}
+        <p class="muted bc-pad">Function values are S<sub>d</sub>/g with 5 % damping (η is in q); the cases scale by g = 9.81 m/s², combine modes by CQC and directions by SRSS, and carry the accidental eccentricity ${s.ecc}·L (EN 1998-1 4.3.2). The seismic combinations (100 % + 30 %) use these cases.</p>` : ''}</div>`;
+    return head + status + prev + opts + rsCard + impCard + loadsCard;
   }
 
   function mount(root) {
@@ -338,12 +385,12 @@
     };
     root.onchange = ev => {
       const t = ev.target, L = P();
-      if (t.dataset.ldset !== undefined) { const k = t.dataset.ldset; L.set[k] = t.type === 'checkbox' ? t.checked : t.type === 'number' ? +t.value : t.value; api.save(); rer(); if (k !== 'std' && (k !== 'auto' || t.checked)) autoApply(); return; }
+      if (t.dataset.ldset !== undefined) { const k = t.dataset.ldset; L.set[k] = t.type === 'checkbox' ? t.checked : t.type === 'number' || (t.tagName === 'SELECT' && t.value !== '' && !isNaN(+t.value)) ? +t.value : t.value; api.save(); rer(); if (k !== 'std' && (k !== 'auto' || t.checked)) autoApply(); return; }
       if (t.dataset.ldk !== undefined) { const a = L.act[t.dataset.ldk] = Object.assign({}, L.act[t.dataset.ldk], { k: t.value }); if (t.value === 'Q' && !a.cat) a.cat = L.set.cat; if ((t.value === 'W' || t.value === 'E') && !a.dir) a.dir = 'X'; api.save(); rer(); return autoApply(); }
       if (t.dataset.ldcat !== undefined) { L.act[t.dataset.ldcat].cat = t.value; api.save(); rer(); return autoApply(); }
       if (t.dataset.lddir !== undefined) { L.act[t.dataset.lddir].dir = t.value; api.save(); rer(); return autoApply(); }
     };
   }
 
-  EC.loads = { install(a) { api = a; }, view, mount, _generate: generate, _diff: diff, _state: S, _units: units, _guess: guess, CATS };
+  EC.loads = { install(a) { api = a; }, view, mount, _spectrum: spectrum, _generate: generate, _diff: diff, _state: S, _units: units, _guess: guess, CATS };
 })();

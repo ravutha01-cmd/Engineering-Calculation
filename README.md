@@ -48,6 +48,9 @@ Pro accounts with registration come later.
 ## What it does
 
 - **Dashboard**: KPIs (elements, checks OK / revise, design progress, rebar and steel tonnage), utilisation by element, design status, upcoming deadlines and the main element groups.
+- **Two separate design tools**, each with its own section in the sidebar, its own element list and its own cards on the dashboard:
+  - **Design by hand calculation (Mathcad)**: pick a Mathcad worksheet, enter section, materials and forces by hand. Lists at `#/elements`; the Mathcad library is in this section.
+  - **Design with ETABS link**: import ETABS results (beam / column / pier forces, joint reactions), envelope the load combinations and create or update linked elements that are designed for the governing combination. Import at `#/etabs`, linked elements at `#/linked`.
 - **Project → main elements → elements**: nine groups (Foundations, Columns & walls, Beams, Slabs & stairs, Connections & details, Durability & SLS, Geotechnical, Actions & loads, Steel & composite). Each element has a mark, level, grid, quantity, status, start/due dates and a designer.
 - **Element editor**: inputs on the left (yellow cells, as in the Mathcad worksheets). Rows of data such as soil layers, SPT logs, pile coordinates, load spectra and FE forces go in editable tables. On the right are four tabs:
   - **Summary**: Item / U / Status table and U<sub>max</sub>.

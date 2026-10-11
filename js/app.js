@@ -45,6 +45,12 @@
   const STATUS = ['Not started', 'In design', 'Checked', 'Approved', 'IFC'];
   const STATUS_VAR = ['--st0', '--st1', '--st2', '--st3', '--st4'];
   const MOD = EC.modules;
+  /* two separate design tools: hand calculation (Mathcad worksheets, inputs typed in) and ETABS link (forces imported from ETABS) */
+  const TOOLS = {
+    hand: { r: 'elements', l: 'Design by hand calculation', all: 'Hand-calculated elements', sub: 'Mathcad worksheets · inputs and forces entered by hand', has: e => !e.etabs },
+    etabs: { r: 'linked', l: 'Design with ETABS link', all: 'ETABS-linked elements', sub: 'Forces imported from ETABS · governing combination per member', has: e => !!e.etabs }
+  };
+  const listHref = e => '#/' + TOOLS[e.etabs ? 'etabs' : 'hand'].r + '/' + MOD[e.type].cat;
   const defaults = type => { if (MOD[type].mc) return {}; const o = {}; MOD[type].groups.forEach(g => g.f.forEach(f => { o[f.k] = f.cols ? JSON.parse(JSON.stringify(f.d)) : f.d; })); return o; };
   const uid = () => Math.random().toString(36).slice(2, 10);
   const today = () => new Date().toISOString().slice(0, 10);
@@ -174,21 +180,24 @@
   function chrome(route) {
     const p = proj();
     $('#projSel').innerHTML = DB.projects.map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${esc(x.number ? x.number + ' · ' : '')}${esc(x.name)}</option>`).join('');
-    const cnt = k => p.elements.filter(e => MOD[e.type] && MOD[e.type].cat === k).length;
     const a = (href, icon, label, extra, active) => `<a href="#/${href}" class="${active ? 'active' : ''}">${ic(icon)}<span>${label}</span>${extra || ''}</a>`;
     const r0 = route[0] || 'dashboard';
+    const tool = (k, cats) => { const T = TOOLS[k], els = p.elements.filter(T.has), cnt = c => els.filter(e => MOD[e.type] && MOD[e.type].cat === c).length;
+      return `${a(T.r, 'layers', 'All elements', `<span class="count">${els.length}</span>`, r0 === T.r && !route[1])}
+      <div class="sub">${cats.map(c => a(T.r + '/' + c.k, c.icon, c.l, `<span class="count">${cnt(c.k)}</span>`, r0 === T.r && route[1] === c.k)).join('')}</div>`; };
+    const linkedCats = CATS.filter(c => p.elements.some(e => e.etabs && MOD[e.type] && MOD[e.type].cat === c.k));
     $('#sidebar').innerHTML = `<div class="nav">
       ${a('dashboard', 'dashboard', 'Dashboard', '', r0 === 'dashboard')}
-      <h4>Project - main elements</h4>
-      ${a('elements', 'layers', 'All elements', `<span class="count">${p.elements.length}</span>`, r0 === 'elements' && !route[1])}
-      <div class="sub">${CATS.map(c => a('elements/' + c.k, c.icon, c.l, `<span class="count">${cnt(c.k)}</span>`, r0 === 'elements' && route[1] === c.k)).join('')}</div>
+      <h4 class="tool">Design by hand calculation<small>Mathcad worksheets</small></h4>
+      ${tool('hand', CATS)}
+      ${a('library', 'book', 'Mathcad library', `<span class="count">${EC.library.length}</span>`, r0 === 'library')}
+      <h4 class="tool">Design with ETABS link<small>analysis results → design</small></h4>
+      ${a('etabs', 'upload', 'Import ETABS results', '', r0 === 'etabs')}
+      ${tool('etabs', linkedCats)}
       <h4>Schedules</h4>
       ${a('schedules', 'table', 'Element schedules', '', r0 === 'schedules')}
       ${a('programme', 'gantt', 'Design programme', '', r0 === 'programme')}
-      <h4>Analysis link</h4>
-      ${a('etabs', 'upload', 'ETABS link', `<span class="count">${p.elements.filter(e => e.etabs).length}</span>`, r0 === 'etabs')}
-      <h4>Reference</h4>
-      ${a('library', 'book', 'Mathcad library', `<span class="count">${EC.library.length}</span>`, r0 === 'library')}
+      <h4>Project</h4>
       ${a('project', 'gear', 'Project settings', '', r0 === 'project')}
     </div>`;
     const dark = document.documentElement.getAttribute('data-theme') === 'dark' || (!document.documentElement.getAttribute('data-theme') && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -224,15 +233,19 @@
         <div class="axisrow"><div></div><div class="lane" style="position:relative">${ticks.map(v => `<span style="left:${pct(v)}%">${v}</span>`).join('')}</div><div></div></div></div>
         <div class="legend"><span><i style="background:var(--good)"></i>✓ U ≤ 1.0</span><span><i style="background:var(--critical)"></i>✗ U > 1.0 - revise</span><span>┆ limit U = 1.0</span></div>` : '<div class="empty">No elements yet</div>';
 
-    const cats = CATS.map(c => {
-      const xs = R.filter(x => MOD[x.e.type].cat === c.k);
+    const catCards = (k, cats) => cats.map(c => {
+      const T = TOOLS[k], xs = R.filter(x => T.has(x.e) && MOD[x.e.type].cat === c.k);
       const ok = xs.filter(x => x.r.ok).length;
       const mu = xs.reduce((a, x) => Math.max(a, Number.isFinite(x.r.Umax) ? x.r.Umax : 0), 0);
       const dn = xs.filter(x => x.e.status === 'Approved' || x.e.status === 'IFC').length;
-      return `<div class="card cat-card" data-go="elements/${c.k}"><div class="top"><div class="ic">${ic(c.icon)}</div><div><h3>${c.l}</h3><div class="meta">${c.types.length} Mathcad worksheets</div></div></div>
+      return `<div class="card cat-card" data-go="${T.r}/${c.k}"><div class="top"><div class="ic">${ic(c.icon)}</div><div><h3>${c.l}</h3><div class="meta">${k === 'hand' ? `${c.types.length} Mathcad worksheets` : 'designed from ETABS forces'}</div></div></div>
         <div class="nums"><div><b>${xs.length}</b>types</div><div><b>${xs.reduce((a, x) => a + (+x.e.qty || 1), 0)}</b>no. off</div><div><b style="color:${xs.length - ok ? 'var(--critical)' : 'inherit'}">${xs.length - ok}</b>revise</div><div><b>${xs.length ? fmt(mu, 2) : '–'}</b>U max</div></div>
         <div style="margin-top:10px">${ubar(xs.length ? dn / xs.length : 0).replace(/<span class="v">.*?<\/span>/, `<span class="v">${xs.length ? Math.round(dn / xs.length * 100) : 0}%</span>`).replace('title="Maximum utilisation', 'title="Approved / IFC share')}</div></div>`;
     }).join('');
+    const nHand = els.filter(TOOLS.hand.has).length, nLinked = els.length - nHand;
+    const linkedCats = CATS.filter(c => els.some(e => e.etabs && MOD[e.type].cat === c.k));
+    const toolCard = (k, icon, n, txt, go, btn) => `<div class="card tool-card" data-go="${go}"><div class="top"><div class="ic">${ic(icon)}</div><div><h3>${TOOLS[k].l}</h3><div class="meta">${txt}</div></div><b class="n">${n}<small>elements</small></b></div>
+      <div class="foot">${btn}</div></div>`;
 
     const upcoming = els.filter(e => e.status !== 'IFC' && e.status !== 'Approved').sort((a, b) => (a.due || '9').localeCompare(b.due || '9')).slice(0, 8);
     const dueTbl = upcoming.length ? `<table class="tbl"><thead><tr><th>Mark</th><th>Element</th><th>Status</th><th>Due</th></tr></thead><tbody>${upcoming.map(e => {
@@ -255,23 +268,33 @@
           <div class="card"><header><h3>Upcoming deadlines</h3></header><div class="body" style="padding-top:8px">${dueTbl}</div></div>
         </div>
       </div>
-      <h2 style="font-size:16px;margin:22px 0 10px">Main elements</h2>
-      <div class="grid g3">${cats}</div>`;
+      <h2 style="font-size:16px;margin:22px 0 10px">Design tools</h2>
+      <div class="grid g2">
+        ${toolCard('hand', 'book', nHand, 'Mathcad worksheets · section, materials and forces entered by hand', 'elements', `<button class="btn sm primary" data-add>${ic('plus')}New hand calculation</button><button class="btn sm" data-go="library">${ic('book')}Mathcad library</button>`)}
+        ${toolCard('etabs', 'upload', nLinked, 'Import ETABS forces · envelope the combinations · design each member', 'linked', `<button class="btn sm primary" data-go="etabs">${ic('upload')}Import ETABS results</button><button class="btn sm" data-go="linked">${ic('layers')}Linked elements</button>`)}
+      </div>
+      <h2 style="font-size:16px;margin:22px 0 10px">Design by hand calculation (Mathcad) · main elements</h2>
+      <div class="grid g3">${catCards('hand', CATS)}</div>
+      <h2 style="font-size:16px;margin:22px 0 10px">Design with ETABS link · main elements</h2>
+      ${linkedCats.length ? `<div class="grid g3">${catCards('etabs', linkedCats)}</div>` : `<div class="card"><div class="empty">No ETABS-linked elements yet.<br><br><button class="btn primary" data-go="etabs">${ic('upload')}Import ETABS results</button></div></div>`}`;
   }
 
   /* ---------------- element list ---------------- */
-  function vElements(catKey) {
-    const p = proj();
+  function vElements(catKey, k) {
+    const p = proj(), T = TOOLS[k], hand = k === 'hand';
     const cat = CATS.find(c => c.k === catKey);
-    const els = p.elements.filter(e => !cat || MOD[e.type].cat === cat.k);
+    const all = p.elements.filter(T.has);
+    const els = all.filter(e => !cat || MOD[e.type].cat === cat.k);
+    const tabCats = hand ? CATS : CATS.filter(c => c.k === catKey || all.some(e => MOD[e.type].cat === c.k));
+    const addBtn = (lbl, cls) => hand ? `<button class="btn ${cls}" data-add="${cat ? cat.k : ''}">${ic('plus')}${lbl}</button>` : `<button class="btn ${cls}" data-go="etabs">${ic('upload')}Import ETABS results</button>`;
     const rows = els.map(e => { const r = result(e); return `<tr class="click" data-open="${e.id}">
-      <td class="mark">${esc(e.mark)}</td><td>${esc(typeName(e.type))}</td><td>${esc(e.level || '')}</td><td>${esc(e.grid || '')}</td><td class="num">${esc(e.qty)}</td>
+      <td class="mark">${esc(e.mark)}</td><td>${esc(typeName(e.type))}</td><td>${esc(e.level || '')}</td><td>${esc(e.grid || '')}</td>${hand ? '' : `<td><small>${esc(e.etabs.combo)}</small></td>`}<td class="num">${esc(e.qty)}</td>
       <td>${pill(e.status)}</td><td class="num">${esc(e.due || '')}</td><td>${ubar(r.Umax)}</td><td>${resTag(r)}</td>
       <td class="no-print" style="white-space:nowrap"><button class="btn sm" data-dup="${e.id}" title="Duplicate">${ic('copy')}</button> <button class="btn sm danger" data-del="${e.id}" title="Delete">${ic('trash')}</button></td></tr>`; }).join('');
-    return `<div class="page-head"><div><h1>${cat ? cat.l : 'All elements'}</h1><div class="sub">${cat ? `${cat.types.length} Mathcad worksheets` : 'Project → main elements → elements'} · ${els.length} elements in this project</div></div>
-      <div class="actions"><button class="btn primary" data-add="${cat ? cat.k : ''}">${ic('plus')}New element</button></div></div>
-      <div class="tabs">${[{ k: '', l: 'All' }].concat(CATS).map(c => `<button class="${(c.k || '') === (catKey || '') ? 'active' : ''}" data-go="elements${c.k ? '/' + c.k : ''}">${c.l}<span class="badge">${p.elements.filter(e => !c.k || MOD[e.type].cat === c.k).length}</span></button>`).join('')}</div>
-      <div class="card"><div class="tbl-wrap">${els.length ? `<table class="tbl"><thead><tr><th>Mark</th><th>Type</th><th>Level</th><th>Grid / location</th><th class="num">Qty</th><th>Status</th><th class="num">Due</th><th>Utilisation</th><th>Result</th><th class="no-print"></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty">No elements in this group yet.<br><br><button class="btn primary" data-add="${cat ? cat.k : ''}">${ic('plus')}Add the first one</button></div>`}</div></div>`;
+    return `<div class="page-head"><div><div class="tool-tag">${ic(hand ? 'book' : 'upload')}${T.l}</div><h1>${cat ? cat.l : T.all}</h1><div class="sub">${hand && cat ? `${cat.types.length} Mathcad worksheets` : T.sub} · ${els.length} elements in this project</div></div>
+      <div class="actions">${addBtn(hand ? 'New element' : '', 'primary')}</div></div>
+      <div class="tabs">${[{ k: '', l: 'All' }].concat(tabCats).map(c => `<button class="${(c.k || '') === (catKey || '') ? 'active' : ''}" data-go="${T.r}${c.k ? '/' + c.k : ''}">${c.l}<span class="badge">${all.filter(e => !c.k || MOD[e.type].cat === c.k).length}</span></button>`).join('')}</div>
+      <div class="card"><div class="tbl-wrap">${els.length ? `<table class="tbl"><thead><tr><th>Mark</th><th>Type</th><th>Level</th><th>Grid / location</th>${hand ? '' : '<th>Governing combination</th>'}<th class="num">Qty</th><th>Status</th><th class="num">Due</th><th>Utilisation</th><th>Result</th><th class="no-print"></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty">${hand ? 'No hand-calculated elements in this group yet.' : 'No ETABS-linked elements in this group yet - import the ETABS results to create them.'}<br><br>${addBtn('Add the first one', 'primary')}</div>`}</div></div>`;
   }
 
   /* ---------------- element editor ---------------- */
@@ -289,7 +312,7 @@
       return f.opts && !f.u ? `<div class="field wide"><span class="fl">${EC.sym(f.l)}</span>${ctl}</div>` : `<div class="field"><span class="fl">${EC.sym(f.l)}</span>${ctl}<span class="fu">${esc(f.u || '')}</span></div>`;
     }).join('')}</div>`).join('');
     const opt = (arr, v) => arr.map(s => `<option ${s === v ? 'selected' : ''}>${esc(s)}</option>`).join('');
-    return `<div class="page-head no-print"><div><a href="#/elements/${mod.cat}" class="btn sm" style="margin-bottom:8px">${ic('back')}${esc(CATS.find(c => c.k === mod.cat).l)}</a>
+    return `<div class="page-head no-print"><div><a href="${listHref(e)}" class="btn sm" style="margin-bottom:8px">${ic('back')}${e.etabs ? 'ETABS link · ' : ''}${esc(CATS.find(c => c.k === mod.cat).l)}</a>
         <h1><span style="color:var(--accent)">${esc(e.mark)}</span> · ${esc(mod.name)}</h1><div class="sub">${esc(mod.code)} · Mathcad reference: ${esc(mod.mathcad)}</div></div>
       <div class="actions"><button class="btn" data-print>${ic('print')}Print calculation</button><button class="btn" data-dup="${e.id}">${ic('copy')}Duplicate</button><button class="btn danger" data-del="${e.id}">${ic('trash')}Delete</button></div></div>
       <div class="card no-print"><div class="el-head" id="elHead">
@@ -469,7 +492,7 @@
     chrome(r);
     const m = $('#main');
     const v = r[0] || 'dashboard';
-    m.innerHTML = v === 'elements' ? vElements(r[1]) : v === 'el' ? vElement(r[1]) : v === 'schedules' ? vSchedules() : v === 'programme' ? vProgramme() : v === 'library' ? vLibrary() : v === 'etabs' ? EC.etabs.view() : v === 'project' ? vProject() : vDashboard();
+    m.innerHTML = v === 'elements' ? vElements(r[1], 'hand') : v === 'linked' ? vElements(r[1], 'etabs') : v === 'el' ? vElement(r[1]) : v === 'schedules' ? vSchedules() : v === 'programme' ? vProgramme() : v === 'library' ? vLibrary() : v === 'etabs' ? EC.etabs.view() : v === 'project' ? vProject() : vDashboard();
     if (v === 'etabs') EC.etabs.mount(m); else m.onclick = m.onchange = null;
     if (v !== 'el' && v !== 'etabs') m.scrollTop = 0;
     $('#app').classList.remove('nav-open');
@@ -484,8 +507,8 @@
     const p = proj(), go = h => () => { location.hash = h; };
     const items = [];
     p.elements.forEach(e => items.push({ g: 'Elements', t: e.mark, s: typeName(e.type) + (e.level ? ' · ' + e.level : '') + (e.grid ? ' · ' + e.grid : ''), b: e.status, ic: (CATS.find(c => MOD[e.type] && c.k === MOD[e.type].cat) || {}).icon || 'layers', run: () => { activeTab = 'summary'; location.hash = '#/el/' + e.id; } }));
-    [['dashboard', 'dashboard', 'Dashboard'], ['elements', 'layers', 'All elements']].concat(CATS.map(c => ['elements/' + c.k, c.icon, c.l]), [['schedules', 'table', 'Element schedules'], ['programme', 'gantt', 'Design programme'], ['etabs', 'upload', 'ETABS link'], ['library', 'book', 'Mathcad library'], ['project', 'gear', 'Project settings']])
-      .forEach(([h, i, l]) => items.push({ g: 'Go to', t: l, ic: i, run: go('#/' + h) }));
+    [['dashboard', 'dashboard', 'Dashboard'], ['elements', 'layers', 'Hand-calculated elements', 'Design by hand calculation (Mathcad)']].concat(CATS.map(c => ['elements/' + c.k, c.icon, c.l, 'Hand calculation (Mathcad)']), [['library', 'book', 'Mathcad library', 'Design by hand calculation'], ['etabs', 'upload', 'Import ETABS results', 'Design with ETABS link'], ['linked', 'layers', 'ETABS-linked elements', 'Design with ETABS link']], CATS.map(c => ['linked/' + c.k, c.icon, c.l, 'ETABS link']), [['schedules', 'table', 'Element schedules'], ['programme', 'gantt', 'Design programme'], ['project', 'gear', 'Project settings']])
+      .forEach(([h, i, l, sub]) => items.push({ g: 'Go to', t: l, s: sub, ic: i, run: go('#/' + h) }));
     CATS.forEach(c => c.types.forEach(t => items.push({ g: 'New element', t: 'New ' + typeName(t), s: c.l, ic: 'plus', run: () => createEl(t) })));
     items.push({ g: 'Actions', t: 'Toggle light / dark mode', ic: 'moon', run: () => $('#themeBtn').click() });
     if (!DEMO) items.push({ g: 'Actions', t: 'Export all projects (JSON)', ic: 'download', run: () => $('#btnExport').click() });
@@ -548,7 +571,7 @@
     const p = proj(), e = p.elements.find(x => x.id === id); if (!e) return;
     modal('Delete element', `<p>Delete <b>${esc(e.mark)}</b> (${esc(typeName(e.type))}) and its calculation? This cannot be undone.</p>`, () => {
       p.elements = p.elements.filter(x => x.id !== id); cache.delete(id); save();
-      if (route()[0] === 'el') location.hash = '#/elements/' + MOD[e.type].cat; else render();
+      if (route()[0] === 'el') location.hash = listHref(e); else render();
     }, 'Delete');
   }
   function refreshOutput(e) {

@@ -284,7 +284,7 @@
     }
     const lk = linked.length ? `<div class="card"><div class="card-h"><b>Linked elements</b><small>${linked.length} element(s) designed from ETABS results</small></div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Mark</th><th>Design</th><th>Story</th><th>ETABS member</th><th>Governing combination</th><th>Imported</th></tr></thead><tbody>
       ${linked.map(e => `<tr class="click" data-open="${e.id}"><td class="mark">${esc(e.mark)}</td><td>${esc(EC.modules[e.type].name)}</td><td>${esc(e.etabs.story)}</td><td>${esc(e.etabs.label)}</td><td><small>${esc(e.etabs.combo)}</small></td><td><small>${new Date(e.etabs.at).toLocaleString()}</small></td></tr>`).join('')}</tbody></table></div></div>` : '';
-    return `<div class="page-head"><div><h1>ETABS link</h1><div class="sub">Design and detail members directly from ETABS analysis results · RC beams &amp; columns, steel members, shear walls, footings, punching · Eurocodes</div></div></div>${load}${body}${lk}`;
+    return `<div class="page-head"><div><div class="tool-tag">${ic('upload')}Design with ETABS link</div><h1>Import ETABS results</h1><div class="sub">Design and detail members directly from ETABS analysis results · RC beams &amp; columns, steel members, shear walls, footings, punching · Eurocodes</div></div>${linked.length ? `<div class="actions"><a class="btn" href="#/linked">${ic('layers')}ETABS-linked elements <span class="badge">${linked.length}</span></a></div>` : ''}</div>${load}${body}${lk}`;
   }
   function mount(root) {
     const rer = () => api.render();

@@ -25,7 +25,8 @@ Endpoints (JSON):
                                    sel=1: only the members selected in ETABS
     GET /loads                     load patterns, load cases and load combinations (with their cases)
     POST /loads/apply              create missing load patterns and rebuild the managed combinations
-                                   {prefix, patterns: [{name, type, sw}], combos: [{name, type, items: [[name, sf, isCombo]]}], unlock}
+                                   {prefix, patterns: [{name, type, sw}], combos: [{name, type, items: [[name, sf, isCombo]]}], unlock,
+                                    notional: [{name, base, ratio, dir}]}  (notional patterns: base pattern, load ratio, X / Y)
     POST /loads/assign             uniform area loads on the floor slabs selected in ETABS {items: [{pattern, value kN/m2}]}
 
 Writing: only POST with a JSON body from an allowed web page (checked Origin); the model is changed only
@@ -43,7 +44,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.3'
+VERSION = '1.4'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -509,6 +510,7 @@ def apply_loads(m, body):
         old = left
         if not old:
             break
+    notional = set_notional(m, body.get('notional', []))
     n = 0
     for c in body.get('combos', []):
         if not str(c['name']).startswith(prefix):
@@ -517,7 +519,46 @@ def apply_loads(m, body):
         for name, sf, is_combo in c['items']:
             ok(m.RespCombo.SetCaseList(c['name'], 1 if is_combo else 0, name, float(sf)), 'RespCombo.SetCaseList ' + c['name'])
         n += 1
-    return {'patterns_created': made, 'combos': n, 'removed_left': old}
+    return {'patterns_created': made, 'combos': n, 'removed_left': old, 'notional': notional}
+
+
+def set_notional(m, items):
+    """base load pattern, ratio and direction of ETABS notional load patterns, through the editable
+    database table of notional loads (its field names are discovered, so ETABS versions may differ)"""
+    if not items:
+        return {'set': 0}
+    dt = m.DatabaseTables
+    try:
+        n, keys, names, _imp = ok(dt.GetAvailableTables(0, [], [], []), 'GetAvailableTables')[:4]
+        key = next((k for k in (keys or []) if 'notional' in k.lower()), None)
+        if not key:
+            return {'set': 0, 'manual': 'this ETABS version has no editable notional-load table'}
+        ver, fields, data = None, None, None
+        out = ok(dt.GetTableForEditingArray(key, 'All', 0, [], 0, []), 'GetTableForEditingArray')
+        ver, fields, nrec, data = out[0], list(out[1] or []), out[2], list(out[3] or [])
+        f = lambda *w: next((i for i, k in enumerate(fields) if all(x in k.lower() for x in w)), None)
+        i_name, i_base, i_ratio, i_dir = f('name'), f('base'), f('ratio'), f('dir')
+        if None in (i_name, i_base, i_ratio, i_dir):
+            return {'set': 0, 'manual': 'unexpected notional-load table fields: ' + ', '.join(fields)}
+        nf = len(fields)
+        rows = [data[r * nf:(r + 1) * nf] for r in range(nrec or 0)]
+        want = {it['name']: it for it in items}
+        rows = [r for r in rows if r[i_name] not in want]
+        for it in items:
+            r = [''] * nf
+            r[i_name], r[i_base], r[i_ratio] = it['name'], it['base'], f"{float(it['ratio']):.6g}"
+            r[i_dir] = 'Global ' + it['dir'] if 'global' in ' '.join(x for x in data[i_dir::nf] if x).lower() else it['dir']
+            rows.append(r)
+        flat = [x for r in rows for x in r]
+        ok(dt.SetTableForEditingArray(key, ver, fields, len(rows), flat), 'SetTableForEditingArray')
+        # ApplyEditedTables -> [fatal errors, errors, warnings, info, import log, ret]
+        res = dt.ApplyEditedTables(True, 0, 0, 0, 0, '')
+        res = list(res) if isinstance(res, (list, tuple)) else [0, 0, 0, 0, '', res]
+        if (res[0] or 0) + (res[1] or 0):
+            return {'set': 0, 'manual': 'ETABS refused the notional-load table: ' + str(res[4])[:300]}
+        return {'set': len(items)}
+    except Exception as e:
+        return {'set': 0, 'manual': f'{type(e).__name__}: {e}'}
 
 
 def assign_slab_loads(m, body):
@@ -568,7 +609,7 @@ class Mock:
 
     def loads(self):
         cases = [{'name': p['name'], 'type': 1} for p in self.patterns] + self.extra_cases
-        return {'patterns': self.patterns, 'cases': cases, 'combos': self.combos, 'locked': self.locked}
+        return {'patterns': self.patterns, 'cases': cases, 'combos': self.combos, 'locked': self.locked, 'notional': list(getattr(self, 'notional', {}).values())}
 
     def apply_loads(self, body):
         prefix = str(body.get('prefix') or 'CS-')
@@ -581,7 +622,8 @@ class Mock:
         self.combos = [c for c in self.combos if not c['name'].startswith(prefix)]
         new = [{'name': c['name'], 'type': int(c.get('type', 0)), 'items': [list(i) for i in c['items']]} for c in body.get('combos', []) if c['name'].startswith(prefix)]
         self.combos += new
-        return {'patterns_created': made, 'combos': len(new), 'removed_left': []}
+        self.notional = {it['name']: it for it in body.get('notional', [])}
+        return {'patterns_created': made, 'combos': len(new), 'removed_left': [], 'notional': {'set': len(self.notional)}}
 
     def assign_loads(self, body):
         if self.locked and not body.get('unlock'):

@@ -692,3 +692,12 @@ a.badge:hover { border-color: var(--ok-ink); }
 .bc-in input, .bc-in select { background: var(--input-bg); border-color: var(--input-border); }
 .bc-in small { color: var(--muted); font-size: 11px; }
 @media (max-width: 900px) { .bc-split, .bc-split.two { grid-template-columns: minmax(0, 1fr); } }
+
+/* Loads & combinations (ETABS) */
+.ld-chks { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 0 16px 16px; }
+.ld-chk { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+.ld-chk input { width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
+.ld-auto { flex: 1 1 320px; min-width: 0; }
+.ld-auto span { min-width: 0; }
+.ld-tbl td { font-size: 12.5px; }
+.ld-tbl select.ctl, .card .tbl select.ctl { min-width: 140px; }

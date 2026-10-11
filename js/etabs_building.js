@@ -16,6 +16,7 @@
   const B = () => { const p = api.proj(); p.building = p.building || {}; const b = p.building; b.set = Object.assign({}, DEF, b.set || {}); b.roles = b.roles || {}; return b; };
   function guessRole(c) {
     const n = c.toUpperCase();
+    if (/\bEQU\b/.test(n)) return 'uls';   // EN 1990 EQU (overturning) combinations are not seismic
     if (/\bW(IND)?[XY]?\b|WIND/.test(n) && /SLS|SER|CHAR|FREQ/.test(n)) return 'wind';
     if (/\bE[XY]?\b|EQ|SEIS|\bRS\b|SPEC|SPECTR/.test(n)) return 'seis';
     if (/ULS|STR|1\.35|1\.5/.test(n)) return 'uls';

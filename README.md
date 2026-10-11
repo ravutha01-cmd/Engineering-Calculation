@@ -52,6 +52,17 @@ Pro accounts with registration come later.
   - **Design by hand calculation (Mathcad)**: pick a Mathcad worksheet, enter section, materials and forces by hand. Lists at `#/elements`; the Mathcad library is in this section.
   - **Design with ETABS link**: a live link to the open ETABS model through the CSI API (no Excel export). Pick the load combinations, read beam / column / brace / pier forces and support reactions, envelope them and create or update linked elements designed for the governing combination. After re-running the analysis, **Sync linked elements** pushes the new forces into every linked element and keeps your section and bar edits. Link at `#/etabs`, linked elements at `#/linked`. An exported table (Excel / CSV / paste) is still accepted as an offline fallback.
 
+### Loads & combinations (ETABS)
+
+**Design with ETABS link → Loads & combinations** writes to the open ETABS model:
+
+- **Load patterns** - creates the missing standard patterns (Dead with self-weight 1.0, SDL, Live, Roof Live, Wind X, Wind Y); every pattern and response-spectrum case is mapped to its action (G, Q with its EN 1990 category, S, W, E, T), guessed from its ETABS type.
+- **Slab loads** - SDL and the imposed load q_k of the chosen category (EN 1991-1-1 Table 6.2) on the floor slabs selected in ETABS.
+- **Load combinations (EN 1990 Annex A1)** - ULS 6.10 or 6.10a/6.10b with each variable action leading in turn and ψ0 from Table A1.1, G favourable with leading wind, wind ±, EQU 0.9 G + 1.5 W, seismic G + ψ2·Q + E with 100 % + 30 % (EN 1998-1 4.3.3.5.2, ± for static seismic patterns), SLS characteristic / frequent / quasi-permanent, wind-only SLS for drift, and envelopes. Roof imposed loads are not combined with snow or wind (EN 1991-1-1 3.3.2).
+- **Auto-update** - the managed combinations (prefix `CS-`) are rebuilt and written back whenever the load patterns or cases change in ETABS (the building is modified) or a rule changes here; the user's own combinations are never touched.
+
+Writing needs `etabs_bridge.py` 1.3 or later. Writes are POST requests accepted only from the CAMBO STRUCT page; an analysed (locked) model is unlocked only after you confirm, because ETABS then deletes the analysis results.
+
 ### Building checks (ETABS)
 
 **Design with ETABS link → Building checks** reads the whole building from ETABS (storey drifts, storey forces, max / average displacements, base reactions, buckling factors) and checks:

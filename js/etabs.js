@@ -24,6 +24,14 @@
     if (!r.ok || j.error) throw new Error(j.error || 'HTTP ' + r.status);
     return j;
   }
+  async function bpost(path, body) {
+    let r;
+    try { r = await fetch(L.url.replace(/\/+$/, '') + path, { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
+    catch (e) { throw new Error('ETABS link not running on ' + L.url + ' - start tools/etabs_bridge/start_etabs_link.bat (version 1.3 or later for writing).'); }
+    const j = await r.json().catch(() => ({ error: 'Bad answer from the ETABS link (HTTP ' + r.status + ')' }));
+    if (!r.ok || j.error) throw new Error(j.error || (r.status === 404 || r.status === 501 ? 'Update etabs_bridge.py: this version cannot write to ETABS.' : 'HTTP ' + r.status));
+    return j;
+  }
   async function connect(pid) {
     L.st = await bget(pid === undefined ? '/status' : '/connect?pid=' + pid); L.model = await bget('/model');
     L.sel = null; pollSel(true);
@@ -482,5 +490,5 @@
       <p class="muted" style="margin:8px 14px 12px">Re-import the ETABS results on the <a href="#/etabs">ETABS link</a> page to update these forces. Section, material and bar inputs you change here are kept.</p></details>`;
   }
 
-  EC.etabs = { install(a) { api = a; }, view, mount, banner, live: { L, get: bget, connect: openConnect }, _demoDesign: () => { demo(); let n = 0; S.tables.forEach((t, ti) => { const r = apply(ti, true); n += r.nNew + r.nUpd; }); return n; }, _parse: (text) => { ingest([[splitText(text), '']]); return S; }, _members: members, _state: S, _demo: demo };
+  EC.etabs = { install(a) { api = a; }, view, mount, banner, live: { L, get: bget, post: bpost, connect: openConnect }, _demoDesign: () => { demo(); let n = 0; S.tables.forEach((t, ti) => { const r = apply(ti, true); n += r.nNew + r.nUpd; }); return n; }, _parse: (text) => { ingest([[splitText(text), '']]); return S; }, _members: members, _state: S, _demo: demo };
 })();

@@ -9,7 +9,7 @@ It attaches to the running ETABS instance through the CSI API (OAPI, ETABSv1), r
 combinations and the analysis results, and serves them to the CAMBO STRUCT page on
 http://127.0.0.1:5480 (this computer only). In the app: Design with ETABS link -> Connect.
 
-Read-only: the bridge never edits the model. While reading it switches the present units to
+Reading never edits the model; the two POST calls below create load patterns, load combinations and slab loads. While reading it switches the present units to
 kN, m and selects the requested combinations for output, then restores the units.
 
 Endpoints (JSON):
@@ -23,6 +23,13 @@ Endpoints (JSON):
     GET /results?c=<combo>&c=...&k=beams&k=columns&k=braces&k=piers&k=reactions[&sel=1]
                                    results as ETABS-style tables (header row, units row, rows);
                                    sel=1: only the members selected in ETABS
+    GET /loads                     load patterns, load cases and load combinations (with their cases)
+    POST /loads/apply              create missing load patterns and rebuild the managed combinations
+                                   {prefix, patterns: [{name, type, sw}], combos: [{name, type, items: [[name, sf, isCombo]]}], unlock}
+    POST /loads/assign             uniform area loads on the floor slabs selected in ETABS {items: [{pattern, value kN/m2}]}
+
+Writing: only POST with a JSON body from an allowed web page (checked Origin); the model is changed only
+through these two calls, and an analysed (locked) model is unlocked only when the request says unlock=true.
 
 Options: --port 5480   --allow-origin https://example.org (repeatable)   --mock (no ETABS, demo data)
 """
@@ -36,7 +43,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.2'
+VERSION = '1.3'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -213,6 +220,15 @@ class Etabs:
     def model_info(self):
         m = self.attach()
         return {'combos': self.names(m.RespCombo, 'RespCombo.GetNameList'), 'cases': self.names(m.LoadCases, 'LoadCases.GetNameList')}
+
+    def loads(self):
+        return loads_from_model(self.attach())
+
+    def apply_loads(self, body):
+        return apply_loads(self.attach(), body)
+
+    def assign_loads(self, body):
+        return assign_slab_loads(self.attach(), body)
 
     def building(self, combos):
         m = self.attach()
@@ -443,6 +459,94 @@ def building_from_model(m, combos, cset):
     return {'stories': stories, 'drifts': drifts, 'forces': forces, 'torsion': torsion, 'base': base_r, 'buckling': buck, 'modal': modal}
 
 
+COMBO_TYPES = {0: 'Linear Add', 1: 'Envelope', 2: 'Absolute Add', 3: 'SRSS', 4: 'Range Add'}
+
+
+def loads_from_model(m):
+    pats = []
+    for n in ok(m.LoadPatterns.GetNameList(0, []), 'LoadPatterns.GetNameList')[1] or []:
+        t = ok(m.LoadPatterns.GetLoadType(n, 0), 'LoadPatterns.GetLoadType')[0]
+        sw = ok(m.LoadPatterns.GetSelfWTMultiplier(n, 0), 'LoadPatterns.GetSelfWTMultiplier')[0]
+        pats.append({'name': n, 'type': int(t), 'sw': sw})
+    cases = []
+    for n in ok(m.LoadCases.GetNameList(0, []), 'LoadCases.GetNameList')[1] or []:
+        try:
+            t = int(ok(m.LoadCases.GetTypeOAPI(n, 0, 0), 'LoadCases.GetTypeOAPI')[0])
+        except BridgeError:
+            t = 0
+        cases.append({'name': n, 'type': t})
+    combos = []
+    for n in ok(m.RespCombo.GetNameList(0, []), 'RespCombo.GetNameList')[1] or []:
+        t = ok(m.RespCombo.GetTypeOAPI(n, 0), 'RespCombo.GetTypeOAPI')[0]
+        k, ctypes, cnames, sfs = ok(m.RespCombo.GetCaseList(n, 0, [], [], []), 'RespCombo.GetCaseList')[:4]
+        combos.append({'name': n, 'type': int(t), 'items': [[cnames[i], sfs[i], int(ctypes[i]) == 1] for i in range(k or 0)]})
+    return {'patterns': pats, 'cases': cases, 'combos': combos, 'locked': bool(m.GetModelIsLocked())}
+
+
+def apply_loads(m, body):
+    prefix = str(body.get('prefix') or 'CS-')
+    if len(prefix) < 2:
+        raise BridgeError('The managed-combination prefix must have at least 2 characters.')
+    if m.GetModelIsLocked():
+        if not body.get('unlock'):
+            raise BridgeError('LOCKED: the ETABS model is analysed (locked). Unlocking deletes the analysis results.')
+        ok(m.SetModelIsLocked(False), 'SetModelIsLocked')
+    have = set(ok(m.LoadPatterns.GetNameList(0, []), 'LoadPatterns.GetNameList')[1] or [])
+    made = []
+    for p in body.get('patterns', []):
+        if p['name'] not in have:
+            ok(m.LoadPatterns.Add(p['name'], int(p['type']), float(p.get('sw', 0)), True), 'LoadPatterns.Add ' + p['name'])
+            made.append(p['name'])
+    # rebuild the managed combinations: delete every <prefix>* combination (envelopes first), then add
+    old = [c for c in (ok(m.RespCombo.GetNameList(0, []), 'RespCombo.GetNameList')[1] or []) if c.startswith(prefix)]
+    for _ in range(4):
+        left = []
+        for c in old:
+            try:
+                ok(m.RespCombo.Delete(c), 'RespCombo.Delete')
+            except BridgeError:
+                left.append(c)          # still used by another managed envelope: next pass
+        old = left
+        if not old:
+            break
+    n = 0
+    for c in body.get('combos', []):
+        if not str(c['name']).startswith(prefix):
+            continue                    # never touch the user's own combinations
+        ok(m.RespCombo.Add(c['name'], int(c.get('type', 0))), 'RespCombo.Add ' + c['name'])
+        for name, sf, is_combo in c['items']:
+            ok(m.RespCombo.SetCaseList(c['name'], 1 if is_combo else 0, name, float(sf)), 'RespCombo.SetCaseList ' + c['name'])
+        n += 1
+    return {'patterns_created': made, 'combos': n, 'removed_left': old}
+
+
+def assign_slab_loads(m, body):
+    if m.GetModelIsLocked():
+        if not body.get('unlock'):
+            raise BridgeError('LOCKED: the ETABS model is analysed (locked). Unlocking deletes the analysis results.')
+        ok(m.SetModelIsLocked(False), 'SetModelIsLocked')
+    n, types, names = ok(m.SelectObj.GetSelected(0, [], []), 'SelectObj.GetSelected')[:3]
+    floors = []
+    for i in range(n or 0):
+        if int(types[i]) == SEL_AREA:
+            try:
+                if int(ok(m.AreaObj.GetDesignOrientation(names[i], 0), 'AreaObj.GetDesignOrientation')[0]) == 2:   # Floor
+                    floors.append(names[i])
+            except BridgeError:
+                pass
+    if not floors:
+        raise BridgeError('No floor slab is selected in ETABS - select the slabs (not walls) first.')
+    old = m.GetPresentUnits()
+    m.SetPresentUnits(KN_M_C)
+    try:
+        for it in body.get('items', []):
+            for a in floors:   # direction 10 = gravity; replace the previous value of this pattern
+                ok(m.AreaObj.SetLoadUniform(a, it['pattern'], float(it['value']), 10, True, 'Global', 0), 'AreaObj.SetLoadUniform')
+    finally:
+        m.SetPresentUnits(old)
+    return {'slabs': len(floors), 'items': len(body.get('items', []))}
+
+
 class Mock:
     """Demo model with the same answers as a live ETABS (for testing without ETABS).
     The selection is B12 on Story3, column C3 on Story1 and support J1."""
@@ -455,6 +559,37 @@ class Mock:
 
     def __init__(self):
         self.pid = 4120
+        self.locked = True
+        self.patterns = [{'name': 'Dead', 'type': 1, 'sw': 1.0}, {'name': 'SDL', 'type': 2, 'sw': 0.0}, {'name': 'Live', 'type': 3, 'sw': 0.0},
+                         {'name': 'Wind X', 'type': 6, 'sw': 0.0}, {'name': 'Wind Y', 'type': 6, 'sw': 0.0}]
+        self.extra_cases = [{'name': 'Modal', 'type': 3}, {'name': 'EQX RS', 'type': 4}, {'name': 'EQY RS', 'type': 4}, {'name': 'Buckling', 'type': 10}]
+        self.combos = [{'name': c, 'type': 0, 'items': [['Dead', 1.35, False], ['Live', 1.5, False]]} for c in self.COMBOS]
+        self.slab_loads = {}
+
+    def loads(self):
+        cases = [{'name': p['name'], 'type': 1} for p in self.patterns] + self.extra_cases
+        return {'patterns': self.patterns, 'cases': cases, 'combos': self.combos, 'locked': self.locked}
+
+    def apply_loads(self, body):
+        prefix = str(body.get('prefix') or 'CS-')
+        if self.locked:
+            if not body.get('unlock'):
+                raise BridgeError('LOCKED: the ETABS model is analysed (locked). Unlocking deletes the analysis results.')
+            self.locked = False
+        made = [p['name'] for p in body.get('patterns', []) if p['name'] not in {x['name'] for x in self.patterns}]
+        self.patterns += [{'name': p['name'], 'type': int(p['type']), 'sw': float(p.get('sw', 0))} for p in body.get('patterns', []) if p['name'] in made]
+        self.combos = [c for c in self.combos if not c['name'].startswith(prefix)]
+        new = [{'name': c['name'], 'type': int(c.get('type', 0)), 'items': [list(i) for i in c['items']]} for c in body.get('combos', []) if c['name'].startswith(prefix)]
+        self.combos += new
+        return {'patterns_created': made, 'combos': len(new), 'removed_left': []}
+
+    def assign_loads(self, body):
+        if self.locked and not body.get('unlock'):
+            raise BridgeError('LOCKED: the ETABS model is analysed (locked). Unlocking deletes the analysis results.')
+        self.locked = False
+        for it in body.get('items', []):
+            self.slab_loads[it['pattern']] = float(it['value'])
+        return {'slabs': 6, 'items': len(body.get('items', []))}
 
     def instances(self):
         return {'instances': [{'pid': 4120, 'file': r'C:\Projects\Demo\Tower-A.EDB', 'linked': self.pid == 4120},
@@ -466,10 +601,11 @@ class Mock:
 
     def status(self):
         f = next(i['file'] for i in self.instances()['instances'] if i['pid'] == self.pid)
-        return {'connected': True, 'etabs': 'mock', 'pid': self.pid, 'file': f, 'analysed': True}
+        return {'connected': True, 'etabs': 'mock', 'pid': self.pid, 'file': f, 'analysed': self.locked}
 
     def model_info(self):
-        return {'combos': self.COMBOS + ['EQX RS', 'EQY RS', 'G+0.3Q+EX', 'G+0.3Q+EY', 'WX SLS', 'WY SLS'], 'cases': ['Dead', 'Live', 'Wind X', 'Buckling']}
+        own = [c['name'] for c in self.combos if c['name'] not in self.COMBOS]
+        return {'combos': self.COMBOS + ['EQX RS', 'EQY RS', 'G+0.3Q+EX', 'G+0.3Q+EY', 'WX SLS', 'WY SLS'] + own, 'cases': [p['name'] for p in self.patterns] + ['Buckling']}
 
     def building(self, combos):
         """10-storey RC frame, 3.4 m ground storey + 3.2 m above, 24 x 18 m plan"""
@@ -591,8 +727,8 @@ def make_handler(src, origins):
         def do_OPTIONS(self):
             self.send_response(204)
             self.cors()
-            self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
-            self.send_header('Access-Control-Allow-Headers', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
             self.end_headers()
 
         def do_GET(self):
@@ -610,6 +746,8 @@ def make_handler(src, origins):
                     return self.send(200, dict(src.status(), bridge=VERSION))
                 if u.path == '/model':
                     return self.send(200, src.model_info())
+                if u.path == '/loads':
+                    return self.send(200, src.loads())
                 if u.path == '/building':
                     return self.send(200, src.building(q.get('c', [])))
                 if u.path == '/results':
@@ -619,6 +757,31 @@ def make_handler(src, origins):
             except BridgeError as e:
                 return self.send(503, {'error': str(e)})
             except Exception as e:   # COM errors: report, keep serving
+                traceback.print_exc()
+                return self.send(500, {'error': f'{type(e).__name__}: {e}'})
+
+        def allowed(self):
+            o = self.headers.get('Origin')
+            return bool(o) and (o in origins or '*' in origins or o.startswith(('http://localhost:', 'http://127.0.0.1:')))
+
+        def do_POST(self):
+            u = urlparse(self.path)
+            # writes: only from an allowed page, only with a JSON body (a cross-site form cannot send one)
+            if not self.allowed() or 'application/json' not in (self.headers.get('Content-Type') or ''):
+                return self.send(403, {'error': 'Writing to ETABS is only allowed from the CAMBO STRUCT page.'})
+            try:
+                n = int(self.headers.get('Content-Length') or 0)
+                if n > 2_000_000:
+                    return self.send(413, {'error': 'request too large'})
+                body = json.loads(self.rfile.read(n) or b'{}')
+                if u.path == '/loads/apply':
+                    return self.send(200, src.apply_loads(body))
+                if u.path == '/loads/assign':
+                    return self.send(200, src.assign_loads(body))
+                return self.send(404, {'error': 'unknown endpoint'})
+            except BridgeError as e:
+                return self.send(409 if str(e).startswith('LOCKED') else 503, {'error': str(e)})
+            except Exception as e:
                 traceback.print_exc()
                 return self.send(500, {'error': f'{type(e).__name__}: {e}'})
 

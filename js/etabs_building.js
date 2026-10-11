@@ -209,7 +209,7 @@
     return api.proj().elements.filter(e => e.etabs && AMP[e.type]).map(e => {
       const story = st.some(x => x.name === e.etabs.story) ? e.etabs.story : low;   // supports (Base) take the lowest storey
       const seis = has(e, seisNames), lat = has(e, lateral), imp = !lat && has(e, imper), sway = seis || lat || (imp && b.set.ampImp);
-      let k = 1, basis = '';
+      let k = 1, basis = '', kk = null;
       if (seis) {
         const th = R.theta.filter(x => x.story === story);
         const t = th.length ? Math.max(...th.map(x => x.th)) : 0;
@@ -221,25 +221,87 @@
       } else if (R.acr) {
         const a = R.acr.a;
         if (a < 3) { k = null; basis = `α<sub>cr</sub> = ${api.fmt(a, 2)} < 3: second-order analysis needed`; }
-        else if (a < 10) { k = 1 / (1 - 1 / a); basis = `α<sub>cr</sub> = ${api.fmt(a, 2)} → 1/(1−1/α<sub>cr</sub>)${imp ? ' · sway from imperfections (notional loads): whole M, V amplified - conservative' : ''}`; }
+        else if (a < 10) {
+          k = 1 / (1 - 1 / a);
+          const sh = imp ? nShare(b, e) : null;
+          if (imp && sh) {   // exact: only the notional (sway) share of each force is amplified
+            kk = {}; const pct = [];
+            Object.keys(sh).forEach(x => { const v = Math.abs(+e.inputs[x] || 0), base0 = Math.abs(+((e.pdelta && e.pdelta.base) || e.inputs)[x] || 0) || v; if (base0 > 1e-9) { kk[x] = 1 + (k - 1) * Math.min(sh[x], base0) / base0; pct.push(`${x} +${api.fmt((kk[x] - 1) * 100, 2)} %`); } });
+            basis = `α<sub>cr</sub> = ${api.fmt(a, 2)} → (1/(1−1/α<sub>cr</sub>) − 1) × notional share Σf·F(N) only (exact): ${pct.join(', ') || 'no notional forces'}`;
+          } else basis = `α<sub>cr</sub> = ${api.fmt(a, 2)} → 1/(1−1/α<sub>cr</sub>)${imp ? ' · sway from imperfections (notional loads): whole M, V amplified - conservative (read the building with the notional patterns in ETABS for the exact share)' : ''}`;
+        }
         else basis = `α<sub>cr</sub> = ${api.fmt(a, 2)} ≥ 10 → no amplification`;
       } else basis = 'no buckling factor (add a buckling case)';
       const base = (e.pdelta && e.pdelta.base) || Object.fromEntries(AMP[e.type].filter(x => e.inputs[x] !== undefined).map(x => [x, e.inputs[x]]));
       const U = inp => { try { return EC.modules[e.type].calc(Object.assign({}, e.inputs, inp)).Umax; } catch (er) { return NaN; } };
-      const amp = k && k > 1 ? Object.fromEntries(Object.keys(base).map(x => [x, Math.round(base[x] * k * 10) / 10])) : base;
-      return { e, story, seis, k, basis, base, U0: U(base), U1: U(amp), applied: e.pdelta ? e.pdelta.k : null };
+      const fx = x => (kk && kk[x] != null ? kk[x] : kk ? 1 : k);
+      const amp = k && k > 1 ? Object.fromEntries(Object.keys(base).map(x => [x, Math.round(base[x] * fx(x) * 10) / 10])) : base;
+      const kShow = kk ? Math.max(1, ...Object.values(kk)) : k;
+      return { e, story, seis, k: kShow, kk, basis, base, U0: U(base), U1: U(amp), applied: e.pdelta ? e.pdelta.k : null };
     });
   }
-  function applyK(e, base, k) {
-    e.pdelta = { k, base, at: Date.now() };
-    Object.keys(base).forEach(x => { e.inputs[x] = Math.round(base[x] * k * 10) / 10; });
+  /* exact P-Δ share of the imperfections: for each amplified input, Σ |f_N|·F(N) over the notional cases N of the governing
+     combination, F = the member's largest force of that kind under N (M3 / V2 / M2, support MX / MY) - read from ETABS */
+  const NFORCE = { beam: { MEd: 'M3', MEdh: 'M3', VEd: 'V2' }, column: { My1: 'M3', My2: 'M3', Mz1: 'M2', Mz2: 'M2' }, shearwall: { M: 'M3', V: 'V2' }, steel: { MEd: 'M3', VEd: 'V2' }, footing: { MEx: 'MY', MEy: 'MX' } };
+  function nShare(b, e) {
+    const nf = b.data.nf && b.data.nf[e.etabs.story + '|' + e.etabs.label], cm = b.data.ncombos;
+    if (!nf || !cm) return null;
+    const strip = c => String(c || '').replace(/\s+(Max|Min)$/i, '').trim();
+    const g = String(e.etabs.combo || ''), mb = /^M\+ (.+?) · M− (.+?) · V (.+)$/.exec(g);
+    const comboOf = x => strip(mb ? { MEd: mb[1], MEdh: mb[2], VEd: mb[3] }[x] : g);
+    const out = {}; let any = false;
+    Object.entries(NFORCE[e.type] || {}).forEach(([x, F]) => {
+      const items = cm[comboOf(x)]; if (!items) return;
+      let s = 0; Object.entries(items).forEach(([c, f]) => { if (nf[c] && nf[c][F] != null) s += Math.abs(f) * Math.abs(nf[c][F]); });
+      out[x] = s; any = true;
+    });
+    return any ? out : null;
+  }
+  /* demo: notional-case member forces of the linked members (about 3 % of their gravity forces, Dead 70 % / Live 30 %) */
+  function demoNotional(b) {
+    const items = { 'N Dead X': 1.35, 'N Live X': 1.5 };
+    b.data.ncombos = { 'ULS1 1.35G+1.5Q': items };
+    b.data.nf = {};
+    api.proj().elements.filter(e => e.etabs && NFORCE[e.type]).forEach(e => {
+      const share = { M3: 0, V2: 0, M2: 0, MX: 0, MY: 0 };
+      Object.entries(NFORCE[e.type]).forEach(([x, F]) => { share[F] = Math.max(share[F], 0.03 * Math.abs(+(e.pdelta && e.pdelta.base ? e.pdelta.base[x] : e.inputs[x]) || 0)); });
+      const per = f => Object.fromEntries(Object.entries(share).map(([F, v]) => [F, Math.round(v * f / 1.4 * 1000) / 1000]));   // Σ |f|·F(N) = 3 % of the force
+      b.data.nf[e.etabs.story + '|' + e.etabs.label] = { 'N Dead X': per(0.7), 'N Live X': per(0.3 * 1.35 / 1.5) };
+    });
+  }
+  /* member forces of the notional cases ("N <pattern> X|Y") for the linked members, and the combinations that use them */
+  async function readNotional(b) {
+    const ld = await EC.etabs.live.get('/loads');
+    const ncases = (ld.patterns || []).filter(p => /^N\s.+\s[XY]$/.test(p.name) && (p.type === 12 || p.type === 8)).map(p => p.name);
+    b.data.nf = null; b.data.ncombos = null;
+    if (!ncases.length) return;
+    const ncombos = {};
+    (ld.combos || []).forEach(c => { const its = (c.items || []).filter(i => !i[2]); if (its.some(i => ncases.includes(i[0]))) ncombos[c.name] = Object.fromEntries(its.filter(i => ncases.includes(i[0])).map(i => [i[0], +i[1]])); });
+    const want = new Set(api.proj().elements.filter(e => e.etabs).map(e => e.etabs.story + '|' + e.etabs.label));
+    const j = await EC.etabs.live.get('/results?' + ncases.map(c => 'c=' + encodeURIComponent(c)).concat(['beams', 'columns', 'braces', 'piers', 'reactions'].map(k => 'k=' + k)).join('&'));
+    const nf = {};
+    (j.tables || []).forEach(t => {
+      const h = (t.rows[0] || []).map(x => String(x).toLowerCase().replace(/\s+/g, '')), col = n => h.indexOf(n);
+      const iS = col('story'), iL = 1, iC = col('outputcase');
+      const F = ['M3', 'V2', 'M2', 'MX', 'MY'].map(f => [f, col(f.toLowerCase())]).filter(([, i]) => i >= 0);
+      t.rows.slice(2).forEach(r => {
+        const key = r[iS] + '|' + r[iL]; if (!want.has(key)) return;
+        const o = ((nf[key] = nf[key] || {})[r[iC]] = nf[key][r[iC]] || {});
+        F.forEach(([f, i]) => { o[f] = Math.max(o[f] || 0, Math.abs(+r[i] || 0)); });
+      });
+    });
+    b.data.nf = nf; b.data.ncombos = ncombos;
+  }
+  function applyK(e, base, k, kk) {
+    e.pdelta = { k, kk: kk || null, base, at: Date.now() };
+    Object.keys(base).forEach(x => { e.inputs[x] = Math.round(base[x] * (kk ? (kk[x] != null ? kk[x] : 1) : k) * 10) / 10; });
     e.u = Date.now();
   }
   /* new ETABS forces arrived for an amplified member: keep the factor, refresh the base values */
   function reamp(e) {
     if (!e.pdelta || !AMP[e.type]) return;
     const base = Object.fromEntries(AMP[e.type].filter(x => e.inputs[x] !== undefined).map(x => [x, e.inputs[x]]));
-    applyK(e, base, e.pdelta.k);
+    applyK(e, base, e.pdelta.k, e.pdelta.kk);
   }
 
   /* ---------- small storey-profile chart (value vs height) ---------- */
@@ -376,10 +438,12 @@
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
       if (d.bc === 'demo') {
-        b.data = demoBuilding(); b.data.mods = demoMods(); b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
+        b.data = demoBuilding(); b.data.mods = demoMods();
+        b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
         Object.assign(b.roles, DEMO_ROLES); Object.assign(b.set, { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, Bx: 24, By: 18, fos: 1.0 });
         let n = 0;   // demo ETABS-linked members (beams, columns, footings) for the P-Δ member design
         if (!api.proj().elements.some(e => e.etabs) && EC.etabs._demoDesign) n = EC.etabs._demoDesign();
+        demoNotional(b);   // demo: ULS1 carries notional loads N Dead X / N Live X; their member forces ≈ 3 % of the gravity ones
         api.save(); api.toast('Demo building loaded' + (n ? ` · ${n} demo ETABS-linked member(s) designed` : '')); return rer();
       }
       if (d.bc === 'amp' || d.bc === 'unamp') {
@@ -387,7 +451,7 @@
         let n = 0;
         memberFactors(b, R).forEach(m => {
           if (d.bc === 'unamp') { if (m.e.pdelta) { Object.assign(m.e.inputs, m.e.pdelta.base); delete m.e.pdelta; m.e.u = Date.now(); n++; } }
-          else if (m.k && m.k > 1) { applyK(m.e, m.base, m.k); n++; }
+          else if (m.k && m.k > 1) { applyK(m.e, m.base, m.k, m.kk); n++; }
           else if (m.e.pdelta) { Object.assign(m.e.inputs, m.e.pdelta.base); delete m.e.pdelta; m.e.u = Date.now(); }
         });
         api.save(); api.toast(d.bc === 'amp' ? `P-Δ amplification applied to ${n} member(s)` : `P-Δ amplification removed from ${n} member(s)`); return rer();
@@ -402,7 +466,8 @@
           b.file = String(j.file || '').split(/[\\/]/).pop(); b.at = Date.now(); b.demo = false;
           if (j.plan && b.set.Bx === DEF.Bx && b.set.By === DEF.By) { b.set.Bx = j.plan.Bx; b.set.By = j.plan.By; }
           if (!b.data.stories.length) throw new Error('ETABS returned no storeys.');
-          return EC.etabs.live.get('/modifiers').then(mj => { b.data.mods = mj.props || []; }, () => { b.data.mods = []; });
+          return EC.etabs.live.get('/modifiers').then(mj => { b.data.mods = mj.props || []; }, () => { b.data.mods = []; })
+            .then(() => readNotional(b).catch(() => { b.data.nf = null; b.data.ncombos = null; }));
         }).then(() => {
           busy = ''; api.save(); api.toast('Building read from ETABS'); rer();
         }).catch(e => { busy = ''; err = e.message; rer(); });

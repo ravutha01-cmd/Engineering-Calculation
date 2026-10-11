@@ -945,7 +945,9 @@ class Mock:
                 [{'kind': 'reactions', 'story': j[0], 'label': j[1]} for j in self.JOINTS if j[2] in self.SEL['points']]}
 
     def results(self, combos, kinds, only_sel=False):
-        combos = [c for c in combos if c in self.F]
+        # notional cases "N <pattern> X|Y": about 3 % of the gravity forces
+        F = dict(self.F, **{c: 0.03 for c in combos if c.startswith('N ')})
+        combos = [c for c in combos if c in F]
         if not combos:
             raise BridgeError('Select at least one load combination')
         fr = (lambda u: u in self.SEL['frames']) if only_sel else (lambda u: True)
@@ -957,7 +959,7 @@ class Mock:
                 if not fr(u):
                     continue
                 for c in combos:
-                    w = 48 * k * self.F[c]
+                    w = 48 * k * F[c]
                     for i in range(5):
                         x = L * i / 4
                         rows.append([st, b, u, c, 'Combination', '', x, 0, w * (L / 2 - x), 0, 2.1 * k, 0, w * x * (L - x) / 2 - w * L * L / 12])
@@ -969,7 +971,7 @@ class Mock:
                 if not fr(u):
                     continue
                 for c in combos:
-                    f = self.F[c]
+                    f = F[c]
                     for i, x in enumerate([0, 1.75, 3.5]):
                         wm = 1.8 if 'W' in c else 1.0   # wind combination: larger moments, less axial load
                         rows.append([st, cl, u, c, 'Combination', '', x, -1500 * k * f, 22 * wm, 9 * wm, 0.4, 16 * wm * (1 - i), 58 * k * wm * (1 - 0.8 * i)])
@@ -977,7 +979,7 @@ class Mock:
             out.append({'name': 'Element Forces - Columns', 'rows': [[h or 'Column' for h in FRAME_HEAD], FRAME_UNITS] + rows})
         rows = []
         if 'reactions' in kinds:
-            rows = [[st, j, u, c, 'Combination', '', 14, 8, 1650 * k * self.F[c], 25, 48, 0.2] for st, j, u, k in self.JOINTS if pt(u) for c in combos]
+            rows = [[st, j, u, c, 'Combination', '', 14, 8, 1650 * k * F[c], 25, 48, 0.2] for st, j, u, k in self.JOINTS if pt(u) for c in combos]
         if rows:
             out.append({'name': 'Joint Reactions', 'rows': [['Story', 'Label', 'Unique Name', 'Output Case', 'Case Type', 'Step Type', 'FX', 'FY', 'FZ', 'MX', 'MY', 'MZ'],
                                                             ['', '', '', '', '', '', 'kN', 'kN', 'kN', 'kN-m', 'kN-m', 'kN-m']] + rows})

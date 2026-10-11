@@ -79,6 +79,55 @@
     return out;
   }
 
+  /* ---------- P-Δ / sway design of the ETABS-linked members ----------
+   * EN 1998-1 4.4.2.2(3): seismic action effects × 1/(1−θ) of the storey (0.1 < θ ≤ 0.2).
+   * EN 1993-1-1 5.2.2(5)B: sway effects × 1/(1−1/αcr) (3 ≤ αcr < 10) for the non-seismic combinations.
+   * The moments and shears of the governing case are multiplied (conservative: the gravity part is amplified too);
+   * the original ETABS values are kept in e.pdelta.base so the factor can be changed or removed. */
+  const AMP = { beam: ['MEd', 'MEdh', 'VEd'], column: ['My1', 'My2', 'Mz1', 'Mz2'], shearwall: ['M', 'V'], steel: ['MEd', 'VEd'], footing: ['MEx', 'MEy'] };
+  function memberFactors(b, R) {
+    const role = c => b.roles[c] || 'off';
+    const seisNames = Object.keys(b.roles).filter(c => role(c) === 'seis');
+    const st = R.st, low = st.length ? st[0].name : null;
+    // combinations with horizontal load (base shear > 1 % of the vertical load, or lateral-only cases)
+    const lateral = (b.data.base || []).filter(r => { const H = Math.hypot(r.FX, r.FY), V = Math.abs(r.FZ); return H > 1e-6 && (V < 1e-6 || H > 0.01 * V); }).map(r => r.combo);
+    const has = (e, names) => names.some(c => String(e.etabs.combo || '').includes(c));
+    return api.proj().elements.filter(e => e.etabs && AMP[e.type]).map(e => {
+      const story = st.some(x => x.name === e.etabs.story) ? e.etabs.story : low;   // supports (Base) take the lowest storey
+      const seis = has(e, seisNames), sway = seis || has(e, lateral);
+      let k = 1, basis = '';
+      if (seis) {
+        const th = R.theta.filter(x => x.story === story);
+        const t = th.length ? Math.max(...th.map(x => x.th)) : 0;
+        if (t > 0.2) { k = null; basis = `θ = ${api.fmt(t, 3)} > 0.2: second-order analysis needed`; }
+        else if (t > 0.1) { k = 1 / (1 - t); basis = `θ = ${api.fmt(t, 3)} (${esc(story)}) → 1/(1−θ)`; }
+        else basis = th.length ? `θ = ${api.fmt(t, 3)} ≤ 0.1 → no amplification` : 'no θ for this storey';
+      } else if (!sway) {
+        basis = has(e, (b.data.base || []).map(r => r.combo)) ? 'gravity-only governing case → no sway amplification' : 'governing case not read on this page - give it a role (ULS) and read again';
+      } else if (R.acr) {
+        const a = R.acr.a;
+        if (a < 3) { k = null; basis = `α<sub>cr</sub> = ${api.fmt(a, 2)} < 3: second-order analysis needed`; }
+        else if (a < 10) { k = 1 / (1 - 1 / a); basis = `α<sub>cr</sub> = ${api.fmt(a, 2)} → 1/(1−1/α<sub>cr</sub>)`; }
+        else basis = `α<sub>cr</sub> = ${api.fmt(a, 2)} ≥ 10 → no amplification`;
+      } else basis = 'no buckling factor (add a buckling case)';
+      const base = (e.pdelta && e.pdelta.base) || Object.fromEntries(AMP[e.type].filter(x => e.inputs[x] !== undefined).map(x => [x, e.inputs[x]]));
+      const U = inp => { try { return EC.modules[e.type].calc(Object.assign({}, e.inputs, inp)).Umax; } catch (er) { return NaN; } };
+      const amp = k && k > 1 ? Object.fromEntries(Object.keys(base).map(x => [x, Math.round(base[x] * k * 10) / 10])) : base;
+      return { e, story, seis, k, basis, base, U0: U(base), U1: U(amp), applied: e.pdelta ? e.pdelta.k : null };
+    });
+  }
+  function applyK(e, base, k) {
+    e.pdelta = { k, base, at: Date.now() };
+    Object.keys(base).forEach(x => { e.inputs[x] = Math.round(base[x] * k * 10) / 10; });
+    e.u = Date.now();
+  }
+  /* new ETABS forces arrived for an amplified member: keep the factor, refresh the base values */
+  function reamp(e) {
+    if (!e.pdelta || !AMP[e.type]) return;
+    const base = Object.fromEntries(AMP[e.type].filter(x => e.inputs[x] !== undefined).map(x => [x, e.inputs[x]]));
+    applyK(e, base, e.pdelta.k);
+  }
+
   /* ---------- small storey-profile chart (value vs height) ---------- */
   function profile(series, opt) {
     const W = 380, Hh = 260, l = 64, r = 34, t = 12, bt = 34;
@@ -167,6 +216,13 @@
       R.buck.length ? `${tbl([['Case', r => esc(r.case)], ['Mode', r => r.mode, 'num'], ['α<sub>cr</sub>', r => fmt(r.factor, 2), 'num'], ['Sway amplification 1/(1−1/α<sub>cr</sub>)', r => r.factor > 1 ? fmt(1 / (1 - 1 / r.factor), 3) : '∞', 'num']], R.buck.slice(0, 12))}
         <div class="bc-verdict ${R.acr.a >= 3 ? 'ok' : 'bad'}">α<sub>cr</sub> = <b>${fmt(R.acr.a, 2)}</b> → ${esc(R.acr.note)}${R.acr.a < 10 && R.acr.a >= 3 ? '. The P-Δ design: increase the horizontal loads (wind, notional, seismic) by this factor, or run ETABS with P-Delta on.' : ''}</div>`
         : '<p class="muted bc-pad">No buckling factors - add a linear buckling load case in ETABS (initial P-Delta from the ULS gravity combination), run it and read again.</p>');
+    const MF = memberFactors(b, R), nAmp = MF.filter(m => m.k && m.k > 1).length, nOn = MF.filter(m => m.applied).length;
+    html += card('members', 'P-Δ design of the ETABS-linked members', 'EN 1998-1 4.4.2.2(3) · EN 1993-1-1 5.2.2(5)B', 'seismic governing case × 1/(1−θ) of its storey · other cases × 1/(1−1/α<sub>cr</sub>) · M and V amplified',
+      MF.length ? `${tbl([['Mark', r => `<a href="#/el/${r.e.id}" class="mark">${esc(r.e.mark)}</a>`], ['Design', r => esc(EC.modules[r.e.type].name)], ['Storey', r => esc(r.story || '')], ['Governing case', r => `<small>${esc(r.e.etabs.combo)}</small>`], ['Basis', r => `<small>${r.basis}</small>`],
+          ['Factor', r => r.k === null ? '<span class="res bad">2nd order</span>' : fmt(r.k, 3), 'num'], ['Applied', r => r.applied ? `<span class="res ok" style="white-space:nowrap">× ${fmt(r.applied, 3)}</span>` : '–'], ['U ETABS', r => fmt(r.U0, 2), 'num'], ['U with P-Δ', r => r.k && r.k > 1 ? api.ubar(r.U1) : fmt(r.U0, 2)]], MF)}
+        <div class="etabs-btns" style="padding:12px 16px 14px"><button class="btn primary" data-bc="amp" ${nAmp ? '' : 'disabled'}>${ic('check')}Apply P-Δ to ${nAmp} member(s)</button>${nOn ? `<button class="btn" data-bc="unamp">${ic('undo')}Remove from ${nOn} member(s)</button>` : ''}
+          <small class="muted">The original ETABS forces are kept; re-reading or syncing ETABS keeps the factor on the new forces.</small></div>`
+        : '<p class="muted bc-pad">No ETABS-linked beams, columns, walls, steel members or footings yet - design members from Link to ETABS first.</p>');
     return html + inputs + `<p class="muted" style="margin-top:12px">Source: ${esc(b.file || '')} · read ${new Date(b.at).toLocaleString()} · units kN, m.</p>`;
   }
 
@@ -177,6 +233,16 @@
       const t = ev.target.closest('[data-bc],[data-bcrole]'); if (!t) return;
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
+      if (d.bc === 'amp' || d.bc === 'unamp') {
+        const R = compute(b); if (!R) return;
+        let n = 0;
+        memberFactors(b, R).forEach(m => {
+          if (d.bc === 'unamp') { if (m.e.pdelta) { Object.assign(m.e.inputs, m.e.pdelta.base); delete m.e.pdelta; m.e.u = Date.now(); n++; } }
+          else if (m.k && m.k > 1) { applyK(m.e, m.base, m.k); n++; }
+          else if (m.e.pdelta) { Object.assign(m.e.inputs, m.e.pdelta.base); delete m.e.pdelta; m.e.u = Date.now(); }
+        });
+        api.save(); api.toast(d.bc === 'amp' ? `P-Δ amplification applied to ${n} member(s)` : `P-Δ amplification removed from ${n} member(s)`); return rer();
+      }
       if (d.bcrole !== undefined) { b.roles[d.bcrole] = ROLE_ORDER[(ROLE_ORDER.indexOf(b.roles[d.bcrole] || 'off') + 1) % ROLE_ORDER.length]; api.save(); return rer(); }
       if (d.bc === 'read') {
         const cs = Object.keys(b.roles).filter(c => b.roles[c] !== 'off' && EC.etabs.live.L.model && EC.etabs.live.L.model.combos.concat(EC.etabs.live.L.model.cases).includes(c));
@@ -198,5 +264,5 @@
     };
   }
 
-  EC.building = { install(a) { api = a; }, view, mount, _compute: compute };
+  EC.building = { install(a) { api = a; }, view, mount, reamp, _compute: compute };
 })();

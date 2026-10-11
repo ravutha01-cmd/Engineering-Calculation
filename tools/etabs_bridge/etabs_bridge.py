@@ -528,7 +528,8 @@ class Mock:
                 for c in combos:
                     f = self.F[c]
                     for i, x in enumerate([0, 1.75, 3.5]):
-                        rows.append([st, cl, u, c, 'Combination', '', x, -1500 * k * f, 22, 9, 0.4, 16 * (1 - i), 58 * k * (1 - 0.8 * i)])
+                        wm = 1.8 if 'W' in c else 1.0   # wind combination: larger moments, less axial load
+                        rows.append([st, cl, u, c, 'Combination', '', x, -1500 * k * f, 22 * wm, 9 * wm, 0.4, 16 * wm * (1 - i), 58 * k * wm * (1 - 0.8 * i)])
         if rows:
             out.append({'name': 'Element Forces - Columns', 'rows': [[h or 'Column' for h in FRAME_HEAD], FRAME_UNITS] + rows})
         rows = []

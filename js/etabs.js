@@ -120,7 +120,7 @@
         let ms = []; try { ms = members(ti); } catch (e) { return; }
         ms.forEach(m => {
           const e = p.elements.find(x => x.type === m.target && x.etabs && x.etabs.story === m.story && x.etabs.label === m.label); if (!e) return;
-          Object.assign(e.inputs, m.gov.inputs);
+          Object.assign(e.inputs, m.gov.inputs); if (EC.building) EC.building.reamp(e);
           e.etabs = linkOf(t, m); e.u = Date.now(); n++;
         });
       });
@@ -341,7 +341,7 @@
     list.forEach(m => {
       const link = linkOf(t, m);
       let e = p.elements.find(x => x.type === m.target && x.etabs && x.etabs.story === m.story && x.etabs.label === m.label);
-      if (e) { Object.assign(e.inputs, m.gov.inputs); e.etabs = link; e.u = Date.now(); nUpd++; }
+      if (e) { Object.assign(e.inputs, m.gov.inputs); if (EC.building) EC.building.reamp(e); e.etabs = link; e.u = Date.now(); nUpd++; }
       else {
         e = { id: api.uid(), type: m.target, mark: m.label + (new Set(list.map(x => x.story)).size > 1 ? '-' + m.story : ''), level: m.story, grid: 'ETABS ' + m.label, qty: 1, status: 'In design',
           start: api.today(), due: api.addDays(api.today(), 14), assignee: p.engineer || '', inputs: Object.assign(baseInputs(m.target, sel.tpl), m.gov.inputs), etabs: link };

@@ -282,21 +282,105 @@
   }
 
   /* ---------------- element list ---------------- */
+  /* element lists: search + filters, multi-select (checkbox, select-all, Shift-click range) and bulk actions */
+  const SEL = new Set(); let lastSel = null; const LF = { q: '', level: '', type: '', res: '' };
+  function listRows(els) {
+    return els.filter(e => (!LF.level || (e.level || '') === LF.level) && (!LF.type || e.type === LF.type) && (!LF.res || (LF.res === 'bad' ? !result(e).ok : result(e).ok)));
+  }
   function vElements(catKey, k) {
     const p = proj(), T = TOOLS[k], hand = k === 'hand';
     const cat = CATS.find(c => c.k === catKey);
     const all = p.elements.filter(T.has);
-    const els = all.filter(e => !cat || MOD[e.type].cat === cat.k);
+    const inCat = all.filter(e => !cat || MOD[e.type].cat === cat.k);
+    const els = listRows(inCat);
+    const ids = new Set(p.elements.map(e => e.id)); Array.from(SEL).forEach(id => { if (!ids.has(id)) SEL.delete(id); });
     const tabCats = hand ? CATS : CATS.filter(c => c.k === catKey || all.some(e => MOD[e.type].cat === c.k));
     const addBtn = (lbl, cls) => hand ? `<button class="btn ${cls}" data-add="${cat ? cat.k : ''}">${ic('plus')}${lbl}</button>` : `<button class="btn ${cls}" data-go="etabs">${ic('upload')}Link to ETABS</button>`;
-    const rows = els.map(e => { const r = result(e); return `<tr class="click" data-open="${e.id}">
+    const q = e => [e.mark, typeName(e.type), e.level, e.grid, e.status, e.etabs ? e.etabs.combo : ''].join(' ').toLowerCase();
+    const rows = els.map(e => { const r = result(e), on = SEL.has(e.id); return `<tr class="click${on ? ' sel' : ''}" data-open="${e.id}" data-q="${esc(q(e))}">
+      <td class="ck no-print" data-sel="${e.id}"><input type="checkbox" ${on ? 'checked' : ''} aria-label="Select ${esc(e.mark)}" tabindex="-1"></td>
       <td class="mark">${esc(e.mark)}</td><td>${esc(typeName(e.type))}</td><td>${esc(e.level || '')}</td><td>${esc(e.grid || '')}</td>${hand ? '' : `<td><small>${esc(e.etabs.combo)}</small></td>`}<td class="num">${esc(e.qty)}</td>
       <td>${pill(e.status)}</td><td class="num">${esc(e.due || '')}</td><td>${ubar(r.Umax)}</td><td>${resTag(r)}</td>
       <td class="no-print" style="white-space:nowrap"><button class="btn sm" data-dup="${e.id}" title="Duplicate">${ic('copy')}</button> <button class="btn sm danger" data-del="${e.id}" title="Delete">${ic('trash')}</button></td></tr>`; }).join('');
-    return `<div class="page-head"><div><div class="tool-tag">${ic(hand ? 'book' : 'upload')}${T.l}</div><h1>${cat ? cat.l : T.all}</h1><div class="sub">${hand && cat ? `${cat.types.length} Mathcad worksheets` : T.sub} · ${els.length} elements in this project</div></div>
+    const levels = Array.from(new Set(inCat.map(e => e.level || ''))).filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const types = Array.from(new Set(inCat.map(e => e.type)));
+    const nSel = els.filter(e => SEL.has(e.id)).length, allOn = els.length && nSel === els.length;
+    const opt = (v, l, cur) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`;
+    const tools = `<div class="list-tools no-print"><div class="cg-search">${ic('search')}<input id="listQ" type="search" placeholder="Search mark, type, level, grid…" value="${esc(LF.q)}" aria-label="Search elements"></div>
+      <select class="ctl" data-lf="level" aria-label="Level"><option value="">All levels</option>${levels.map(l => opt(l, l, LF.level)).join('')}</select>
+      ${types.length > 1 ? `<select class="ctl" data-lf="type" aria-label="Type"><option value="">All types</option>${types.map(t => opt(t, typeName(t), LF.type)).join('')}</select>` : ''}
+      <select class="ctl" data-lf="res" aria-label="Result"><option value="">All results</option>${opt('bad', 'Revise only', LF.res)}${opt('ok', 'OK only', LF.res)}</select>
+      ${LF.level || LF.type || LF.res || LF.q ? '<button class="btn sm" data-lfclear>Clear filters</button>' : ''}<span class="muted list-n">${els.length} of ${inCat.length}</span></div>`;
+    const bar = `<div class="bulk-bar no-print" ${SEL.size ? '' : 'hidden'}><b><span id="nSel">${SEL.size}</span> selected</b>
+      <button class="btn sm primary" data-bulk="edit">${ic('gear')}Edit inputs…</button><button class="btn sm" data-bulk="details">${ic('table')}Status, level, due…</button>
+      <button class="btn sm" data-bulk="dup">${ic('copy')}Duplicate</button><button class="btn sm danger" data-bulk="del">${ic('trash')}Delete</button><button class="btn sm" data-bulk="none">${ic('x')}Clear</button></div>`;
+    return `<div class="page-head"><div><div class="tool-tag">${ic(hand ? 'book' : 'upload')}${T.l}</div><h1>${cat ? cat.l : T.all}</h1><div class="sub">${hand && cat ? `${cat.types.length} Mathcad worksheets` : T.sub} · ${inCat.length} elements in this project</div></div>
       <div class="actions">${addBtn(hand ? 'New element' : '', 'primary')}</div></div>
       <div class="tabs">${[{ k: '', l: 'All' }].concat(tabCats).map(c => `<button class="${(c.k || '') === (catKey || '') ? 'active' : ''}" data-go="${T.r}${c.k ? '/' + c.k : ''}">${c.l}<span class="badge">${all.filter(e => !c.k || MOD[e.type].cat === c.k).length}</span></button>`).join('')}</div>
-      <div class="card"><div class="tbl-wrap">${els.length ? `<table class="tbl"><thead><tr><th>Mark</th><th>Type</th><th>Level</th><th>Grid / location</th>${hand ? '' : '<th>Governing combination</th>'}<th class="num">Qty</th><th>Status</th><th class="num">Due</th><th>Utilisation</th><th>Result</th><th class="no-print"></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty">${hand ? 'No hand-calculated elements in this group yet.' : 'No ETABS-linked elements in this group yet - link to ETABS to create them.'}<br><br>${addBtn('Add the first one', 'primary')}</div>`}</div></div>`;
+      ${inCat.length ? tools : ''}${bar}
+      <div class="card"><div class="tbl-wrap">${els.length ? `<table class="tbl sel-tbl"><thead><tr><th class="ck no-print" data-selall><input type="checkbox" ${allOn ? 'checked' : ''} data-part="${nSel && !allOn ? 1 : ''}" aria-label="Select all shown" title="Select all shown"></th><th>Mark</th><th>Type</th><th>Level</th><th>Grid / location</th>${hand ? '' : '<th>Governing combination</th>'}<th class="num">Qty</th><th>Status</th><th class="num">Due</th><th>Utilisation</th><th>Result</th><th class="no-print"></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty">${inCat.length ? 'No element matches the filters.' : hand ? 'No hand-calculated elements in this group yet.' : 'No ETABS-linked elements in this group yet - link to ETABS to create them.'}<br><br>${inCat.length ? '<button class="btn" data-lfclear>Clear filters</button>' : addBtn('Add the first one', 'primary')}</div>`}</div></div>`;
+  }
+  function selSync() {
+    const m = $('#main'); if (!m) return;
+    $$('tr[data-open]', m).forEach(r => { const on = SEL.has(r.dataset.open); r.classList.toggle('sel', on); const c = $('td.ck input', r); if (c) c.checked = on; });
+    const vis = $$('tr[data-open]', m).filter(r => !r.hidden), nOn = vis.filter(r => SEL.has(r.dataset.open)).length;
+    const h = $('th[data-selall] input', m); if (h) { h.checked = vis.length > 0 && nOn === vis.length; h.indeterminate = nOn > 0 && nOn < vis.length; }
+    const b = $('.bulk-bar', m); if (b) { b.hidden = !SEL.size; $('#nSel', b).textContent = SEL.size; }
+  }
+  const selEls = () => proj().elements.filter(e => SEL.has(e.id));
+  /* edit one input of every selected element */
+  async function bulkEdit() {
+    const els = selEls(); if (!els.length) return;
+    const types = Array.from(new Set(els.map(e => e.type)));
+    const fieldsOf = async t => {
+      if (MOD[t].mc) { const doc = await EC.mcui.loadSheet(MOD[t].mc); return (doc.inputs || []).filter(i => i.kind === 'num' || i.kind === 'combo' || i.kind === 'str').map(i => ({ k: i.n, l: i.l || i.n, g: i.g || '', u: i.u ? EC.mrender.unitText(i.u) : '', opts: i.kind === 'combo' ? (i.opts || []).map((o, j) => ({ v: j, l: o })) : null, d: i.v, mc: i, str: i.kind === 'str' })); }
+      return MOD[t].groups.flatMap(g => g.f.filter(f => !f.cols).map(f => ({ k: f.k, l: f.l, g: g.t, u: f.u || '', opts: f.opts || null, d: f.d, str: typeof f.d === 'string' && !f.opts })));
+    };
+    const lists = await Promise.all(types.map(fieldsOf));
+    const fs = lists[0].filter(f => lists.every(L => L.some(x => x.k === f.k)));
+    if (!fs.length) { toast('The selected element types have no input in common - select one type'); return; }
+    const groups = Array.from(new Set(fs.map(f => f.g)));
+    const bg = modal(`Edit inputs of ${els.length} element${els.length > 1 ? 's' : ''}`, `<div class="form bulk-form">
+      <p class="muted" style="margin:0 0 12px">${types.length === 1 ? esc(typeName(types[0])) : types.length + ' types - inputs they share'} · the value is applied to every selected element; their other inputs are kept.</p>
+      <label>Input<select class="ctl" id="bkF">${groups.map(g => `${g ? `<optgroup label="${esc(g)}">` : ''}${fs.filter(f => f.g === g).map(f => `<option value="${esc(f.k)}">${esc(f.l)}${f.u ? ' [' + esc(f.u) + ']' : ''}</option>`).join('')}${g ? '</optgroup>' : ''}`).join('')}</select></label>
+      <label>New value<span id="bkV"></span></label><p class="muted bk-cur" id="bkCur"></p></div>`, () => {
+      const f = fs.find(x => x.k === $('#bkF', bg).value), el = $('#bkVal', bg); if (!f || !el) return false;
+      let raw = el.value; if (!f.opts && !f.str) { raw = parseFloat(raw); if (!Number.isFinite(raw)) { toast('Enter a number'); return false; } }
+      els.forEach(e => {
+        e.inputs = e.inputs || {};
+        if (MOD[e.type].mc) { const i = f.mc; const v = i.kind === 'combo' ? +raw : i.kind === 'str' ? ['s', raw] : i.u ? ['o', '*', raw, i.u] : raw;
+          if (JSON.stringify(v) === JSON.stringify(i.kind === 'combo' ? i.v : i.kind === 'str' ? ['s', i.v] : i.u ? ['o', '*', i.v, i.u] : i.v)) delete e.inputs[i.n]; else e.inputs[i.n] = v; }
+        else e.inputs[f.k] = f.opts ? (typeof f.d === 'number' ? +raw : raw) : raw;
+        e.u = Date.now(); cache.delete(e.id);
+      });
+      save(); render(); toast(`${f.l} set on ${els.length} element(s)`);
+    }, 'Apply to all');
+    const cur = f => { const vals = els.map(e => { const v = e.inputs && e.inputs[f.k]; if (v === undefined) return f.opts ? (f.opts.find(o => String(o.v) === String(f.d)) || {}).l : f.d; if (Array.isArray(v)) return v[0] === 's' ? v[1] : v[2]; return f.opts ? (f.opts.find(o => String(o.v) === String(v)) || {}).l : v; });
+      const u = Array.from(new Set(vals.map(String))); return u.length === 1 ? `Now: ${u[0]}${f.u && !f.opts ? ' ' + f.u : ''} on all` : `Now: ${u.slice(0, 4).join(', ')}${u.length > 4 ? '…' : ''} (differs)`; };
+    const show = () => { const f = fs.find(x => x.k === $('#bkF', bg).value); $('#bkV', bg).innerHTML = f.opts ? `<select class="ctl" id="bkVal">${f.opts.map(o => `<option value="${esc(o.v)}">${esc(o.l)}</option>`).join('')}</select>` : `<span class="bk-in"><input class="ctl" id="bkVal" ${f.str ? '' : 'type="number" step="any" inputmode="decimal"'} value="${esc(f.str ? '' : '')}">${f.u ? `<span class="fu">${esc(f.u)}</span>` : ''}</span>`; $('#bkCur', bg).textContent = cur(f); const v = $('#bkVal', bg); v.focus(); v.onkeydown = ev => { if (ev.key === 'Enter') $('[data-ok]', bg).click(); }; };
+    $('#bkF', bg).onchange = show; show();
+  }
+  function bulkDetails() {
+    const els = selEls(); if (!els.length) return;
+    const bg = modal(`Details of ${els.length} element${els.length > 1 ? 's' : ''}`, `<div class="form bulk-form"><p class="muted" style="margin:0 0 12px">Leave a field empty to keep each element's own value.</p>
+      <label>Status<select class="ctl" id="bkS"><option value="">- keep -</option>${STATUS.map(s => `<option>${esc(s)}</option>`).join('')}</select></label>
+      <label>Level<input class="ctl" id="bkL" placeholder="- keep -"></label><label>Due date<input class="ctl" id="bkD" type="date"></label>
+      <label>Designer<input class="ctl" id="bkA" placeholder="- keep -"></label><label>Quantity<input class="ctl" id="bkQ" type="number" min="1" placeholder="- keep -"></label></div>`, () => {
+      const v = id => $(id, bg).value.trim(); const st = v('#bkS'), lv = v('#bkL'), du = v('#bkD'), as = v('#bkA'), qt = v('#bkQ');
+      els.forEach(e => { if (st) e.status = st; if (lv) e.level = lv; if (du) e.due = du; if (as) e.assignee = as; if (qt) e.qty = Math.max(1, parseInt(qt, 10) || 1); e.u = Date.now(); });
+      save(); render(); toast(`${els.length} element(s) updated`);
+    }, 'Apply to all');
+  }
+  function bulkDel() {
+    const els = selEls(); if (!els.length) return;
+    modal(`Delete ${els.length} element${els.length > 1 ? 's' : ''}`, `<p>Delete <b>${els.length}</b> selected element${els.length > 1 ? 's' : ''} and their calculations?</p><p class="muted">${esc(els.slice(0, 12).map(e => e.mark).join(', '))}${els.length > 12 ? ` and ${els.length - 12} more` : ''}</p><p>This cannot be undone.</p>`, () => {
+      const p = proj(), ids = new Set(els.map(e => e.id)); p.elements = p.elements.filter(x => !ids.has(x.id)); ids.forEach(id => cache.delete(id)); SEL.clear(); save(); render(); toast(`${ids.size} element(s) deleted`);
+    }, `Delete ${els.length}`);
+  }
+  function bulkDup() {
+    const p = proj(), els = selEls(); SEL.clear();
+    els.forEach(e => { const n = JSON.parse(JSON.stringify(e)); n.id = uid(); n.mark = nextMark(e.type); n.status = 'Not started'; if (n.etabs) n.etabs.copy = e.mark; delete n.res;   /* a copy stays in its list but is never overwritten by an ETABS re-import */ p.elements.splice(p.elements.indexOf(e) + 1, 0, n); SEL.add(n.id); });
+    save(); render(); toast(`${els.length} element(s) duplicated - the copies are selected`);
   }
 
   /* ---------------- element editor ---------------- */
@@ -495,13 +579,22 @@
     const m = $('#main');
     const v = r[0] || 'dashboard';
     m.innerHTML = v === 'elements' ? vElements(r[1], 'hand') : v === 'linked' ? vElements(r[1], 'etabs') : v === 'el' ? vElement(r[1]) : v === 'schedules' ? vSchedules() : v === 'programme' ? vProgramme() : v === 'library' ? vLibrary() : v === 'etabs' ? EC.etabs.view() : v === 'building' ? EC.building.view() : v === 'loads' ? EC.loads.view() : v === 'project' ? vProject() : vDashboard();
+    if (v === 'elements' || v === 'linked') { const q = LF.q.toLowerCase().trim(); if (q) $$('tr[data-open][data-q]', m).forEach(r => { r.hidden = !q.split(/\s+/).every(w => r.dataset.q.includes(w)); }); selSync(); }
     if (v === 'etabs') EC.etabs.mount(m); else if (v === 'building') EC.building.mount(m); else if (v === 'loads') EC.loads.mount(m); else m.onclick = m.onchange = null;
     if (v !== 'el' && v !== 'etabs' && v !== 'building' && v !== 'loads') m.scrollTop = 0;
     $('#app').classList.remove('nav-open');
     const p = proj();
     document.title = `${v === 'el' ? ((p.elements.find(e => e.id === r[1]) || {}).mark || '') + ' · ' : ''}${p.name} · CAMBO STRUCT`;
   }
-  window.addEventListener('hashchange', render);
+  window.addEventListener('hashchange', () => { if (!/^#\/(elements|linked)/.test(location.hash)) SEL.clear(); render(); });
+  document.addEventListener('input', ev => {
+    if (ev.target.id !== 'listQ') return;
+    LF.q = ev.target.value; const q = LF.q.toLowerCase().trim();
+    $$('tr[data-open][data-q]').forEach(r => { r.hidden = q && !q.split(/\s+/).every(w => r.dataset.q.includes(w)); });
+    selSync();
+  });
+  document.addEventListener('change', ev => { const f = ev.target.dataset && ev.target.dataset.lf; if (f) { LF[f] = ev.target.value; render(); } });
+  document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && SEL.size && !$('.modal-bg')) { SEL.clear(); selSync(); } });
 
   /* ---------------- quick search (Ctrl+K / "/") ---------------- */
   function palette() {
@@ -566,7 +659,7 @@
   }
   function dupElement(id) {
     const p = proj(), e = p.elements.find(x => x.id === id); if (!e) return;
-    const n = JSON.parse(JSON.stringify(e)); n.id = uid(); n.mark = nextMark(e.type); n.status = 'Not started';
+    const n = JSON.parse(JSON.stringify(e)); n.id = uid(); n.mark = nextMark(e.type); n.status = 'Not started'; if (n.etabs) n.etabs.copy = e.mark;
     p.elements.splice(p.elements.indexOf(e) + 1, 0, n); save(); toast(`Duplicated as ${n.mark}`); location.hash = '#/el/' + n.id;
   }
   function delElement(id) {
@@ -585,6 +678,18 @@
   }
 
   document.addEventListener('click', ev => {
+    const sc = ev.target.closest('[data-sel],[data-selall],[data-bulk],[data-lfclear]');
+    if (sc && $('#main').contains(sc)) {
+      const d = sc.dataset;
+      if (d.lfclear !== undefined) { LF.q = ''; LF.level = ''; LF.type = ''; LF.res = ''; return render(); }
+      if (d.bulk) { if (d.bulk === 'none') { SEL.clear(); return selSync(); } return ({ edit: bulkEdit, details: bulkDetails, del: bulkDel, dup: bulkDup })[d.bulk](); }
+      const vis = $$('tr[data-open]').filter(r => !r.hidden).map(r => r.dataset.open);
+      if (d.selall !== undefined) { const on = !vis.every(id => SEL.has(id)); vis.forEach(id => (on ? SEL.add(id) : SEL.delete(id))); return selSync(); }
+      const id = d.sel, on = !SEL.has(id);
+      if (ev.shiftKey && lastSel && vis.includes(lastSel)) { const a = vis.indexOf(lastSel), z = vis.indexOf(id); vis.slice(Math.min(a, z), Math.max(a, z) + 1).forEach(x => (on ? SEL.add(x) : SEL.delete(x))); }
+      else on ? SEL.add(id) : SEL.delete(id);
+      lastSel = id; return selSync();
+    }
     const tr = ev.target.closest('[data-tradd],[data-trdel]');
     if (tr) {
       const e = proj().elements.find(x => x.id === route()[1]); if (!e) return;

@@ -57,7 +57,7 @@
     if (!L.sel) return '<p class="muted">Reading the selection in ETABS…</p>';
     if (!L.sel.length) return `<div class="etabs-sel-empty">${ic('search')}<div><b>Nothing selected in ETABS</b><small>Click beams, columns, wall piers or support joints in the ETABS window - they appear here at once.</small></div></div>`;
     const by = {}; L.sel.forEach(x => { (by[x.kind] = by[x.kind] || []).push(x); });
-    const linkedOf = x => api.proj().elements.find(e => e.etabs && e.etabs.story === x.story && e.etabs.label === x.label);
+    const linkedOf = x => api.proj().elements.find(e => e.etabs && !e.etabs.copy && e.etabs.story === x.story && e.etabs.label === x.label);
     return `<div class="etabs-sel-sum">${Object.keys(by).map(k => `<span class="badge">${by[k].length} ${KS[k][by[k].length > 1 ? 1 : 0]}</span>`).join('')}</div>
       <div class="etabs-chips">${L.sel.slice(0, 40).map(x => { const e = linkedOf(x); return `<span class="chip sel" title="${esc(KS[x.kind][0])}${e ? ' · linked to ' + esc(e.mark) : ''}"><b>${esc(x.label)}</b>${esc(x.story)}${e ? ' <i>linked</i>' : ''}</span>`; }).join('')}${L.sel.length > 40 ? `<span class="muted">+${L.sel.length - 40} more</span>` : ''}</div>`;
   }
@@ -127,7 +127,7 @@
         S.sel[ti] = { target: tg.t, tpl: '', rows: null };
         let ms = []; try { ms = members(ti); } catch (e) { return; }
         ms.forEach(m => {
-          const e = p.elements.find(x => x.type === m.target && x.etabs && x.etabs.story === m.story && x.etabs.label === m.label); if (!e) return;
+          const e = p.elements.find(x => x.type === m.target && x.etabs && !x.etabs.copy && x.etabs.story === m.story && x.etabs.label === m.label); if (!e) return;
           Object.assign(e.inputs, m.gov.inputs); if (EC.building) EC.building.reamp(e);
           e.etabs = linkOf(t, m); e.u = Date.now(); n++;
         });
@@ -263,7 +263,8 @@
   /* ---------- design targets & force mapping (kN, kN·m, m) ---------- */
   const len = rs => { const st = rs.map(r => r.station).filter(Number.isFinite); return st.length ? Math.max(...st) - Math.min(...st) : 0; };
   const maxBy = (rs, f) => rs.reduce((a, r) => (a === null || f(r) > f(a) ? r : a), null);
-  const byCombo = rs => { const m = new Map(); rs.forEach(r => { const k = r.combo + '|' + r.step; if (!m.has(k)) m.set(k, []); m.get(k).push(r); }); return Array.from(m.entries()).map(([k, a]) => ({ combo: k.replace(/\|(Max|Min)?$/i, s => (s.length > 1 ? ' ' + s.slice(1) : '')), rows: a })); };
+  /* one candidate per combination and step ('Max' / 'Min' kept in the name, 'Single Value' dropped) */
+  const byCombo = rs => { const m = new Map(); rs.forEach(r => { const k = r.combo + '|' + r.step; if (!m.has(k)) m.set(k, []); m.get(k).push(r); }); return Array.from(m.entries()).map(([k, a]) => ({ combo: k.replace(/\|(.*)$/, (m, st) => (/^(max|min)$/i.test(st) ? ' ' + st : '')), rows: a })); };
   const ends = rs => { const s = rs.slice().sort((a, b) => a.station - b.station); return { bot: s[0], top: s[s.length - 1] }; };
   const r1 = x => Math.round(x * 10) / 10;
   /* each target returns candidate design cases {combo, inputs, show}; the governing one is chosen by the design itself */
@@ -325,7 +326,7 @@
       if (!u.length) return;
       const cs = tg.cases(u, s);
       // an element already linked to this member is designed with its own (possibly edited) section, as apply() keeps it
-      const ex = api.proj().elements.find(x => x.type === tg.t && x.etabs && x.etabs.story === rs[0].story && x.etabs.label === rs[0].label);
+      const ex = api.proj().elements.find(x => x.type === tg.t && x.etabs && !x.etabs.copy && x.etabs.story === rs[0].story && x.etabs.label === rs[0].label);
       const b0 = ex ? Object.assign(defaults(tg.t), JSON.parse(JSON.stringify(ex.inputs || {}))) : base;
       cs.forEach(c => { try { const r = EC.modules[tg.t].calc(Object.assign({}, b0, c.inputs)); c.U = r.Umax; c.ok = r.ok; c.sum = (r.summary || []).reduce((t, x) => t + (Number.isFinite(x.U) ? x.U : 0), 0); } catch (e) { c.U = Infinity; c.ok = false; } });
       const gov = cs.reduce((a, c) => (a === null || c.U > a.U + 1e-9 || (Math.abs(c.U - a.U) <= 1e-9 && c.sum > a.sum) ? c : a), null);   // ties (e.g. detailing governs): most utilised overall
@@ -349,7 +350,7 @@
     let nNew = 0, nUpd = 0;
     list.forEach(m => {
       const link = linkOf(t, m);
-      let e = p.elements.find(x => x.type === m.target && x.etabs && x.etabs.story === m.story && x.etabs.label === m.label);
+      let e = p.elements.find(x => x.type === m.target && x.etabs && !x.etabs.copy && x.etabs.story === m.story && x.etabs.label === m.label);
       if (e) { Object.assign(e.inputs, m.gov.inputs); if (EC.building) EC.building.reamp(e); e.etabs = link; e.u = Date.now(); nUpd++; }
       else {
         e = { id: api.uid(), type: m.target, mark: m.label + (new Set(list.map(x => x.story)).size > 1 ? '-' + m.story : ''), level: m.story, grid: 'ETABS ' + m.label, qty: 1, status: 'In design',
@@ -468,7 +469,7 @@
           <div class="etabs-opts"><label>Design as<select class="ctl" data-ettarget="${ti}">${tg.map(x => `<option value="${x.t}" ${x.t === sel.target ? 'selected' : ''}>${esc(x.l)}</option>`).join('')}</select></label>
           <label>Section, materials &amp; bars from<select class="ctl" data-ettpl="${ti}"><option value="">Default values</option>${tpls.map(e => `<option value="${e.id}" ${e.id === sel.tpl ? 'selected' : ''}>${esc(e.mark)}${e.level ? ' · ' + esc(e.level) : ''}</option>`).join('')}</select></label></div>
           ${err ? `<div class="etabs-msg">${esc(err)}</div>` : ms.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th><input type="checkbox" data-etall="${ti}" ${sel.rows.every(Boolean) ? 'checked' : ''} aria-label="Select all"></th><th>Story</th><th>Member</th><th>Governing combination</th>${keys.map(k => `<th class="num">${EC.sym ? EC.sym(k) : esc(k)}</th>`).join('')}<th>U</th><th></th></tr></thead><tbody>
-            ${ms.map((m, i) => { const ex = api.proj().elements.find(x => x.type === m.target && x.etabs && x.etabs.story === m.story && x.etabs.label === m.label);
+            ${ms.map((m, i) => { const ex = api.proj().elements.find(x => x.type === m.target && x.etabs && !x.etabs.copy && x.etabs.story === m.story && x.etabs.label === m.label);
               return `<tr><td><input type="checkbox" data-etrow="${ti}:${i}" ${sel.rows[i] ? 'checked' : ''} aria-label="Use ${esc(m.label)}"></td><td>${esc(m.story)}</td><td class="mark">${esc(m.label)}</td><td><small>${esc(m.gov.combo)}</small>${m.cases.length > 1 ? `<small class="muted"> · ${m.cases.length} checked</small>` : ''}</td>${keys.map(k => `<td class="num">${fmt(m.gov.show[k], 1)}</td>`).join('')}<td>${api.ubar(m.gov.U)}</td><td>${ex ? `<a href="#/el/${ex.id}" class="badge">linked ${esc(ex.mark)}</a>` : '<span class="badge new">new</span>'}</td></tr>`; }).join('')}
           </tbody></table></div><div class="etabs-btns"><button class="btn primary" data-etapply="${ti}">${ic('check')}Create / update ${sel.rows.filter(Boolean).length} element(s)</button><small class="muted">Forces in kN, kN·m. Linked elements are matched by story + label, so re-importing updates their forces and keeps your section and bar edits.</small></div>`
             : `<p class="muted" style="padding:0 16px 14px">No ULS combination selected for this table.</p>`}</div>`;

@@ -185,7 +185,7 @@
     s += S.dimV(ox - 20, oy, oy + H, `h = ${h}`);
     s += S.label(ox + W + 10, oy + 14, `${pts.length}H${i.dl}`);
     s += S.label(ox + W + 10, oy + 32, `H${i.dw}@${i.sw}`);
-    s += `<g class="axisg"><line x1="${ox + W / 2}" y1="${oy - 10}" x2="${ox + W / 2}" y2="${oy + H + 10}"/><line x1="${ox - 10}" y1="${oy + H / 2}" x2="${ox + W + 10}" y2="${oy + H / 2}"/><text x="${ox + W + 14}" y="${oy + H / 2 + 4}">y</text><text x="${ox + W / 2 + 4}" y="${oy + H + 22}">z</text></g>`;
+    s += `<g class="axisg"><line x1="${ox + W / 2}" y1="${oy - 10}" x2="${ox + W / 2}" y2="${oy + H + 10}"/><line x1="${ox - 10}" y1="${oy + H / 2}" x2="${ox + W + 10}" y2="${oy + H / 2}"/><text x="${ox + W + 14}" y="${oy + H / 2 + 4}">y</text><text x="${ox + W / 2 + 4}" y="${oy - 2}">z</text></g>`;
     return s + '</svg>';
   }
 })();

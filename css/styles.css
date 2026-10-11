@@ -643,6 +643,10 @@ svg.mplot path.p-outline { fill: var(--concrete); stroke: var(--concrete-edge); 
 svg.mplot path.p-outline2 { stroke: var(--concrete-edge); stroke-width: 1.2; }
 .p-outline, .p-outline2 { --c: var(--concrete-edge); }
 .p-link { stroke: var(--link); stroke-width: 2; --c: var(--link); }
+/* 5th+ series: palette colour again, told apart by a dash (and the legend) */
+svg.mplot path.p-alt { stroke-dasharray: 7 3; } .lg-line.p-alt { border-top-style: dashed; } circle.p-alt { fill: var(--surface); stroke: var(--c); stroke-width: 2; }
+.p-rebar { stroke: var(--rebar); stroke-width: 2.4; --c: var(--rebar); }
+.plegend sub, .ptip sub, .pdata sub { font-size: .78em; vertical-align: -.25em; line-height: 0; } .plegend sup, .ptip sup { font-size: .75em; line-height: 0; }
 circle.p-bar { fill: var(--rebar); stroke: var(--rebar-ring); stroke-width: 2; } .p-bar { --c: var(--rebar); }
 circle.p-dots { fill: var(--c, var(--s1)); stroke: var(--surface); stroke-width: 2; }
 svg.mplot .phit { fill: transparent; cursor: crosshair; }
@@ -667,6 +671,27 @@ svg.mplot .pext { stroke: var(--muted); stroke-width: .75; }
 svg.mplot .pdt { fill: var(--ink); font-weight: 600; font-size: 11px; font-variant-numeric: tabular-nums; }
 .plegend b { font-weight: 600; color: var(--ink); }
 @media print { .ptip { display: none !important; } }
+/* native detailing drawings (js/calc: svg.det) and their charts (svg.plot) in the same style as the worksheet plots */
+svg.det .conc { fill: var(--concrete); stroke: var(--concrete-edge); stroke-width: 1.6; }
+svg.det .slabarea { fill: var(--concrete); }
+svg.det .rebar { fill: var(--rebar); stroke: var(--rebar-ring); stroke-width: 1.5; }
+svg.det .link { stroke: var(--link); stroke-width: 2; }
+svg.det .linkline { stroke: var(--link); }
+svg.det .pile { fill: var(--surface); stroke: var(--concrete-edge); }
+svg.det .dim line { stroke: var(--ink-2); stroke-width: 1; }
+svg.det .dim line.ext { stroke: var(--muted); stroke-width: .75; }
+svg.det .dim text { fill: var(--ink); font-weight: 600; font-size: 11px; font-variant-numeric: tabular-nums; }
+svg.det .ttl { fill: var(--ink); font-weight: 600; font-size: 12px; letter-spacing: .02em; }
+svg.det .lbl { fill: var(--ink-2); }
+svg.det text, svg.plot text { font-family: Inter, system-ui, sans-serif; }
+svg.plot .grid { stroke: var(--plot-grid); }
+svg.plot .axis { stroke: var(--border-strong); stroke-width: 1; }
+svg.plot .tick { fill: var(--muted); font-variant-numeric: tabular-nums; }
+svg.plot .ptitle { fill: var(--ink); font-weight: 600; }
+svg.plot .atitle { fill: var(--ink-2); font-weight: 600; }
+svg.plot .pline { stroke-width: 2; stroke-linecap: round; }
+svg.plot .pline.s3 { stroke: var(--s4); }
+svg.plot .ppt { stroke: var(--surface); stroke-width: 2; }
 /* ETABS live link */
 .etabs-live .card-h b { display: inline-flex; align-items: center; gap: 8px; }
 .etabs-live .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--good); display: inline-block; }

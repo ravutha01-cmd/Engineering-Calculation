@@ -221,9 +221,10 @@ EC.svg = {
   open: (w, h, extra) => `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" class="det" xmlns="http://www.w3.org/2000/svg" ${extra || ''}>`,
   dimH: (x1, x2, y, txt, off) => {
     const o = off || 0;
-    return `<g class="dim"><line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"/><line x1="${x1}" y1="${y - 4}" x2="${x1}" y2="${y + 4}"/><line x1="${x2}" y1="${y - 4}" x2="${x2}" y2="${y + 4}"/><text x="${(x1 + x2) / 2}" y="${y - 5 + o}" text-anchor="middle">${txt}</text></g>`;
+    // dimension line with oblique ticks (the app's drawing style, as in the worksheet plots)
+    return `<g class="dim"><line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"/><line x1="${x1 - 4}" y1="${y + 4}" x2="${x1 + 4}" y2="${y - 4}"/><line x1="${x2 - 4}" y1="${y + 4}" x2="${x2 + 4}" y2="${y - 4}"/><text x="${(x1 + x2) / 2}" y="${y - 5 + o}" text-anchor="middle">${txt}</text></g>`;
   },
-  dimV: (x, y1, y2, txt) => `<g class="dim"><line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}"/><line x1="${x - 4}" y1="${y1}" x2="${x + 4}" y2="${y1}"/><line x1="${x - 4}" y1="${y2}" x2="${x + 4}" y2="${y2}"/><text x="${x - 6}" y="${(y1 + y2) / 2}" text-anchor="middle" transform="rotate(-90 ${x - 6} ${(y1 + y2) / 2})">${txt}</text></g>`,
+  dimV: (x, y1, y2, txt) => `<g class="dim"><line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}"/><line x1="${x - 4}" y1="${y1 + 4}" x2="${x + 4}" y2="${y1 - 4}"/><line x1="${x - 4}" y1="${y2 + 4}" x2="${x + 4}" y2="${y2 - 4}"/><text x="${x - 6}" y="${(y1 + y2) / 2}" text-anchor="middle" transform="rotate(-90 ${x - 6} ${(y1 + y2) / 2})">${txt}</text></g>`,
   bar: (x, y, r) => `<circle class="rebar" cx="${x}" cy="${y}" r="${Math.max(r, 2)}"/>`,
   label: (x, y, t, cls, anchor) => `<text class="${cls || 'lbl'}" x="${x}" y="${y}" text-anchor="${anchor || 'start'}">${t}</text>`
 };

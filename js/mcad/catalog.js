@@ -586,8 +586,8 @@ EC.sheetCatalog = [
 "prefix": "PC",
 "title": "PILE CAP DESIGN TO EN 1992-1-1:2023 - HAND INPUT",
 "code": "EN 1992-1-1:2023",
-"nin": 94,
-"kb": 224
+"nin": 83,
+"kb": 219
 },
 {
 "id": "Punching_EC2-2023_Standalone",

@@ -31,7 +31,7 @@ Endpoints (JSON):
                                    for the quasi-permanent combination (axial shortening check)
     GET /supports?c=<combo>&c=...  restrained joints (plan x, y) with their reactions for the combinations (uplift / pile tension)
     GET /strength                  columns and wall panels of every storey with section size, material strength and
-                                   shear areas (storey shear resistance for the weak-storey check)
+                                   shear areas (storey shear resistance for the weak-storey check), floor slab thickness / material
     GET /loads                     load patterns, load cases and load combinations (with their cases)
     POST /loads/apply              create missing load patterns and rebuild the managed combinations
                                    {prefix, patterns: [{name, type, sw}], combos: [{name, type, items: [[name, sf, isCombo]]}], unlock,
@@ -56,7 +56,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.13'
+VERSION = '1.14'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -1117,7 +1117,23 @@ def strength_from_model(m):
         kind, f = material(mat)
         out.append({'story': story, 'obj': label, 'sec': prop, 'kind': 'wall', 'mat': kind, 'f': f, 'shape': 'wall',
                     'L': L, 't': t, 'ang': math.degrees(math.atan2(y1 - y0, x1 - x0))})
-    return {'elements': out}
+    # floor slabs (diaphragm check): thickness and material of the slab properties used by floor area objects
+    slabs, used = [], set()
+    for n in ok(m.AreaObj.GetNameList(0, []), 'AreaObj.GetNameList')[1] or []:
+        try:
+            if int(ok(m.AreaObj.GetDesignOrientation(n, 0), 'GetDesignOrientation')[0]) == 2:   # floor
+                used.add(ok(m.AreaObj.GetProperty(n, ''), 'AreaObj.GetProperty')[0])
+        except Exception:
+            continue
+    for prop in sorted(used):
+        try:
+            r = ok(m.PropArea.GetSlab(prop, 0, 0, '', 0, 0, '', ''), 'PropArea.GetSlab')
+            kind, f = material(r[2])
+            if r[3] > 0:
+                slabs.append({'prop': prop, 't': r[3], 'mat': kind, 'f': f})
+        except Exception:
+            continue
+    return {'elements': out, 'slabs': slabs}
 
 
 class Mock:
@@ -1175,7 +1191,7 @@ class Mock:
             for k, (ang, L) in enumerate([(0, 7.0), (0, 7.0), (90, 6.0), (90, 6.0)]):
                 out.append({'story': st, 'obj': 'W%d' % (k + 1), 'sec': 'W%d C%d' % (t * 1000, fw), 'kind': 'wall', 'mat': 'Concrete',
                             'f': fw, 'shape': 'wall', 'L': L, 't': t, 'ang': ang})
-        return {'elements': out}
+        return {'elements': out, 'slabs': [{'prop': 'S200 C30', 't': 0.2, 'mat': 'Concrete', 'f': 30}]}
 
     def loads(self):
         cases = [{'name': p['name'], 'type': 1} for p in self.patterns] + self.extra_cases

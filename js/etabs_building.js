@@ -10,7 +10,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ROLES = { seis: 'Seismic', wind: 'Wind SLS', uls: 'ULS', off: 'Not used' };
   const ROLE_ORDER = ['seis', 'wind', 'uls', 'off'];
-  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '' };
+  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500 };
   let busy = '', err = '';
 
   const B = () => { const p = api.proj(); p.building = p.building || {}; const b = p.building; b.set = Object.assign({}, DEF, b.set || {}); b.roles = b.roles || {}; return b; };
@@ -338,6 +338,22 @@
       });
       out.short = { combo: AX.combo, stacks: S, lim };
     }
+    // 16. diaphragms - EN 1998-1 4.4.2.5(2): analysis effects × γ_d (1.3 brittle: in-plane shear, 1.1 ductile: chord
+    //     tension). Floor force F_i (storey shear difference of the governing seismic case) carried as a deep beam between
+    //     the lateral systems at both ends: M = F·L/8, chord T = M/(0.9·D), edge shear v = F/(2·D); in-plane shear:
+    //     reinforcement a_s = v/f_yd each way (θ = 45°), strut τ ≤ 0.5·ν·f_cd (EN 1992-1-1 6.2.2(6), 6.2.3(3))
+    out.diaph = null;
+    if (out.acc.rows.length) {
+      const sl = (d.slabs || []).filter(x => x.t > 0), slMin = sl.length ? sl.reduce((a, x) => (x.t < a.t ? x : a)) : null;
+      const t = +s.slabT > 0 ? +s.slabT : slMin ? slMin.t : 0.2, fck = +s.slabFck > 0 ? +s.slabFck : slMin && slMin.f > 0 ? slMin.f : 30;
+      const fyd = (+s.fyk || 500) / 1.15, nu = 0.6 * (1 - fck / 250), tRd = 0.5 * nu * fck / 1.5;
+      const rows = out.acc.rows.map(r => {
+        const L = r.dir === 'X' ? +s.Bx : +s.By, D = r.dir === 'X' ? +s.By : +s.Bx;
+        const M = (+s.gdD || 1.1) * r.F * L / 8, T = M / (0.9 * D), V = (+s.gdB || 1.3) * r.F / 2, v = V / D, tau = v / (t * 1000);
+        return { story: r.story, z: r.z, dir: r.dir, F: r.F, L, D, M, T, As: T * 1000 / fyd, v, tau, as: v * 1000 / fyd, U: tau / tRd };
+      });
+      out.diaph = { rows, t, fck, tFrom: +s.slabT > 0 ? 'input' : slMin ? 'ETABS ' + slMin.prop : 'default', tRd, fyd, nu };
+    }
     return out;
   }
 
@@ -651,6 +667,7 @@
       ${sumCard('base', 'Overturning', R.base.some(x => Number.isFinite(x.fos)) ? oU : null, 'required ÷ provided safety')}
       ${sumCard('modal', 'Modal mass participation', R.modal ? R.modal.U : null, R.modal ? `ΣU<sub>X</sub> ${fmt(R.modal.sum.X * 100, 1)} % · ΣU<sub>Y</sub> ${fmt(R.modal.sum.Y * 100, 1)} % · T<sub>1</sub> ${fmt(R.modal.T1, 2)} s` : '')}
       ${R.soft.length ? sumCard('soft', 'Soft storey k<sub>i</sub>/k<sub>i+1</sub>', Umax(R.soft), (() => { const w = R.soft.filter(r => r.r1 != null).reduce((a, r) => (!a || r.r1 < a.r1 ? r : a), null); return w ? `min ${fmt(w.r1, 2)} at ${esc(w.story)} ${w.dir} (0.7)` : ''; })()) : ''}
+      ${R.diaph ? sumCard('diaph', 'Diaphragm in-plane shear τ/τ<sub>Rd</sub>', Umax(R.diaph.rows), (() => { const w = R.diaph.rows.reduce((a, r) => (!a || r.T > a.T ? r : a), null); return `chord T<sub>max</sub> = ${fmt(w.T, 0)} kN (${esc(w.story)} ${w.dir}) · A<sub>s</sub> = ${fmt(w.As, 0)} mm²`; })()) : ''}
       ${R.short ? sumCard('short', 'Differential shortening Δ/L', Umax(R.short.stacks), (() => { const w = R.short.stacks.reduce((a, k) => (!a || k.tot > a.tot ? k : a), null); return `roof δ<sub>max</sub> = ${fmt(w.tot * 1000, 1)} mm (${esc(w.name)}) · limit L/${R.short.lim}`; })()) : ''}
       ${R.sup.list.length ? sumCard('sup', 'Support uplift F<sub>t,d</sub>/R<sub>t,d</sub>', Umax(R.sup.list), (() => { const w = R.sup.list.reduce((a, p) => (!a || p.min.FZ < a.min.FZ ? p : a), null); return `FZ<sub>min</sub> = ${fmt(w.min.FZ, 0)} kN at ${esc(w.label)}`; })()) : ''}
       ${(() => { const rs = R.wc.map(w => wcResult(wcEl(w.dir))).filter(x => x && x.U != null); return R.wc.length ? sumCard('wcomf', 'Wind comfort a<sub>peak</sub>/a<sub>lim</sub>', rs.length ? Math.max(...rs.map(x => x.U)) : null, rs.length ? `top acceleration ${R.wc.map(w => { const x = wcResult(wcEl(w.dir)); return w.dir + ' ' + (x && x.a ? x.a : '–'); }).join(' · ')}` : '') : ''; })()}
@@ -710,6 +727,15 @@
         ${tbl([['Storey', r => esc(r.story)], ['Dir.', r => r.dir], ['V<sub>i</sub> kN', r => fmt(r.V, 0), 'num'], ['d<sub>r</sub> mm', r => fmt(r.d * 1000, 2), 'num'], ['k<sub>i</sub> kN/m', r => r.k ? fmt(r.k, 0) : '–', 'num'], ['k<sub>i</sub>/k<sub>i+1</sub>', r => r.r1 != null ? fmt(r.r1, 2) : '–', 'num'], ['k<sub>i</sub>/k̄<sub>3 above</sub>', r => r.r3 != null ? fmt(r.r3, 2) : '–', 'num'], ['Class', r => esc(r.cls)], ['U', r => r.r1 != null ? api.ubar(r.U) : '']], top(R.soft))}</div>
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(r => `${esc(r.story)} ${r.dir}: ${esc(r.cls).toLowerCase()} (k<sub>i</sub>/k<sub>i+1</sub> = ${fmt(r.r1, 2)})`).join(' · ')} → the building is not regular in elevation (EN 1998-1 4.2.3.1): use the modal response spectrum analysis (Table 4.1) and reduce q<sub>0</sub> by 20 % (5.2.2.2(3)); better, stiffen the soft storey.` : 'Stiffness constant or reducing gradually upwards in X and Y: regular in elevation for the stiffness criterion (EN 1998-1 4.2.3.3(3)).'}</div>
         <p class="muted bc-pad">k<sub>i</sub> from the seismic case with the largest base shear in each direction (storey shear and storey drift of the same case). EN 1998-1 gives the criterion without numbers; the ASCE 7 limits are a common quantification.</p>`);
+    }
+    if (R.diaph) {
+      const D = R.diaph, bad = D.rows.filter(r => r.U > 1 + 1e-9), wT = D.rows.reduce((a, r) => (!a || r.T > a.T ? r : a), null), wv = D.rows.reduce((a, r) => (!a || r.v > a.v ? r : a), null);
+      html += card('diaph', 'Diaphragms: in-plane forces, chords and collectors', 'EN 1998-1 4.4.2.5 · EN 1992-1-1 6.2.2(6), 6.2.3(3)', `F<sub>i</sub> × γ<sub>d</sub> (${fmt(+s.gdB, 2)} shear, ${fmt(+s.gdD, 2)} chords) · deep beam between the lateral systems: M = F·L/8, T = M/(0.9·D), v = F/(2·D) · slab t = ${fmt(D.t * 1000, 0)} mm (${esc(D.tFrom)}), f<sub>ck</sub> = ${fmt(D.fck, 0)} MPa`,
+        `<div class="bc-inputs">${num('slabT', 'Slab thickness t', 'm', '0.01', '0 = thinnest ETABS floor slab')}${num('slabFck', 'Slab f<sub>ck</sub>', 'MPa', '1', '0 = from ETABS')}${num('fyk', 'f<sub>yk</sub> reinforcement', 'MPa', '10', 'f<sub>yd</sub> = f<sub>yk</sub>/1.15')}${num('gdB', 'γ<sub>d</sub> brittle (shear)', '-', '0.05', '4.4.2.5(2): 1.3')}${num('gdD', 'γ<sub>d</sub> ductile (chords)', '-', '0.05', '4.4.2.5(2): 1.1')}</div>
+        <div class="bc-split">${profile(['X', 'Y'].map((dd, i) => ({ n: 'chord T ' + dd, c: i ? '--s2' : '--s1', pts: D.rows.filter(r => r.dir === dd).map(r => ({ story: r.story, z: r.z, v: r.T })) })).filter(x => x.pts.length), { title: 'Chord force by floor', xlabel: 'chord force kN', unit: 'kN', fmt: v => fmt(v, 0) })}
+        ${tbl([['Floor', r => esc(r.story)], ['Dir.', r => r.dir], ['F<sub>i</sub> kN', r => fmt(r.F, 0), 'num'], ['L × D m', r => `<span style="white-space:nowrap">${fmt(r.L, 1)} × ${fmt(r.D, 1)}</span>`, 'num'], ['M<sub>d</sub> kN·m', r => fmt(r.M, 0), 'num'], ['Chord T kN', r => fmt(r.T, 0), 'num'], ['A<sub>s,chord</sub> mm²', r => fmt(r.As, 0), 'num'], ['v kN/m', r => fmt(r.v, 1), 'num'], ['a<sub>s</sub> mm²/m', r => fmt(r.as, 0), 'num'], ['τ MPa', r => fmt(r.tau, 3), 'num'], ['U', r => api.ubar(r.U)]], top(D.rows))}</div>
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `In-plane shear above the strut resistance 0.5·ν·f<sub>cd</sub> = ${fmt(D.tRd, 2)} MPa at ${bad.map(r => esc(r.story) + ' ' + r.dir).join(', ')} → thicker slab or higher f<sub>ck</sub> near the walls.` : `In-plane shear τ ≤ 0.5·ν·f<sub>cd</sub> = ${fmt(D.tRd, 2)} MPa on every floor.`} Chords: the largest T = ${fmt(wT.T, 0)} kN (${esc(wT.story)} ${wT.dir}) needs A<sub>s</sub> = ${fmt(wT.As, 0)} mm² along the two slab edges parallel to the action - the flanges of the deep beam (continuous, lapped for f<sub>yd</sub>). Collectors and edge shear: v = ${fmt(wv.v, 1)} kN/m → a<sub>s</sub> = ${fmt(wv.as, 0)} mm²/m each way near the walls / frames; drag the force into each wall with ties of A<sub>s</sub> = v·l<sub>connected</sub>/f<sub>yd</sub>.</div>
+        <p class="muted bc-pad">Simplified: one span between the lateral systems at the plan edges, uniform floor force; openings, re-entrant corners and transfer forces (a podium, a wall that stops) need a model of the diaphragm (semi-rigid shells or strut-and-tie). For response-spectrum results F<sub>i</sub> comes from the SRSS/CQC storey shears (approximate). EN 1998-1 5.10 adds the concrete diaphragm rules for DCH.</p>`);
     }
     if (R.short) {
       const K = R.short.stacks, seen = new Set(), gov = K.filter(k => k.U != null).sort((a, c) => c.U - a.U).filter(k => { const key = [k.name, k.nb].sort().join('|'); if (seen.has(key)) return false; seen.add(key); return true; }), top12 = gov.slice(0, 12), bad = gov.filter(k => k.U > 1 + 1e-9);
@@ -817,7 +843,7 @@
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
       if (d.bc === 'demo') {
-        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial();
+        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
         b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
         Object.assign(b.roles, DEMO_ROLES); Object.assign(b.set, { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, Bx: 24, By: 18, fos: 1.0 });
         let n = 0;   // demo ETABS-linked members (beams, columns, footings) for the P-Δ member design
@@ -850,7 +876,7 @@
           if (j.plan && b.set.Bx === DEF.Bx && b.set.By === DEF.By) { b.set.Bx = j.plan.Bx; b.set.By = j.plan.By; }
           if (!b.data.stories.length) throw new Error('ETABS returned no storeys.');
           return EC.etabs.live.get('/modifiers').then(mj => { b.data.mods = mj.props || []; }, () => { b.data.mods = []; })
-            .then(() => EC.etabs.live.get('/strength').then(sj => { b.data.strength = sj.elements || []; }, () => { b.data.strength = []; }))
+            .then(() => EC.etabs.live.get('/strength').then(sj => { b.data.strength = sj.elements || []; b.data.slabs = sj.slabs || []; }, () => { b.data.strength = []; b.data.slabs = []; }))
             .then(() => { const ms = EC.etabs.live.L.model ? EC.etabs.live.L.model.combos : [], qp = b.set.qpCombo && ms.includes(b.set.qpCombo) ? b.set.qpCombo : ms.find(c => /qp|quasi|perm/i.test(c));
               if (!qp) { b.data.axial = null; return; }
               return EC.etabs.live.get('/axial?c=' + encodeURIComponent(qp)).then(aj => { b.data.axial = aj; }, () => { b.data.axial = null; }); })

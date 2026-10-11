@@ -10,7 +10,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ROLES = { seis: 'Seismic', wind: 'Wind SLS', uls: 'ULS', off: 'Not used' };
   const ROLE_ORDER = ['seis', 'wind', 'uls', 'off'];
-  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true };
+  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis' };
   let busy = '', err = '';
 
   const B = () => { const p = api.proj(); p.building = p.building || {}; const b = p.building; b.set = Object.assign({}, DEF, b.set || {}); b.roles = b.roles || {}; return b; };
@@ -146,6 +146,51 @@
       <figcaption class="legend"><span><i style="background:var(--s1)"></i>ΣU<sub>X</sub></span><span><i style="background:var(--s2)"></i>ΣU<sub>Y</sub></span><span>┆ 90 %</span></figcaption></figure>`;
   }
 
+  /* ---------- stiffness modifiers vs the purpose of the analysis ----------
+   * seis: EN 1998-1 4.3.1(6)-(7) cracked stiffness, 0.5 of the uncracked (or a more accurate cracked analysis, e.g. the
+   *       ACI 318 cracked values 0.35-0.7); wind: service level ≈ 1.4 × the ACI strength-level values (≤ 1.0);
+   * pdelta: EN 1992-1-1 5.8.7.2 nominal stiffness EI = Kc·Ecd·Ic + Ks·Es·Is, ≈ 0.15-0.5 of Ec·Ic with creep.
+   * Steel members are not reduced; mass, weight and axial area stay 1.0. */
+  const PURPOSE = {
+    seis: ['Seismic ULS forces, drift, θ (EN 1998-1 4.3.1(7))', { columns: [0.35, 0.7], beams: [0.3, 0.7], braces: [0.35, 0.7], walls: [0.35, 0.7], slabsM: [0.25, 0.5], slabsF: [0.25, 1], shear: [0.4, 1] }],
+    wind: ['Wind SLS drift (service level ≈ 1.4 × cracked)', { columns: [0.7, 1], beams: [0.35, 0.7], braces: [0.7, 1], walls: [0.5, 1], slabsM: [0.25, 0.5], slabsF: [0.5, 1], shear: [0.5, 1] }],
+    pdelta: ['P-Δ and buckling α<sub>cr</sub> (EN 1992-1-1 5.8.7.2)', { columns: [0.15, 0.5], beams: [0.15, 0.5], braces: [0.15, 0.5], walls: [0.15, 0.5], slabsM: [0.15, 0.5], slabsF: [0.25, 1], shear: [0.4, 1] }]
+  };
+  function modCheck(props, purpose) {
+    const R = PURPOSE[purpose][1], f2 = v => api.fmt(v, 2);
+    return (props || []).map(p => {
+      const uses = Object.keys(p.use || {}), main = uses.sort((a, c) => p.use[c] - p.use[a])[0] || 'other';
+      const issues = [];
+      const chk = (mods, where) => {
+        const M = k => (mods[k] === undefined ? 1 : +mods[k]);
+        ['Mass', 'Weight'].forEach(k => { if (Math.abs(M(k) - 1) > 1e-6) issues.push({ lvl: 'bad', t: `${k} ${f2(M(k))} ≠ 1.0${where}: changes the ${k === 'Mass' ? 'seismic mass' : 'self-weight'}` }); });
+        if (p.kind === 'frame' && Math.abs(M('A') - 1) > 1e-6) issues.push({ lvl: 'warn', t: `axial area ${f2(M('A'))}${where}: keep 1.0 (reduce only for column shortening)` });
+        if (p.mat === 'Steel') {
+          const ks = p.kind === 'frame' ? ['I22', 'I33', 'As2', 'As3'] : ['f11', 'f22', 'f12', 'm11', 'm22', 'm12'];
+          ks.filter(k => Math.abs(M(k) - 1) > 0.01).forEach(k => issues.push({ lvl: 'warn', t: `steel ${k} ${f2(M(k))}${where}: steel is not reduced - second order through imperfections and α<sub>cr</sub>` }));
+          return;
+        }
+        const range = (ks, r, what) => ks.forEach(k => { const v = M(k); if (v > r[1] + 1e-6) issues.push({ lvl: 'bad', t: `${k} ${f2(v)} > ${r[1]}${where}: too stiff for ${what}` }); else if (v < r[0] - 1e-6) issues.push({ lvl: 'warn', t: `${k} ${f2(v)} < ${r[0]}${where}: softer than usual for ${what}` }); });
+        if (p.kind === 'frame') { range(['I22', 'I33'], R[main] || R.beams, main); range(['As2', 'As3'], R.shear, 'shear'); }
+        else if (main === 'walls') { range(['f22', 'm11', 'm22'], R.walls, 'walls'); range(['f12'], R.shear, 'wall shear'); }
+        else { range(['m11', 'm22', 'm12'], R.slabsM, 'slab bending'); range(['f11', 'f22', 'f12'], R.slabsF, 'diaphragm'); }
+      };
+      chk(p.mods, '');
+      (p.over || []).forEach(o => { const eff = {}; Object.keys(p.mods).forEach(k => { eff[k] = (+p.mods[k]) * (o.mods[k] === undefined ? 1 : +o.mods[k]); }); chk(eff, ` (object ${o.obj} × override)`); });
+      const st = issues.some(i => i.lvl === 'bad') ? 'bad' : issues.length ? 'warn' : 'ok';
+      return { p, main, uses, issues, st };
+    });
+  }
+  const demoMods = () => {
+    const F = o => Object.assign({ A: 1, As2: 1, As3: 1, J: 1, I22: 1, I33: 1, Mass: 1, Weight: 1 }, o), A = o => Object.assign({ f11: 1, f22: 1, f12: 1, m11: 1, m22: 1, m12: 1, v13: 1, v23: 1, Mass: 1, Weight: 1 }, o);
+    return [{ kind: 'frame', name: 'C600x600 C40', mat: 'Concrete', use: { columns: 36 }, mods: F({ I22: 0.5, I33: 0.5, As2: 0.5, As3: 0.5 }), over: [] },
+      { kind: 'frame', name: 'B300x600 C30', mat: 'Concrete', use: { beams: 84 }, mods: F({ I22: 0.35, I33: 0.35, J: 0.1 }), over: [{ obj: 'B12-Story3', mods: F({ I33: 2.0 }) }] },
+      { kind: 'frame', name: 'B400x700 C30', mat: 'Concrete', use: { beams: 22 }, mods: F({}), over: [] },
+      { kind: 'frame', name: 'HEB300', mat: 'Steel', use: { braces: 8 }, mods: F({}), over: [] },
+      { kind: 'area', name: 'W250 C40', mat: 'Concrete', use: { walls: 40 }, mods: A({ f22: 0.5, f12: 0.5, m11: 0.5, m22: 0.5 }), over: [] },
+      { kind: 'area', name: 'S200 C30', mat: 'Concrete', use: { slabs: 60 }, mods: A({ m11: 0.25, m22: 0.25, m12: 0.25, Mass: 0.9 }), over: [] }];
+  };
+
   /* ---------- P-Δ / sway design of the ETABS-linked members ----------
    * EN 1998-1 4.4.2.2(3): seismic action effects × 1/(1−θ) of the storey (0.1 < θ ≤ 0.2).
    * EN 1993-1-1 5.2.2(5)B: sway effects × 1/(1−1/αcr) (3 ≤ αcr < 10) for the non-seismic combinations.
@@ -250,6 +295,7 @@
     const sumCard = (k, label, U, txt) => `<a class="card bc-sum" href="#bc-${k}"><div class="label">${label}</div><div class="value">${U === null ? '–' : fmt(U, 2)}</div><div class="foot">${U === null ? 'no data for this check' : okTag(U) + ' <span>' + txt + '</span>'}</div></a>`;
     const dU = Umax(R.drift), wU = Umax(R.wind), tU = Umax(R.theta), qU = Umax(R.tors), oU = Umax(R.base.filter(x => Number.isFinite(x.fos)));
     const thMax = R.theta.length ? Math.max(...R.theta.map(x => x.th)) : null, rMax = R.tors.length ? Math.max(...R.tors.map(x => x.ratio)) : null;
+    const MC = b.data.mods && b.data.mods.length ? modCheck(b.data.mods, s.kPurpose) : null;
     const sums = `<div class="grid g3 bc-sums">
       ${sumCard('drift', 'Seismic drift', R.drift.length ? dU : null, 'max d<sub>r</sub>ν/h ÷ α')}
       ${sumCard('pdelta', 'P-Δ stability θ', R.theta.length ? tU : null, R.theta.length ? `θ<sub>max</sub> = ${fmt(thMax, 3)} (limit 0.3)` : '')}
@@ -257,6 +303,7 @@
       ${sumCard('wind', 'Wind drift', R.wind.length ? wU : null, `drift ÷ h/${s.windLim}`)}
       ${sumCard('base', 'Overturning', R.base.some(x => Number.isFinite(x.fos)) ? oU : null, 'required ÷ provided safety')}
       ${sumCard('modal', 'Modal mass participation', R.modal ? R.modal.U : null, R.modal ? `ΣU<sub>X</sub> ${fmt(R.modal.sum.X * 100, 1)} % · ΣU<sub>Y</sub> ${fmt(R.modal.sum.Y * 100, 1)} % · T<sub>1</sub> ${fmt(R.modal.T1, 2)} s` : '')}
+      ${MC ? `<a class="card bc-sum" href="#bc-mods"><div class="label">Stiffness modifiers</div><div class="value">${MC.filter(r => r.st === 'bad').length} <small>of ${MC.length} properties flagged</small></div><div class="foot">${MC.some(r => r.st === 'bad') ? '<span class="res bad">✗ Revise</span>' : MC.some(r => r.st === 'warn') ? '<span class="res ok">✓ OK</span> <span>with notes</span>' : '<span class="res ok">✓ OK</span>'} <span>${PURPOSE[s.kPurpose][0].split(' (')[0]}</span></div></a>` : ''}
       ${sumCard('buckling', 'Global buckling α<sub>cr</sub>', R.acr ? R.acr.U : null, R.acr ? `α<sub>cr</sub> = ${fmt(R.acr.a, 2)}${R.acr.a >= 10 ? ' ≥ 10: 1st order' : R.acr.a >= 3 ? ` · sway × ${fmt(R.acr.k, 3)}` : ' < 3'}` : '')}</div>`;
     const ser = (rows, key) => ['X', 'Y'].map((d, i) => ({ n: 'Direction ' + d, c: i ? '--s2' : '--s1', pts: rows.filter(r => r.dir === d).map(r => ({ story: r.story, z: r.z, v: r[key] })) })).filter(x => x.pts.length);
     const card = (k, title, ref, sub, body) => `<section class="card bc-card" id="bc-${k}"><div class="card-h"><b>${title}</b><small>${ref}${sub ? ' · ' + sub : ''}</small></div>${body}</section>`;
@@ -300,6 +347,16 @@
           ${tbl([['Mode', r => r.mode, 'num'], ['T s', r => fmt(r.T, 3), 'num'], ['f Hz', r => r.T > 0 ? fmt(1 / r.T, 2) : '–', 'num'], ['U<sub>X</sub>', r => pc(r.Ux), 'num'], ['U<sub>Y</sub>', r => pc(r.Uy), 'num'], ['R<sub>Z</sub>', r => pc(r.Rz), 'num'], ['ΣU<sub>X</sub>', r => pc(r.SumUx), 'num'], ['ΣU<sub>Y</sub>', r => pc(r.SumUy), 'num'], ['Dominant', r => esc(M.dom(r))]], M.md.slice(0, 30))}</div>
         <div class="bc-verdict ${M.U <= 1 + 1e-9 ? 'ok' : 'bad'}">${verdict}</div>${notes.length ? `<p class="muted bc-pad">Note: ${notes.join('; ')}.</p>` : ''}`);
     }
+    if (MC) {
+      const modTxt = r => { const M = r.p.mods, ks = r.p.kind === 'frame' ? ['I33', 'I22', 'As2', 'As3', 'A', 'J', 'Mass', 'Weight'] : ['f11', 'f22', 'f12', 'm11', 'm22', 'm12', 'Mass', 'Weight'];
+        return ks.map(k => `<span class="${Math.abs((M[k] === undefined ? 1 : +M[k]) - 1) > 1e-6 ? 'md-on' : 'md-off'}">${k} ${fmt(M[k] === undefined ? 1 : +M[k], 2)}</span>`).join(' '); };
+      html += card('mods', 'Stiffness modifiers', 'EN 1998-1 4.3.1(6)-(7) · EN 1992-1-1 5.8.7.2 · cracked-section stiffness for the purpose of the analysis', '',
+        `<div class="bc-inputs" style="grid-template-columns:minmax(0,420px)"><label class="bc-in"><span>Purpose of this ETABS model</span><select class="ctl" data-bcpurpose>${Object.keys(PURPOSE).map(k => `<option value="${k}" ${s.kPurpose === k ? 'selected' : ''}>${PURPOSE[k][0].replace(/<[^>]+>/g, '')}</option>`).join('')}</select><small>expected range of the flexural modifier: columns ${PURPOSE[s.kPurpose][1].columns.join('–')}, beams ${PURPOSE[s.kPurpose][1].beams.join('–')}, walls ${PURPOSE[s.kPurpose][1].walls.join('–')}, slab bending ${PURPOSE[s.kPurpose][1].slabsM.join('–')}; steel 1.0; mass and weight always 1.0</small></label></div>
+        ${tbl([['Status', r => `<span class="res ${r.st === 'bad' ? 'bad' : 'ok'}">${r.st === 'bad' ? '✗ Revise' : r.st === 'warn' ? '! Note' : '✓ OK'}</span>`], ['Property', r => `<b>${esc(r.p.name)}</b><br><small class="muted">${r.p.kind === 'frame' ? 'frame section' : 'shell'} · ${esc(r.p.mat)}</small>`],
+          ['Used as', r => `<small>${r.uses.map(u => `${r.p.use[u]} ${esc(u)}`).join(', ')}</small>`], ['Modifiers in ETABS', r => `<small class="md">${modTxt(r)}</small>${r.p.over && r.p.over.length ? `<br><small class="muted">${r.p.over.length} object override(s)</small>` : ''}`],
+          ['Findings', r => r.issues.length ? `<small>${r.issues.map(i => `${i.lvl === 'bad' ? '✗' : '!'} ${i.t}`).join('<br>')}</small>` : '<small class="muted">within the range for this purpose</small>']], MC)}
+        <p class="muted bc-pad">Use one model (or one set of modifiers) per purpose: too stiff underestimates drift, θ and the period and overestimates α<sub>cr</sub> (unsafe for P-Δ); too soft underestimates the forces of stiff buildings. Object overrides multiply the property modifiers. Torsion J of beams (0.01-0.1) avoids compatibility torsion - keep the minimum torsion links (EN 1992-1-1 6.3.1(2)).</p>`);
+    }
     const MF = memberFactors(b, R), nAmp = MF.filter(m => m.k && m.k > 1).length, nOn = MF.filter(m => m.applied).length;
     html += card('members', 'P-Δ design of the ETABS-linked members', 'EN 1998-1 4.4.2.2(3) · EN 1993-1-1 5.2.2(5)B', 'seismic governing case × 1/(1−θ) of its storey · other cases × 1/(1−1/α<sub>cr</sub>) · M and V amplified',
       MF.length ? `${tbl([['Mark', r => `<a href="#/el/${r.e.id}" class="mark">${esc(r.e.mark)}</a>`], ['Design', r => esc(EC.modules[r.e.type].name)], ['Storey', r => esc(r.story || '')], ['Governing case', r => `<small>${esc(r.e.etabs.combo)}</small>`], ['Basis', r => `<small>${r.basis}</small>`],
@@ -319,7 +376,7 @@
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
       if (d.bc === 'demo') {
-        b.data = demoBuilding(); b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
+        b.data = demoBuilding(); b.data.mods = demoMods(); b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
         Object.assign(b.roles, DEMO_ROLES); Object.assign(b.set, { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, Bx: 24, By: 18, fos: 1.0 });
         let n = 0;   // demo ETABS-linked members (beams, columns, footings) for the P-Δ member design
         if (!api.proj().elements.some(e => e.etabs) && EC.etabs._demoDesign) n = EC.etabs._demoDesign();
@@ -345,17 +402,21 @@
           b.file = String(j.file || '').split(/[\\/]/).pop(); b.at = Date.now(); b.demo = false;
           if (j.plan && b.set.Bx === DEF.Bx && b.set.By === DEF.By) { b.set.Bx = j.plan.Bx; b.set.By = j.plan.By; }
           if (!b.data.stories.length) throw new Error('ETABS returned no storeys.');
+          return EC.etabs.live.get('/modifiers').then(mj => { b.data.mods = mj.props || []; }, () => { b.data.mods = []; });
+        }).then(() => {
           busy = ''; api.save(); api.toast('Building read from ETABS'); rer();
         }).catch(e => { busy = ''; err = e.message; rer(); });
       }
     };
     root.onchange = ev => {
-      const t = ev.target; if (t.dataset.bcset === undefined) return;
+      const t = ev.target;
+      if (t.dataset.bcpurpose !== undefined) { B().set.kPurpose = t.value; api.save(); return rer(); }
+      if (t.dataset.bcset === undefined) return;
       if (t.type === 'checkbox') { B().set[t.dataset.bcset] = t.checked; api.save(); return rer(); }
       const v = parseFloat(t.value); if (!Number.isFinite(v)) return;
       B().set[t.dataset.bcset] = v; api.save(); rer();
     };
   }
 
-  EC.building = { install(a) { api = a; }, view, mount, reamp, _compute: compute, _memberFactors: (b, R) => memberFactors(b, R) };
+  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R) };
 })();

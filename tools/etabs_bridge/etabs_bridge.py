@@ -23,6 +23,8 @@ Endpoints (JSON):
     GET /results?c=<combo>&c=...&k=beams&k=columns&k=braces&k=piers&k=reactions[&sel=1]
                                    results as ETABS-style tables (header row, units row, rows);
                                    sel=1: only the members selected in ETABS
+    GET /modifiers                 stiffness / mass modifiers of the frame and area properties (and per-object overrides),
+                                   with the material and what each property is used for (columns, beams, walls, slabs)
     GET /loads                     load patterns, load cases and load combinations (with their cases)
     POST /loads/apply              create missing load patterns and rebuild the managed combinations
                                    {prefix, patterns: [{name, type, sw}], combos: [{name, type, items: [[name, sf, isCombo]]}], unlock,
@@ -45,7 +47,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.5'
+VERSION = '1.6'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -225,6 +227,9 @@ class Etabs:
 
     def loads(self):
         return loads_from_model(self.attach())
+
+    def modifiers(self):
+        return modifiers_from_model(self.attach())
 
     def apply_loads(self, body):
         return apply_loads(self.attach(), body)
@@ -618,6 +623,72 @@ def assign_slab_loads(m, body):
     return {'slabs': len(floors), 'items': len(body.get('items', []))}
 
 
+FRAME_MODS = ['A', 'As2', 'As3', 'J', 'I22', 'I33', 'Mass', 'Weight']
+AREA_MODS = ['f11', 'f22', 'f12', 'm11', 'm22', 'm12', 'v13', 'v23', 'Mass', 'Weight']
+MAT = {1: 'Steel', 2: 'Concrete'}
+
+
+def modifiers_from_model(m):
+    """property modifiers by section / area property, what uses them, and object overrides (effective = property x object)"""
+    def material(name, getter):
+        try:
+            mat = ok(getter(name, ''), 'GetMaterial')[0]
+            return MAT.get(int(ok(m.PropMaterial.GetTypeOAPI(mat, 0, 0), 'PropMaterial.GetTypeOAPI')[0]), 'Other')
+        except Exception:
+            return 'Other'
+    props = {}
+    for n in ok(m.PropFrame.GetNameList(0, []), 'PropFrame.GetNameList')[1] or []:
+        try:
+            v = ok(m.PropFrame.GetModifiers(n, []), 'PropFrame.GetModifiers')[0]
+        except BridgeError:
+            continue
+        props[('frame', n)] = {'kind': 'frame', 'name': n, 'mat': material(n, m.PropFrame.GetMaterial), 'mods': dict(zip(FRAME_MODS, list(v)[:8])),
+                               'use': {}, 'over': []}
+    for n in ok(m.FrameObj.GetNameList(0, []), 'FrameObj.GetNameList')[1] or []:
+        try:
+            sec = ok(m.FrameObj.GetSection(n, '', ''), 'FrameObj.GetSection')[0]
+            orient = ORIENT.get(int(ok(m.FrameObj.GetDesignOrientation(n, 0), 'GetDesignOrientation')[0]), 'other')
+        except BridgeError:
+            continue
+        p = props.get(('frame', sec))
+        if not p:
+            continue
+        p['use'][orient] = p['use'].get(orient, 0) + 1
+        try:
+            ov = list(ok(m.FrameObj.GetModifiers(n, []), 'FrameObj.GetModifiers')[0])[:8]
+            if any(abs(x - 1) > 1e-9 for x in ov):
+                p['over'].append({'obj': n, 'mods': dict(zip(FRAME_MODS, ov))})
+        except BridgeError:
+            pass
+    for n in ok(m.PropArea.GetNameList(0, []), 'PropArea.GetNameList')[1] or []:
+        try:
+            v = ok(m.PropArea.GetModifiers(n, []), 'PropArea.GetModifiers')[0]
+        except BridgeError:
+            continue
+        props[('area', n)] = {'kind': 'area', 'name': n, 'mat': material(n, m.PropArea.GetMaterial) if hasattr(m.PropArea, 'GetMaterial') else 'Concrete',
+                              'mods': dict(zip(AREA_MODS, list(v)[:10])), 'use': {}, 'over': []}
+    for n in ok(m.AreaObj.GetNameList(0, []), 'AreaObj.GetNameList')[1] or []:
+        try:
+            prop = ok(m.AreaObj.GetProperty(n, ''), 'AreaObj.GetProperty')[0]
+            orient = {1: 'walls', 2: 'slabs'}.get(int(ok(m.AreaObj.GetDesignOrientation(n, 0), 'GetDesignOrientation')[0]), 'other')
+        except BridgeError:
+            continue
+        p = props.get(('area', prop))
+        if not p:
+            continue
+        p['use'][orient] = p['use'].get(orient, 0) + 1
+        try:
+            ov = list(ok(m.AreaObj.GetModifiers(n, []), 'AreaObj.GetModifiers')[0])[:10]
+            if any(abs(x - 1) > 1e-9 for x in ov):
+                p['over'].append({'obj': n, 'mods': dict(zip(AREA_MODS, ov))})
+        except BridgeError:
+            pass
+    out = [p for p in props.values() if p['use']]
+    for p in out:
+        p['over'] = p['over'][:50]
+    return {'props': out}
+
+
 class Mock:
     """Demo model with the same answers as a live ETABS (for testing without ETABS).
     The selection is B12 on Story3, column C3 on Story1 and support J1."""
@@ -636,6 +707,17 @@ class Mock:
         self.extra_cases = [{'name': 'Modal', 'type': 3}, {'name': 'EQX RS', 'type': 4}, {'name': 'EQY RS', 'type': 4}, {'name': 'Buckling', 'type': 10}]
         self.combos = [{'name': c, 'type': 0, 'items': [['Dead', 1.35, False], ['Live', 1.5, False]]} for c in self.COMBOS]
         self.slab_loads = {}
+
+    def modifiers(self):
+        F = lambda **k: dict(dict(zip(FRAME_MODS, [1.0] * 8)), **k)
+        A = lambda **k: dict(dict(zip(AREA_MODS, [1.0] * 10)), **k)
+        return {'props': [
+            {'kind': 'frame', 'name': 'C600x600 C40', 'mat': 'Concrete', 'use': {'columns': 36}, 'mods': F(I22=0.7, I33=0.7), 'over': []},
+            {'kind': 'frame', 'name': 'B300x600 C30', 'mat': 'Concrete', 'use': {'beams': 84}, 'mods': F(I22=0.35, I33=0.35, J=0.1), 'over': [{'obj': '101', 'mods': F(I33=2.0)}]},
+            {'kind': 'frame', 'name': 'B400x700 C30', 'mat': 'Concrete', 'use': {'beams': 22}, 'mods': F(), 'over': []},
+            {'kind': 'frame', 'name': 'HEB300', 'mat': 'Steel', 'use': {'braces': 8}, 'mods': F(), 'over': []},
+            {'kind': 'area', 'name': 'W250 C40', 'mat': 'Concrete', 'use': {'walls': 40}, 'mods': A(f22=0.7, f12=0.7, m11=0.7, m22=0.7), 'over': []},
+            {'kind': 'area', 'name': 'S200 C30', 'mat': 'Concrete', 'use': {'slabs': 60}, 'mods': A(m11=0.25, m22=0.25, m12=0.25, Mass=0.9), 'over': []}]}
 
     def loads(self):
         cases = [{'name': p['name'], 'type': 1} for p in self.patterns] + self.extra_cases
@@ -825,6 +907,8 @@ def make_handler(src, origins):
                     return self.send(200, dict(src.status(), bridge=VERSION))
                 if u.path == '/model':
                     return self.send(200, src.model_info())
+                if u.path == '/modifiers':
+                    return self.send(200, src.modifiers())
                 if u.path == '/loads':
                     return self.send(200, src.loads())
                 if u.path == '/building':

@@ -783,3 +783,6 @@ svg.plot .ppt { stroke: var(--surface); stroke-width: 2; }
 .ld-filter { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 12px; }
 tr.ld-removed td { opacity: .75; }
 .ld-rs { padding: 4px 16px 8px; max-width: 760px; }
+.md span { white-space: nowrap; margin-right: 6px; }
+.md .md-on { color: var(--ink); font-weight: 600; }
+.md .md-off { color: var(--muted); }

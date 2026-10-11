@@ -16,6 +16,7 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] Demo building on the Building checks page: sample ETABS results of a 10-storey RC building (all checks, no ETABS needed), plus demo ETABS-linked members
 - [x] Loads & combinations: create standard load patterns, assign slab loads to the selected slabs, generate the EN 1990 combinations (ULS 6.10 / 6.10a-b, EQU, seismic 100/30, SLS char / freq / qp, wind SLS, envelopes) in ETABS and rebuild them automatically when the building's loads change
 - [x] Imperfections as notional loads: θi = θ0·αh·αm (EN 1992-1-1 5.2(5)-(6), EN 1993-1-1 5.3.2(3)); one ETABS notional pattern per gravity pattern and direction (base pattern, ratio θi, X/Y set through the ETABS database table), factored like its base pattern in every ULS combination, ±X/±Y or in the wind's direction
+- [x] P-Δ member design with imperfections: gravity combinations carrying notional loads (base shear ≤ 1 % of the vertical load) are sway cases for EN 1993-1-1 5.2.2(5)B - × 1/(1−1/αcr) on the whole M and V by default (conservative), or left unamplified by option
 
 ## Fixes
 - [x] 2026-10-11 · Building checks guessed EN 1990 EQU combinations (CS-EQU) as seismic - now ULS
@@ -23,9 +24,9 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] 2026-10-11 · Building checks: Print opened the print dialog twice (the page and the app both handled the click)
 
 ## Next
-- [ ] P-Δ member design: treat combinations with notional loads as sway cases (αcr amplification of the imperfection effects only)
 - [ ] Response-spectrum function and cases from the EC8 spectrum (ag, ground type, q) written to ETABS
 - [ ] Stiffness modifiers: read the ETABS property modifiers and flag them against the analysis purpose (EC8 4.3.1(7) 0.5 Ig, wind SLS, EC2 5.8.7.2 for P-Δ)
+- [ ] P-Δ member design, exact: read the member forces of the notional cases and amplify only their share Σ f·M(N) instead of the whole M, V
 - [ ] Base shear check: response spectrum vs lateral force method, T1 vs Ct·H^¾ - EN 1998-1 4.3.3.2
 - [ ] Soft storey: lateral stiffness of each storey vs the storey above (regularity in elevation) - EN 1998-1 4.2.3.3
 - [ ] Weak storey: storey shear strength ratio

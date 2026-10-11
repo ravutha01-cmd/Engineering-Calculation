@@ -10,7 +10,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ROLES = { seis: 'Seismic', wind: 'Wind SLS', uls: 'ULS', off: 'Not used' };
   const ROLE_ORDER = ['seis', 'wind', 'uls', 'off'];
-  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0 };
+  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true };
   let busy = '', err = '';
 
   const B = () => { const p = api.proj(); p.building = p.building || {}; const b = p.building; b.set = Object.assign({}, DEF, b.set || {}); b.roles = b.roles || {}; return b; };
@@ -49,7 +49,8 @@
         d.forces.push({ story: x.name, combo: c, step, loc: 'Bottom', P: g * W * (n - i), VX: dir === 'X' ? Vs : dir ? 0.12 * Vs : 0, VY: dir === 'Y' ? Vs : dir ? 0.12 * Vs : 0, T: 0.05 * Vs * 24, MX: dir === 'Y' ? Ms : 0, MY: dir === 'X' ? Ms : 0 });
       });
       const Mb = F.reduce((a, f, j) => a + f * st[j].elev, 0);
-      d.base.push({ combo: c, step, FX: dir === 'X' ? -V : 0, FY: dir === 'Y' ? -V : 0, FZ: g * W * n, MX: dir === 'Y' ? Mb : 0, MY: dir === 'X' ? Mb : 0, MZ: 0 });
+      const Hn = c === 'ULS1 1.35G+1.5Q' ? g * W * n / 405 : 0;   // ULS1 carries the imperfections (notional loads, θi ≈ 1/405)
+      d.base.push({ combo: c, step, FX: dir === 'X' ? -V : -Hn, FY: dir === 'Y' ? -V : 0, FZ: g * W * n, MX: dir === 'Y' ? Mb : 0, MY: dir === 'X' ? Mb : 0, MZ: 0 });
     });
     d.buckling = [8.4, 9.1, 13.7, 21.5, 24.0, 33.2].map((f, i) => ({ case: 'Buckling (1.35G+1.5Q)', mode: i + 1, factor: f }));
     let sx = 0, sy = 0, sr = 0;
@@ -157,10 +158,12 @@
     const st = R.st, low = st.length ? st[0].name : null;
     // combinations with horizontal load (base shear > 1 % of the vertical load, or lateral-only cases)
     const lateral = (b.data.base || []).filter(r => { const H = Math.hypot(r.FX, r.FY), V = Math.abs(r.FZ); return H > 1e-6 && (V < 1e-6 || H > 0.01 * V); }).map(r => r.combo);
+    // gravity combinations that carry only imperfection-level horizontal load (notional loads: H ≤ 1 % of V)
+    const imper = (b.data.base || []).filter(r => { const H = Math.hypot(r.FX, r.FY), V = Math.abs(r.FZ); return H > 1e-6 && V > 1e-6 && H <= 0.01 * V; }).map(r => r.combo);
     const has = (e, names) => names.some(c => String(e.etabs.combo || '').includes(c));
     return api.proj().elements.filter(e => e.etabs && AMP[e.type]).map(e => {
       const story = st.some(x => x.name === e.etabs.story) ? e.etabs.story : low;   // supports (Base) take the lowest storey
-      const seis = has(e, seisNames), sway = seis || has(e, lateral);
+      const seis = has(e, seisNames), lat = has(e, lateral), imp = !lat && has(e, imper), sway = seis || lat || (imp && b.set.ampImp);
       let k = 1, basis = '';
       if (seis) {
         const th = R.theta.filter(x => x.story === story);
@@ -169,11 +172,11 @@
         else if (t > 0.1) { k = 1 / (1 - t); basis = `θ = ${api.fmt(t, 3)} (${esc(story)}) → 1/(1−θ)`; }
         else basis = th.length ? `θ = ${api.fmt(t, 3)} ≤ 0.1 → no amplification` : 'no θ for this storey';
       } else if (!sway) {
-        basis = has(e, (b.data.base || []).map(r => r.combo)) ? 'gravity-only governing case → no sway amplification' : 'governing case not read on this page - give it a role (ULS) and read again';
+        basis = imp ? 'gravity + imperfections (notional loads): sway share small, not amplified (option below)' : has(e, (b.data.base || []).map(r => r.combo)) ? 'gravity-only governing case → no sway amplification' : 'governing case not read on this page - give it a role (ULS) and read again';
       } else if (R.acr) {
         const a = R.acr.a;
         if (a < 3) { k = null; basis = `α<sub>cr</sub> = ${api.fmt(a, 2)} < 3: second-order analysis needed`; }
-        else if (a < 10) { k = 1 / (1 - 1 / a); basis = `α<sub>cr</sub> = ${api.fmt(a, 2)} → 1/(1−1/α<sub>cr</sub>)`; }
+        else if (a < 10) { k = 1 / (1 - 1 / a); basis = `α<sub>cr</sub> = ${api.fmt(a, 2)} → 1/(1−1/α<sub>cr</sub>)${imp ? ' · sway from imperfections (notional loads): whole M, V amplified - conservative' : ''}`; }
         else basis = `α<sub>cr</sub> = ${api.fmt(a, 2)} ≥ 10 → no amplification`;
       } else basis = 'no buckling factor (add a buckling case)';
       const base = (e.pdelta && e.pdelta.base) || Object.fromEntries(AMP[e.type].filter(x => e.inputs[x] !== undefined).map(x => [x, e.inputs[x]]));
@@ -302,7 +305,8 @@
       MF.length ? `${tbl([['Mark', r => `<a href="#/el/${r.e.id}" class="mark">${esc(r.e.mark)}</a>`], ['Design', r => esc(EC.modules[r.e.type].name)], ['Storey', r => esc(r.story || '')], ['Governing case', r => `<small>${esc(r.e.etabs.combo)}</small>`], ['Basis', r => `<small>${r.basis}</small>`],
           ['Factor', r => r.k === null ? '<span class="res bad">2nd order</span>' : fmt(r.k, 3), 'num'], ['Applied', r => r.applied ? `<span class="res ok" style="white-space:nowrap">× ${fmt(r.applied, 3)}</span>` : '–'], ['U ETABS', r => fmt(r.U0, 2), 'num'], ['U with P-Δ', r => r.k && r.k > 1 ? api.ubar(r.U1) : fmt(r.U0, 2)]], MF)}
         <div class="etabs-btns" style="padding:12px 16px 14px"><button class="btn primary" data-bc="amp" ${nAmp ? '' : 'disabled'}>${ic('check')}Apply P-Δ to ${nAmp} member(s)</button>${nOn ? `<button class="btn" data-bc="unamp">${ic('undo')}Remove from ${nOn} member(s)</button>` : ''}
-          <small class="muted">The original ETABS forces are kept; re-reading or syncing ETABS keeps the factor on the new forces.</small></div>`
+          <small class="muted">The original ETABS forces are kept; re-reading or syncing ETABS keeps the factor on the new forces.</small></div>
+        <div class="ld-chks"><label class="ld-chk"><input type="checkbox" data-bcset="ampImp" ${b.set.ampImp ? 'checked' : ''}>Treat gravity + imperfection (notional-load) cases as sway cases: × 1/(1−1/α<sub>cr</sub>) on the whole M and V (EN 1993-1-1 5.2.2(5)B - H<sub>Ed</sub> includes the equivalent imperfection forces; conservative)</label></div>`
         : '<p class="muted bc-pad">No ETABS-linked beams, columns, walls, steel members or footings yet - design members from Link to ETABS first.</p>');
     return html + inputs + `<p class="muted" style="margin-top:12px">Source: ${esc(b.file || '')} · read ${new Date(b.at).toLocaleString()} · units kN, m.</p>`;
   }
@@ -347,10 +351,11 @@
     };
     root.onchange = ev => {
       const t = ev.target; if (t.dataset.bcset === undefined) return;
+      if (t.type === 'checkbox') { B().set[t.dataset.bcset] = t.checked; api.save(); return rer(); }
       const v = parseFloat(t.value); if (!Number.isFinite(v)) return;
       B().set[t.dataset.bcset] = v; api.save(); rer();
     };
   }
 
-  EC.building = { install(a) { api = a; }, view, mount, reamp, _compute: compute };
+  EC.building = { install(a) { api = a; }, view, mount, reamp, _compute: compute, _memberFactors: (b, R) => memberFactors(b, R) };
 })();

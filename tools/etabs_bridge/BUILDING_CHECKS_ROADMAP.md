@@ -28,6 +28,7 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] Accidental torsion: eccentricity ratio of the ETABS response-spectrum cases (ResponseSpectrum.GetEccentricity / GetLoads) against 0.05 (EN 1998-1 4.3.2(1)P), storey torques M_ai = 0.05·L_i·F_i per direction (4.3.3.3.3), δ = 1 + 0.6 x/L_e and 1 + 1.2 x/L_e for planar models (4.3.3.2.4)
 - [x] Wind comfort: peak top acceleration (EN 1991-1-4 Annex B.4, limits ISO 10137 / CTBUH) by the user's Wind_TallBuilding worksheet, one ETABS-linked element per direction created / updated from the building read (h, plan, storeys, ρ from the storey masses, n_1 from the modes, Wind SLS base shear / moment); user wind data kept on update; worksheet's other flags shown
 - [x] Support uplift and pile tension: bridge `/supports` (restrained joints, coordinates, JointReact for the chosen combinations), F_t;d = −FZ_min − 0.9·W_f ≤ R_t;d (EN 1997-1 7.6.3.1(2), eq. 7.12) over the ULS / seismic combinations with vertical load (lateral cases alone skipped), plan of the supports and the critical ones listed
+- [x] Axial shortening: bridge `/axial` (columns by label with FrameForce, wall piers with PierLabel.GetSectionProperties + PierForce, for the quasi-permanent combination), elastic + creep + shrinkage by EN 1992-1-1 3.1.4 / Table 3.1 cumulated up each stack, post-casting differential against the nearest stack ≤ L/limit
 
 ## Fixes
 - [x] 2026-10-11 · Notional loads asked the user to set them by hand when the notional table was not found (it was searched only among the tables that already had data). Now fully automatic: all tables searched (also empty ones, fields read with GetAllFieldsInTable); without such a table, a gravity analysis gives N per floor and H_i = θi·N is applied as storey joint loads (EN 1992-1-1 5.2(8))
@@ -37,6 +38,7 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] 2026-10-11 · Soft storey cited EN 1998-1 4.2.3.3(4)P for the stiffness criterion - it is 4.2.3.3(3) (4.2.3.3(4) is the storey resistance ratio, now the weak-storey check)
 
 ## Next
-- [ ] Column axial shortening / differential shortening in tall buildings
 - [ ] Diaphragm forces and chord / collector design - EN 1998-1 4.4.2.5
 - [ ] Seismic joint / pounding gap between adjacent blocks - EN 1998-1 4.4.2.7
+- [ ] Capacity design of beam-column joints: ΣM_Rc ≥ 1.3·ΣM_Rb at every frame joint from the ETABS sections and reinforcement (strong column / weak beam) - EN 1998-1 4.4.2.3(4), 5.2.3.3(2)
+- [ ] Ductile wall design envelope from ETABS pier forces: moment envelope with tension shift a1 and shear magnification ε (DCM 1.5) - EN 1998-1 5.4.2.4, 5.5.2.4.1

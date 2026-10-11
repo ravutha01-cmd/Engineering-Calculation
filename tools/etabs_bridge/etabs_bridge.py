@@ -27,6 +27,8 @@ Endpoints (JSON):
                                    sel=1: only the members selected in ETABS
     GET /modifiers                 stiffness / mass modifiers of the frame and area properties (and per-object overrides),
                                    with the material and what each property is used for (columns, beams, walls, slabs)
+    GET /axial?c=<combo>           columns (by label) and wall piers: plan position, area, material and axial force per storey
+                                   for the quasi-permanent combination (axial shortening check)
     GET /supports?c=<combo>&c=...  restrained joints (plan x, y) with their reactions for the combinations (uplift / pile tension)
     GET /strength                  columns and wall panels of every storey with section size, material strength and
                                    shear areas (storey shear resistance for the weak-storey check)
@@ -54,7 +56,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.12'
+VERSION = '1.13'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -247,6 +249,18 @@ class Etabs:
         m.SetPresentUnits(KN_M_C)
         try:
             return supports_from_model(m, combos, cset)
+        finally:
+            m.SetPresentUnits(old)
+
+    def axial(self, combo):
+        m = self.attach()
+        if not combo:
+            raise BridgeError('Select the quasi-permanent load combination')
+        cset = set(self.model_info()['combos'])
+        old = m.GetPresentUnits()
+        m.SetPresentUnits(KN_M_C)
+        try:
+            return axial_from_model(m, combo, combo in cset)
         finally:
             m.SetPresentUnits(old)
 
@@ -906,6 +920,86 @@ def supports_from_model(m, combos, cset):
     return {'supports': [v for v in out.values() if v]}
 
 
+def axial_from_model(m, combo, is_combo):
+    """vertical stacks for the shortening check: columns by label (one line through the storeys) and wall piers, with
+    plan position and per storey the area (m2), material (Concrete / Steel, f MPa) and axial compression N (kN) of `combo`"""
+    setup = m.Results.Setup
+    setup.DeselectAllCasesAndCombosForOutput()
+    ok(setup.SetComboSelectedForOutput(combo, True) if is_combo else setup.SetCaseSelectedForOutput(combo, True), 'select ' + combo)
+    mats, stacks = {}, {}
+
+    def material(name):
+        if name not in mats:
+            kind, f = 'Other', 0.0
+            try:
+                kind = MAT.get(int(ok(m.PropMaterial.GetTypeOAPI(name, 0, 0), 'GetTypeOAPI')[0]), 'Other')
+                if kind == 'Concrete':
+                    f = ok(m.PropMaterial.GetOConcrete_1(name, 0, False, 0, 0, 0, 0, 0, 0, 0, 0), 'GetOConcrete_1')[0] / 1000
+                elif kind == 'Steel':
+                    f = ok(m.PropMaterial.GetOSteel_1(name, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), 'GetOSteel_1')[0] / 1000
+            except Exception:
+                pass
+            mats[name] = (kind, f)
+        return mats[name]
+    for n in ok(m.FrameObj.GetNameList(0, []), 'FrameObj.GetNameList')[1] or []:
+        try:
+            if int(ok(m.FrameObj.GetDesignOrientation(n, 0), 'GetDesignOrientation')[0]) != 1:
+                continue
+            label, story = ok(m.FrameObj.GetLabelFromName(n, '', ''), 'FrameObj.GetLabelFromName')[:2]
+            sec = ok(m.FrameObj.GetSection(n, '', ''), 'FrameObj.GetSection')[0]
+            area = ok(m.PropFrame.GetSectProps(sec, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), 'PropFrame.GetSectProps')[0]
+            kind, f = material(ok(m.PropFrame.GetMaterial(sec, ''), 'PropFrame.GetMaterial')[0])
+            pi = ok(m.FrameObj.GetPoints(n, '', ''), 'FrameObj.GetPoints')[0]
+            x, y = ok(m.PointObj.GetCoordCartesian(pi, 0, 0, 0), 'PointObj.GetCoordCartesian')[:2]
+            r = ok(m.Results.FrameForce(n, 0, 0, [], [], [], [], [], [], [], [], [], [], [], [], []), 'Results.FrameForce')
+            P = list(r[8] or [])
+        except Exception:
+            continue
+        if not P:
+            continue
+        st = stacks.setdefault(('column', label), {'name': label, 'kind': 'column', 'x': x, 'y': y, 'levels': []})
+        st['levels'].append({'story': story, 'A': area, 'mat': kind, 'f': f, 'N': max(0.0, -min(P))})
+    try:   # wall piers: section by storey and pier forces (bottom)
+        pf = ok(m.Results.PierForce(0, [], [], [], [], [], [], [], [], [], []), 'Results.PierForce')
+        n_, sto, pier, _case, loc, P = pf[:6]
+        Nb = {}
+        for i in range(n_ or 0):
+            if 'bot' in str(loc[i]).lower():
+                k = (pier[i], sto[i])
+                Nb[k] = max(Nb.get(k, 0.0), -P[i])
+        for pn in ok(m.PierLabel.GetNameList(0, []), 'PierLabel.GetNameList')[1] or []:
+            sp = ok(m.PierLabel.GetSectionProperties(pn, 0, [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], []), 'PierLabel.GetSectionProperties')
+            ns, names, _ang, _na, _nl, wb, tb, _wt, _tt, matp, cx, cy = sp[:12]
+            for i in range(ns or 0):
+                kind, f = material(matp[i])
+                st = stacks.setdefault(('wall', pn), {'name': pn, 'kind': 'wall', 'x': cx[i], 'y': cy[i], 'levels': []})
+                st['levels'].append({'story': names[i], 'A': wb[i] * tb[i], 'mat': kind, 'f': f, 'N': max(0.0, Nb.get((pn, names[i]), 0.0))})
+    except Exception as e:
+        print('piers not read:', e)
+    return {'combo': combo, 'stacks': list(stacks.values())}
+
+
+def mock_axial(combo, demo):
+    """demo stacks: the 20 columns (tributary areas of the 6 m grid, 9.2 kN/m2 quasi-permanent) and the 4 core walls
+    (42 m2 of core slab + own weight) - same as the Building checks demo"""
+    out = []
+    pts = [(x, y) for y in (0, 6, 12, 18) for x in (0, 6, 12, 18, 24)]
+    trib = lambda x, y: (3 if x in (0, 24) else 6) * (3 if y in (0, 18) else 6)
+    for k, (x, y) in enumerate(pts):
+        lv = []
+        for i in range(10):
+            a, f = (0.36, 40) if i < 3 else (0.25, 35) if i < 7 else (0.16, 30)
+            lv.append({'story': 'Story%d' % (i + 1), 'A': a, 'mat': 'Concrete', 'f': f, 'N': round(trib(x, y) * 9.2 * (10 - i), 1)})
+        out.append({'name': 'C%d' % (k + 1), 'kind': 'column', 'x': x, 'y': y, 'levels': lv})
+    for k, (x, y, L) in enumerate([(15.5, 6, 7), (15.5, 12, 7), (12, 9, 6), (18, 9, 6)]):
+        lv = []
+        for i in range(10):
+            t, f = (0.25, 40) if i < 5 else (0.2, 30)
+            lv.append({'story': 'Story%d' % (i + 1), 'A': L * t, 'mat': 'Concrete', 'f': f, 'N': round((42 / 4 * 9.2 + L * t * 3.2 * 25) * (10 - i), 1)})
+        out.append({'name': 'W%d' % (k + 1), 'kind': 'wall', 'x': x, 'y': y, 'levels': lv})
+    return {'combo': combo, 'stacks': out}
+
+
 def mock_supports(combos, base_fn):
     """demo supports: 20 columns on the 6 m grid of the 24 x 18 m demo building; FZ = tributary gravity + overturning
     shared by the columns (frame action): ΔFZ = M·(x - x_c) / Σ(x - x_c)² (same as the Building checks demo)"""
@@ -1055,6 +1149,11 @@ class Mock:
             {'kind': 'frame', 'name': 'HEB300', 'mat': 'Steel', 'use': {'braces': 8}, 'mods': F(), 'over': []},
             {'kind': 'area', 'name': 'W250 C40', 'mat': 'Concrete', 'use': {'walls': 40}, 'mods': A(f22=0.7, f12=0.7, m11=0.7, m22=0.7), 'over': []},
             {'kind': 'area', 'name': 'S200 C30', 'mat': 'Concrete', 'use': {'slabs': 60}, 'mods': A(m11=0.25, m22=0.25, m12=0.25, Mass=0.9), 'over': []}]}
+
+    def axial(self, combo):
+        if not combo:
+            raise BridgeError('Select the quasi-permanent load combination')
+        return mock_axial(combo, True)
 
     def supports(self, combos):
         if not combos:
@@ -1289,6 +1388,8 @@ def make_handler(src, origins):
                     return self.send(200, src.modifiers())
                 if u.path == '/loads':
                     return self.send(200, src.loads())
+                if u.path == '/axial':
+                    return self.send(200, src.axial(q.get('c', [''])[0]))
                 if u.path == '/supports':
                     return self.send(200, src.supports(q.get('c', [])))
                 if u.path == '/strength':

@@ -173,11 +173,9 @@
   function mount(root) {
     const rer = () => api.render();
     root.onclick = ev => {
-      const t = ev.target.closest('[data-bc],[data-bcrole],[data-print],[data-open],[data-go]'); if (!t) return;
+      // print / open / go are handled by the app's document-level handler
+      const t = ev.target.closest('[data-bc],[data-bcrole]'); if (!t) return;
       const d = t.dataset, b = B();
-      if (d.print !== undefined) return window.print();
-      if (d.open) { location.hash = '#/el/' + d.open; return; }
-      if (d.go !== undefined) { location.hash = '#/' + d.go; return; }
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
       if (d.bcrole !== undefined) { b.roles[d.bcrole] = ROLE_ORDER[(ROLE_ORDER.indexOf(b.roles[d.bcrole] || 'off') + 1) % ROLE_ORDER.length]; api.save(); return rer(); }
       if (d.bc === 'read') {

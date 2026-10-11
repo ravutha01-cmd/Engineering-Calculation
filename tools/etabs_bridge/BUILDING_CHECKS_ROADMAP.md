@@ -12,6 +12,9 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] Base shear, storey shear and overturning moment profiles; overturning stability (EQU)
 - [x] Global buckling αcr from the ETABS buckling case and sway amplification - EN 1993-1-1 5.2.1 / 5.2.2, EN 1992-1-1 5.8.2
 
+## Fixes
+- [x] 2026-10-11 · Building checks: Print opened the print dialog twice (the page and the app both handled the click)
+
 ## Next
 - [ ] Apply the P-Δ / αcr amplification to the ETABS-linked members of each storey (design, not only check)
 - [ ] Modal check: periods, mass participation ≥ 90 % / all modes > 5 % - EN 1998-1 4.3.3.3.1

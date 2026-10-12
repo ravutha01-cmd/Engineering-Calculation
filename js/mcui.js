@@ -598,7 +598,8 @@
     });
     const strs = r.keys.filter(k => k.v && k.v.s !== undefined && !/^(OK|NOT OK)/i.test(k.v.s) && k.v.s.length > 3 && /[0-9]/.test(k.v.s));
     const specList = strs.length ? `<h3 class="ksub">Reinforcement / detailing callouts</h3><ul class="callouts">${strs.map(k => `<li><math>${R.ident(k.n)}</math> <span>${esc(k.v.s)}</span></li>`).join('')}</ul>` : '';
-    return (cards.length ? `<div class="dgrid">${cards.join('')}</div>` : '<div class="empty">This worksheet has no drawings.</div>') + specList;
+    const td = EC.typdet ? EC.typdet.html(e, api.MOD, doc, cards.length) : '';
+    return (cards.length ? `<h3 class="ksub td-h">Calculation drawings <small>${cards.length} from the design steps</small></h3><div class="dgrid">${cards.join('')}</div>` : (td ? '' : '<div class="empty">This worksheet has no drawings.</div>')) + td + specList;
   }
   function recordsHTML(e) {
     const recs = (e.records || []).slice().reverse();

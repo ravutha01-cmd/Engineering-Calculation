@@ -11,3 +11,8 @@
   (section outline, links, bars, guide/limit lines, series 1-4 from the validated palette, light + dark),
   drawings are true scale with dimension lines, charts have a legend, hover values and a data table.
   Any new visual work follows this new style.
+- Every calculation follows docs/CALCULATION_GUIDELINES.md: step-by-step report in the app's own style
+  (numbered steps from the worksheet's design workflow, unimportant Mathcad regions hidden), tables for
+  inputs / constants / summaries, pictures in the plot style, and 5-10 typical details per element
+  (js/typdet/<category>.js). Default parameters (partial factors, NDPs, constants, limits) are folded
+  in the input panel.

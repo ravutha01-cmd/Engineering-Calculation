@@ -38,6 +38,7 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] Steel frame design summary: bridge `/steel` (DesignSteel.GetSummaryResults with storey, orientation, section), largest ratio per storey and type, members over 1.0 and design errors, cross-check with the linked app elements - EN 1993-1-1 6.2, 6.3.3
 - [x] Punching shear at the slab-column connections: V_Ed = column axial force difference per floor (ULS gravity combination, `/axial`), β by position, u_0 / u_1, v_Rd,c and v_Rd,max - EN 1992-1-1 6.4.3(6), 6.4.4(1), 6.4.5(3)
 - [x] Columns DCM / DCH: capacity-design shear γ_Rd·2·M_Rc·min(1, ΣM_Rb/ΣM_Rc)/l_cl with M_Rc from the ETABS required steel (bridge `/columns`) and N_Ed of the seismic combination, ν_d limit - EN 1998-1 5.4.2.3, 5.5.2.2, 5.4.3.2.1(3), 5.5.3.2.1(3)
+- [x] Beams DCM / DCH: capacity-design shear V_g+ψ2q + γ_Rd·ΣM_Rb/l_cl from the ETABS end steel and gravity shear (bridge `/beams`), compared with the ETABS links - EN 1998-1 5.4.2.2, 5.5.2.1
 ## Fixes
 - [x] 2026-10-11 · Notional loads asked the user to set them by hand when the notional table was not found (it was searched only among the tables that already had data). Now fully automatic: all tables searched (also empty ones, fields read with GetAllFieldsInTable); without such a table, a gravity analysis gives N per floor and H_i = θi·N is applied as storey joint loads (EN 1992-1-1 5.2(8))
 - [x] 2026-10-11 · Building checks guessed EN 1990 EQU combinations (CS-EQU) as seismic - now ULS
@@ -47,6 +48,6 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] 2026-10-12 · Building checks follow docs/CALCULATION_GUIDELINES.md 5: default parameters (ν, α drift limit, wind drift limit, overturning safety; φ, ε_cs, tilt limit; γ_d) fold into a “Default parameters” block with the count of changed values, as in the worksheet input panel
 
 ## Next
-- [ ] Beam capacity-design shear for DCM / DCH from the ETABS beam reinforcement: V_Ed = V_g+ψ2q ± γ_Rd·(M_Rb,1 + M_Rb,2)/l_cl (EN 1998-1 5.4.2.2(1)-(2), 5.5.2.1) per beam, compared with the ETABS shear design
 - [ ] Slab deflection check from ETABS: long-term deflection of the floor slabs from the ETABS cracked / creep analysis or joint displacements of the quasi-permanent combination vs span/250 and span/500 (EN 1992-1-1 7.4.1(4)-(5))
 - [ ] Construction-stage / staged analysis read-out: ETABS staged construction case results (column axial forces and storey displacements per stage) to refine the axial shortening and transfer-girder checks - EN 1992-1-1 3.1.4, EN 1990 (execution stages)
+- [ ] Coupling beams of coupled walls from ETABS spandrels: diagonal reinforcement when V_Ed > 4·b_w·d·f_ctd (EN 1998-1 5.5.3.5(2)-(4)), A_si = V_Ed/(2·f_yd·sin α) from the ETABS spandrel forces (Results.SpandrelForce)

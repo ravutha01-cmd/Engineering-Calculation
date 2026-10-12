@@ -28,6 +28,8 @@ Endpoints (JSON):
     GET /modifiers                 stiffness / mass modifiers of the frame and area properties (and per-object overrides),
                                    with the material and what each property is used for (columns, beams, walls, slabs)
     GET /piers?c=<combo>&c=...    wall piers: l_w, thickness, f_ck per storey and the envelope of M3, V2, N at the bottom of each storey
+    GET /beams?c=<QP combo>        concrete beams of the ETABS concrete design: section, length, required end steel, links and the
+                                   gravity shear at the ends of the combination (beam capacity-design shear)
     GET /columns                   concrete columns of the ETABS concrete design: required longitudinal steel and shear steel
     GET /steel                     steel members of the ETABS steel frame design: governing ratio, type, location, combination
     GET /joints                    beam-column joints of the ETABS concrete frame design: beam/column capacity ratio and
@@ -61,7 +63,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.19'
+VERSION = '1.20'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -262,6 +264,18 @@ class Etabs:
 
     def steel(self):
         return steel_from_model(self.attach())
+
+    def beams(self, combo):
+        m = self.attach()
+        if not combo:
+            raise BridgeError('Select the quasi-permanent load combination (G + psi2 Q)')
+        cset = set(self.model_info()['combos'])
+        old = m.GetPresentUnits()
+        m.SetPresentUnits(KN_M_C)
+        try:
+            return beams_from_model(m, combo, combo in cset)
+        finally:
+            m.SetPresentUnits(old)
 
     def columns(self):
         m = self.attach()
@@ -1086,6 +1100,70 @@ def columns_from_model(m):
     return {'columns': list(out.values())}
 
 
+def beams_from_model(m, combo, is_combo):
+    """concrete beams of the ETABS concrete frame design (run it first): section b x h, length, f_ck, required top / bottom
+    steel at both ends (m2), shear steel (m2/m), and the gravity shear V2 at both ends of `combo` (G + psi2 Q)"""
+    try:
+        r = ok(m.DesignConcrete.GetSummaryResultsBeam('All', 0, [], [], [], [], [], [], [], [], [], [], [], [], [], [], 1), 'DesignConcrete.GetSummaryResultsBeam')
+    except BridgeError as e:
+        raise BridgeError('No concrete beam design results - run Design > Concrete Frame Design > Start Design/Check in ETABS (' + str(e) + ')')
+    n, frame, loc, _tc, top, _bc, bot, _vc, av = r[:9]
+    st = {}
+    for i in range(n or 0):
+        st.setdefault(frame[i], []).append((loc[i], top[i], bot[i], av[i]))
+    setup = m.Results.Setup
+    setup.DeselectAllCasesAndCombosForOutput()
+    ok(setup.SetComboSelectedForOutput(combo, True) if is_combo else setup.SetCaseSelectedForOutput(combo, True), 'select ' + combo)
+    secs, out = {}, []
+    for fr, rows in st.items():
+        try:
+            label, story = ok(m.FrameObj.GetLabelFromName(fr, '', ''), 'FrameObj.GetLabelFromName')[:2]
+            sec = ok(m.FrameObj.GetSection(fr, '', ''), 'FrameObj.GetSection')[0]
+            if sec not in secs:
+                rr = ok(m.PropFrame.GetRectangle(sec, '', '', 0, 0, 0, '', ''), 'PropFrame.GetRectangle')
+                fck = ok(m.PropMaterial.GetOConcrete_1(rr[1], 0, False, 0, 0, 0, 0, 0, 0, 0, 0), 'GetOConcrete_1')[0] / 1000
+                secs[sec] = (rr[2], rr[3], fck)
+            h, b, fck = secs[sec]
+            p1, p2 = ok(m.FrameObj.GetPoints(fr, '', ''), 'FrameObj.GetPoints')[:2]
+            c1, c2 = [ok(m.PointObj.GetCoordCartesian(p, 0, 0, 0), 'PointObj.GetCoordCartesian')[:3] for p in (p1, p2)]
+            L = math.dist(c1, c2)
+            f = ok(m.Results.FrameForce(fr, 0, 0, [], [], [], [], [], [], [], [], [], [], [], [], []), 'Results.FrameForce')
+            sta, V2 = list(f[2] or []), list(f[9] or [])
+        except Exception:
+            continue
+        rows.sort()
+        i_end, j_end = rows[0], rows[-1]
+        vi = max([abs(v) for s_, v in zip(sta, V2) if s_ <= min(sta) + 1e-6] or [0])
+        vj = max([abs(v) for s_, v in zip(sta, V2) if s_ >= max(sta) - 1e-6] or [0])
+        out.append({'name': fr, 'label': label, 'story': story, 'sec': sec, 'b': b, 'h': h, 'fck': fck, 'L': L,
+                    'topI': i_end[1], 'botI': i_end[2], 'topJ': j_end[1], 'botJ': j_end[2], 'Av': max(x[3] for x in rows), 'VgI': vi, 'VgJ': vj})
+    if not out:
+        raise BridgeError('No concrete beam design results - run Design > Concrete Frame Design > Start Design/Check in ETABS')
+    return {'combo': combo, 'beams': out}
+
+
+def mock_beams(combo):
+    """demo beams B300x600 C30, 6 m spans on the grid (X lines y = 0, 6, 12, 18; Y lines x = 0 ... 24), every storey;
+    top steel 1200 / 900 mm2 (interior / edge ends), bottom 800 mm2, links 800 / 500 mm2/m (interior / edge beams); V_g = 9.2 kN/m2 x 3 m x 6 m / 2"""
+    out, k = [], 0
+    for i in range(10):
+        for y in (0, 6, 12, 18):
+            for x in (0, 6, 12, 18):
+                edge = y in (0, 18)
+                out.append({'name': str(2000 + k), 'label': 'B%d' % (k % 31 + 1), 'story': 'Story%d' % (i + 1), 'sec': 'B300x600 C30', 'b': 0.3, 'h': 0.6,
+                            'fck': 30, 'L': 6.0, 'topI': 0.0009 if x == 0 else 0.0012, 'botI': 0.0008, 'topJ': 0.0009 if x == 18 else 0.0012, 'botJ': 0.0008,
+                            'Av': 0.0005 if edge else 0.0008, 'VgI': 41.4 if edge else 82.8, 'VgJ': 41.4 if edge else 82.8})
+                k += 1
+        for x in (0, 6, 12, 18, 24):
+            for y in (0, 6, 12):
+                edge = x in (0, 24)
+                out.append({'name': str(2000 + k), 'label': 'B%d' % (k % 31 + 1), 'story': 'Story%d' % (i + 1), 'sec': 'B300x600 C30', 'b': 0.3, 'h': 0.6,
+                            'fck': 30, 'L': 6.0, 'topI': 0.0009 if y == 0 else 0.0012, 'botI': 0.0008, 'topJ': 0.0009 if y == 12 else 0.0012, 'botJ': 0.0008,
+                            'Av': 0.0005 if edge else 0.0008, 'VgI': 41.4 if edge else 82.8, 'VgJ': 41.4 if edge else 82.8})
+                k += 1
+    return {'combo': combo, 'beams': out}
+
+
 def mock_columns():
     """demo column design: 1 % of the section as required longitudinal steel (C600 storeys 1-3, C500 4-7, C400 8-10)"""
     out = []
@@ -1380,6 +1458,11 @@ class Mock:
     def columns(self):
         return mock_columns()
 
+    def beams(self, combo):
+        if not combo:
+            raise BridgeError('Select the quasi-permanent load combination (G + psi2 Q)')
+        return mock_beams(combo)
+
     def piers(self, combos):
         if not combos:
             raise BridgeError('Select at least one load combination')
@@ -1625,6 +1708,8 @@ def make_handler(src, origins):
                     return self.send(200, src.loads())
                 if u.path == '/piers':
                     return self.send(200, src.piers(q.get('c', [])))
+                if u.path == '/beams':
+                    return self.send(200, src.beams(q.get('c', [''])[0]))
                 if u.path == '/columns':
                     return self.send(200, src.columns())
                 if u.path == '/steel':

@@ -192,7 +192,7 @@
       ${tool('hand', CATS)}
       ${a('library', 'book', 'Mathcad library', `<span class="count">${EC.library.length}</span>`, r0 === 'library')}
       <h4 class="tool">Design analysis<small>draw → analyse → Mathcad design</small></h4>
-      ${EC.analysis.tools.map(t => a('analysis', t.icon, t.name, `<span class="count">${p.elements.filter(e => e.fda && e.fda.tool === t.k).length}</span>`, r0 === 'analysis')).join('')}
+      ${a('analysis', 'pilecap', `Analysis tools <small class="nav-sub">${EC.analysis.tools.length} tools</small>`, `<span class="count">${EC.analysis.count(p)}</span>`, r0 === 'analysis')}
       <h4 class="tool">Design with ETABS link<small>analysis results → design</small></h4>
       ${a('etabs', 'upload', 'Link to ETABS', '', r0 === 'etabs')}
       ${a('loads', 'wind', 'Loads & combinations', '', r0 === 'loads')}

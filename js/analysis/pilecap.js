@@ -394,7 +394,7 @@
     const svg = $('#atSvg');
     paintCanvas(e);
     if (!S.runs || S.baseH !== JSON.stringify(geomFree(e))) schedule(e, 0); else paintResults(e);
-    if (window.ResizeObserver) { const ro = new ResizeObserver(() => { const c = cur(); if (c && $('#atSvg')) paintCanvas(c); else ro.disconnect(); }); ro.observe($('#atCanvas')); }
+    if (window.ResizeObserver) { if (S.ro) S.ro.disconnect(); const ro = S.ro = new ResizeObserver(() => { const c = cur(); if (c && $('#atSvg')) paintCanvas(c); else ro.disconnect(); }); ro.observe($('#atCanvas')); }
     // pointer: draw / select / drag / pan
     svg.addEventListener('pointerdown', ev => {
       const e = cur(); if (!e || ev.button > 1) return;
@@ -450,7 +450,7 @@
     }, { passive: false });
     svg.addEventListener('dblclick', ev => { const e = cur(); if (e && !ev.target.closest('[data-o]')) { fit(e); paintCanvas(e); } });
 
-    root.addEventListener('click', ev => {
+    root.onclick = ev => {
       const e = cur(); if (!e) return;
       const b = ev.target.closest('[data-attool],[data-atdel],[data-attpl],[data-atgrid],[data-atundo],[data-atredo],[data-atzoom],[data-atfit],[data-atci],[data-atcadd],[data-atcdel],[data-atpile]');
       if (!b) return;
@@ -472,8 +472,8 @@
       if (d.atcadd !== undefined) { snap(e); S.ci = PM.addCombo(e.fda, null, S.ci); commit(e, true); return; }
       if (d.atcdel !== undefined) { snap(e); PM.delCombo(e.fda, S.ci); S.ci = Math.max(0, S.ci - 1); commit(e, true); return; }
       if (d.atpile) { S.sel = { t: 'p', id: d.atpile }; S.tool = 'select'; paintProps(e); paintCanvas(e); $('#atCanvas').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
-    });
-    root.addEventListener('input', ev => {
+    };
+    root.oninput = ev => {
       const e = cur(), t = ev.target; if (!e) return;
       if (t.dataset.atf) {
         const v = parseFloat(t.value); if (!Number.isFinite(v)) return;
@@ -481,15 +481,15 @@
         setField(e, t.dataset.atf, v); e.u = Date.now(); api.save(); paintCanvas(e); schedule(e); return;
       }
       if (t.dataset.atcname !== undefined) { e.fda.combos[S.ci].name = t.value || 'Combination ' + (S.ci + 1); api.save(); paintCombos(e); }
-    });
-    root.addEventListener('change', ev => {
+    };
+    root.onchange = ev => {
       const e = cur(), t = ev.target; if (!e) return;
       if (t.dataset.atf) { S.typing = false; paintProps(e); paintCombos(e); return; }
       if (t.dataset.atsnap !== undefined) { e.fda.snap = +t.value; api.save(); return; }
       if (t.dataset.atseg !== undefined) { snap(e); e.fda.seg = +t.value; commit(e, true); return; }
       if (t.dataset.atlabels !== undefined) { S.labels = t.checked; paintCanvas(e); return; }
       if (t.dataset.atview !== undefined) { e.fda.view = t.dataset.atview === 'gov' ? 'gov' : +t.dataset.atview; applyView(e); const h = document.querySelector('.at-rep small'); if (h) h.textContent = `· worksheet ${SHEET}.mcdx, combination shown: ${e.fda.combos[shownCombo(e)].name}`; paintCanvas(e); }
-    });
+    };
   }
   document.addEventListener('keydown', ev => {
     const e = cur(); if (!e || document.querySelector('.modal-bg')) return;

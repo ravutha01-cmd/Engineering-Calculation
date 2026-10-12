@@ -40,4 +40,29 @@ for (const t of PM.TEMPLATES) {
   if (!ok) fail++;
   console.log((ok ? 'ok   ' : 'FAIL ') + t.n.padEnd(30) + ` piles ${mm.piles.length}  nodes ${PM.nodes(mm, 0).length}  errors ${r.errors}  ΣR ${sumR.toFixed(0)} kN  ΣN ${res.N.toFixed(0)} kN  Umax ${r.summary.Umax == null ? '-' : r.summary.Umax.toFixed(3)}  ${r.summary.result}`);
 }
+
+/* 3. kit tools (js/analysis/tools_*.js): plan, handles and one run per combination through the worksheet */
+require(path.join(root, 'js/analysis/kit.js'));
+for (const f of fs.readdirSync(path.join(root, 'js/analysis')).filter(f => /^tools_.*\.js$/.test(f))) require(path.join(root, 'js/analysis', f));
+const K = EC.analysisKit;
+for (const spec of EC.analysisSpecs || []) {
+  eval(fs.readFileSync(path.join(root, 'sheets', spec.sheet + '.js'), 'utf8'));
+  const doc = D, errs = [];
+  const missing = spec.loads.filter(n => !(doc.inputs || []).some(i => i.n === n));
+  if (missing.length) errs.push('load inputs not in the worksheet: ' + missing.join(', '));
+  const m = K.newModel(spec, doc, {});
+  m.combos.push({ name: 'ULS 2', L: Object.fromEntries(Object.entries(m.combos[0].L).map(([k, v]) => [k, v * 1.1])) });
+  const v = K.values(doc, {}), P = spec.plan(v);
+  if (!P.shapes.length || P.shapes.some(s => (s.t === 'line' ? s.pts.flat() : [s.x, s.y, s.w != null ? s.w : s.d]).some(x => !Number.isFinite(x)))) errs.push('plan has no or non-finite shapes');
+  if (spec.check && spec.check(v)) errs.push('default inputs fail check(): ' + spec.check(v));
+  const edits = {};
+  (P.handles || []).forEach((h, i) => { const ch = h.set(100, 100) || {}; Object.keys(ch).forEach(n => { if (!v.has(n)) errs.push(`handle ${i} sets unknown input ${n}`); else if (!Number.isFinite(ch[n])) errs.push(`handle ${i} gives ${n} = ${ch[n]}`); else edits[n] = v.ast(n, v.unit(n) in { mm: 1, cm: 1, m: 1 } ? v.fromMM(n, ch[n]) : ch[n]); }); });
+  const runs = m.combos.map((c, ci) => EC.mcadc.compute(doc, K.comboInputs(spec, doc, m, ci)));
+  runs.forEach((r, ci) => { if (r.errors) errs.push(`combination ${ci + 1}: ${r.errors} worksheet errors`); });
+  const r2 = EC.mcadc.compute(doc, Object.assign({}, edits, K.comboInputs(spec, doc, m, 0)));
+  if (r2.errors) errs.push('after dragging every handle: ' + r2.errors + ' worksheet errors');
+  if (runs[1] && runs[0].summary.Umax != null && !(runs[1].summary.Umax >= runs[0].summary.Umax - 1e-9)) errs.push('loads × 1.1 lowered U_max - loads not reaching the worksheet?');
+  if (errs.length) fail++;
+  console.log((errs.length ? 'FAIL ' : 'ok   ') + ('kit ' + spec.k).padEnd(30) + ` ${spec.sheet}  U ${runs.map(r => r.summary.Umax == null ? '-' : r.summary.Umax.toFixed(3)).join(' / ')}` + (errs.length ? '\n     ' + errs.join('\n     ') : ''));
+}
 process.exit(fail ? 1 : 0);

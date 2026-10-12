@@ -4,9 +4,10 @@
 - When a Mathcad worksheet is modified, its web calculation must be updated; when a new `.mcdx`
   file is added, add it as a new element. Follow `tools/UPDATE_FROM_MATHCAD.md`.
 - Formulas are never retyped: `sheets/*.js` are generated from the `.mcdx` files by `tools/mcdx2json.py`.
-- Tests: `node tools/test_sheets.js` and `node tools/test_analysis.js`.
+- Tests: `node tools/test_sheets.js`, `node tools/test_analysis.js` and `node tools/test_analysis_ui.js` (browser).
 - Design analysis tools (`js/analysis/`, sidebar "Design analysis") draw a structure and feed the worksheet's own
-  input tables; the worksheet does the design. Follow `docs/DESIGN_ANALYSIS_TOOLS.md` to add one.
+  input tables; the worksheet does the design. Follow `docs/DESIGN_ANALYSIS_TOOLS.md` to add one (kit spec in
+  `js/analysis/tools_<group>.js`); the build order is `docs/DESIGN_ANALYSIS_ROADMAP.md`.
 - Plots and detailing drawings use the app's OWN style (js/mcad/render.js `plot`, "Plots" block in
   css/styles.css): only the calculated data and the formula / calculation workflow come from the
   worksheet. Never copy Mathcad's plot styling (colours, pens, dashes, symbols). Traces get a role

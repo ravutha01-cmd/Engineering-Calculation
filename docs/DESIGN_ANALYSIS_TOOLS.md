@@ -36,6 +36,40 @@ other element. The worksheet element page (`#/el/<id>`) shows a banner that link
   moment are shared by length. The in-plane moment becomes a linear share of N: ΔN_i = M·L_i·e_i / ΣL_j·e_j²,
   so ΣΔN_i·e_i = M. `tools/test_analysis.js` checks that the statics are kept.
 
+## Kit tools (most worksheets)
+
+Worksheets whose geometry is a set of single values (footing B × L, column size and position, section
+b × h, bar numbers) use the kit `js/analysis/kit.js`. A tool is then a short **spec** in
+`js/analysis/tools_<group>.js`:
+
+```js
+specs.push({
+  k: 'padfooting', name: 'Foundation · pad footing', short: 'pad footing', icon: 'footing',
+  sheet: 'PadFooting_EC2-2023_Standalone', sub: '…', desc: '…',
+  loads: ['N_Ed', 'M_Ed;x', 'M_Ed;y', 'N_qp', 'M_qp;x', 'M_qp;y'],   // typed per load combination
+  plan(v) { /* v.mm('B_x'), v.num('N_Ed') */ return { shapes, dims, handles }; },
+  check: v => '',                                                   // optional blocking problem
+  brief: v => '3.00 × 3.00 m'                                      // one line for the list
+});
+```
+
+The kit provides:
+- the editor page and the worksheet input panel (load inputs hidden);
+- the true-scale drawing with dimension lines and drag handles bound to inputs;
+- one row per load combination, with one worksheet run per row and the governing row picked;
+- the verdict and the worksheet's full report;
+- records, print, duplicate and delete.
+
+Shapes are `outline`, `col`, `wall`, `pile`, `zone`, `link`, `bar` and `line`, so plans, sections and elevations all work.
+A handle's `set(dx, dy)` returns new input values: lengths in mm (converted to the input's unit), other values in the input's unit.
+
+Tests:
+- `node tools/test_analysis.js` runs every spec. It checks that the load inputs exist, that the plan is
+  finite, that every handle sets a real input, and that two combinations and the dragged geometry run without worksheet errors.
+- `node tools/test_analysis_ui.js [key]` drives each tool in headless Chromium.
+
+The order of the next tools is in `docs/DESIGN_ANALYSIS_ROADMAP.md`.
+
 ## Adding a tool for another worksheet
 
 1. Write `js/analysis/<tool>_model.js` with pure functions: `inputs(model, combo)` → worksheet overrides,

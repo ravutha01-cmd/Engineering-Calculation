@@ -86,6 +86,16 @@
     return { combo: 'SLS-QP G+0.3Q', stacks: out };
   }
 
+  /* demo joints (same as the --mock bridge /joints): beam/column capacity ratios of the ETABS concrete design */
+  function demoJoints() {
+    const out = [], pts = [], r3 = v => Math.round(v * 1000) / 1000; [0, 6, 12, 18].forEach(y => [0, 6, 12, 18, 24].forEach(x => pts.push([x, y])));
+    for (let i = 0; i < 10; i++) pts.forEach(([x, y], k) => {
+      const edge = x === 0 || x === 24 || y === 0 || y === 18, base = 0.62 + 0.03 * i + (edge ? 0.08 : 0) + (i === 2 || i === 6 ? 0.22 : 0);
+      out.push({ name: String(500 + 20 * i + k), label: 'C' + (k + 1), story: 'Story' + (i + 1), bc: r3(Math.min(base, 1.4)), bcm: r3(Math.min(base * 0.9, 1.4)), bcCase: 'G+0.3Q+EX', bcmCase: 'G+0.3Q+EY', js: r3(0.35 + 0.02 * i), jsm: r3(0.3 + 0.02 * i), jsCase: 'G+0.3Q+EX', err: '', warn: '' });
+    });
+    return out;
+  }
+
   /* ---------- checks ---------- */
   const maxBy = (xs, f) => xs.reduce((a, x) => (a === null || f(x) > f(a) ? x : a), null);
   function compute(b) {
@@ -378,6 +388,19 @@
         out.pound.push(r);
       });
     });
+    // 18. strong column / weak beam - EN 1998-1 4.4.2.3(4): ΣM_Rc ≥ 1.3·ΣM_Rb at every beam-column joint (eq. 4.29),
+    //     from the beam/column capacity ratio of the ETABS concrete frame design (1.3·ΣM_Rb/ΣM_Rc ≤ 1); top storey of a
+    //     multi-storey building exempt (4.4.2.3); joint shear ratio of the design shown (EN 1998-1 5.5.3.3, DCH)
+    out.scwb = null;
+    if ((d.joints || []).length) {
+      const top = st.length ? st[st.length - 1].name : null, zOf = {}; st.forEach(x => { zOf[x.name] = x.elev; });
+      const rows = d.joints.filter(j => zOf[j.story] !== undefined).map(j => {
+        const ex = j.story === top, U = Math.max(+j.bc || 0, +j.bcm || 0);
+        return Object.assign({}, j, { z: zOf[j.story], exempt: ex, U: ex ? 0 : U, Uraw: U, jsU: Math.max(+j.js || 0, +j.jsm || 0) });
+      });
+      const prof = st.map(x => { const rs = rows.filter(r => r.story === x.name); return rs.length ? { story: x.name, z: x.elev, maj: Math.max(...rs.map(r => +r.bc || 0)), min: Math.max(...rs.map(r => +r.bcm || 0)), exempt: x.name === top } : null; }).filter(Boolean);
+      out.scwb = { rows, prof, top };
+    }
     return out;
   }
 
@@ -691,6 +714,7 @@
       ${sumCard('base', 'Overturning', R.base.some(x => Number.isFinite(x.fos)) ? oU : null, 'required ÷ provided safety')}
       ${sumCard('modal', 'Modal mass participation', R.modal ? R.modal.U : null, R.modal ? `ΣU<sub>X</sub> ${fmt(R.modal.sum.X * 100, 1)} % · ΣU<sub>Y</sub> ${fmt(R.modal.sum.Y * 100, 1)} % · T<sub>1</sub> ${fmt(R.modal.T1, 2)} s` : '')}
       ${R.soft.length ? sumCard('soft', 'Soft storey k<sub>i</sub>/k<sub>i+1</sub>', Umax(R.soft), (() => { const w = R.soft.filter(r => r.r1 != null).reduce((a, r) => (!a || r.r1 < a.r1 ? r : a), null); return w ? `min ${fmt(w.r1, 2)} at ${esc(w.story)} ${w.dir} (0.7)` : ''; })()) : ''}
+      ${R.scwb ? sumCard('scwb', 'Strong column / weak beam 1.3ΣM<sub>Rb</sub>/ΣM<sub>Rc</sub>', Umax(R.scwb.rows), (() => { const w = R.scwb.rows.filter(r => !r.exempt).reduce((a, r) => (!a || r.U > a.U ? r : a), null); return w ? `max at ${esc(w.label)} ${esc(w.story)} · ${R.scwb.rows.filter(r => !r.exempt && r.U > 1 + 1e-9).length} joint(s) &gt; 1` : ''; })()) : ''}
       ${R.pound.length ? (() => { const w = R.pound.filter(r => r.req != null).reduce((a, r) => (!a || r.req > a.req ? r : a), null), any = +s.gapX > 0 || +s.gapY > 0; if (!w) return '';
         const txt = `required ${fmt(w.req * 1000, 0)} mm (${w.dir}, ${esc(w.story)})`;
         return any ? sumCard('pound', 'Seismic joint required / provided', Umax(R.pound), txt) : `<a class="card bc-sum" href="#bc-pound"><div class="label">Seismic joint required</div><div class="value">${fmt(w.req * 1000, 0)} <small>mm</small></div><div class="foot"><span>${w.dir} at ${esc(w.story)} · enter the joint width provided</span></div></a>`; })() : ''}
@@ -754,6 +778,16 @@
         ${tbl([['Storey', r => esc(r.story)], ['Dir.', r => r.dir], ['V<sub>i</sub> kN', r => fmt(r.V, 0), 'num'], ['d<sub>r</sub> mm', r => fmt(r.d * 1000, 2), 'num'], ['k<sub>i</sub> kN/m', r => r.k ? fmt(r.k, 0) : '–', 'num'], ['k<sub>i</sub>/k<sub>i+1</sub>', r => r.r1 != null ? fmt(r.r1, 2) : '–', 'num'], ['k<sub>i</sub>/k̄<sub>3 above</sub>', r => r.r3 != null ? fmt(r.r3, 2) : '–', 'num'], ['Class', r => esc(r.cls)], ['U', r => r.r1 != null ? api.ubar(r.U) : '']], top(R.soft))}</div>
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(r => `${esc(r.story)} ${r.dir}: ${esc(r.cls).toLowerCase()} (k<sub>i</sub>/k<sub>i+1</sub> = ${fmt(r.r1, 2)})`).join(' · ')} → the building is not regular in elevation (EN 1998-1 4.2.3.1): use the modal response spectrum analysis (Table 4.1) and reduce q<sub>0</sub> by 20 % (5.2.2.2(3)); better, stiffen the soft storey.` : 'Stiffness constant or reducing gradually upwards in X and Y: regular in elevation for the stiffness criterion (EN 1998-1 4.2.3.3(3)).'}</div>
         <p class="muted bc-pad">k<sub>i</sub> from the seismic case with the largest base shear in each direction (storey shear and storey drift of the same case). EN 1998-1 gives the criterion without numbers; the ASCE 7 limits are a common quantification.</p>`);
+    }
+    if (!R.scwb && b.data.jointsErr) html += card('scwb', 'Strong column / weak beam: capacity design of the joints', 'EN 1998-1 4.4.2.3(4)', '', `<p class="muted bc-pad">${esc(b.data.jointsErr)}. Then read the building again.</p>`);
+    if (R.scwb) {
+      const J = R.scwb, act = J.rows.filter(r => !r.exempt), bad = act.filter(r => r.U > 1 + 1e-9), crit = act.slice().sort((a, c) => c.U - a.U).slice(0, 12), jsBad = act.filter(r => r.jsU > 1 + 1e-9);
+      const byStory = [...new Set(bad.map(r => r.story))];
+      html += card('scwb', 'Strong column / weak beam: capacity design of the joints', 'EN 1998-1 4.4.2.3(4) eq. 4.29 · 5.2.3.3(2)', `ΣM<sub>Rc</sub> ≥ 1.3·ΣM<sub>Rb</sub> at every beam-column joint → ratio 1.3·ΣM<sub>Rb</sub>/ΣM<sub>Rc</sub> ≤ 1 from the ETABS concrete frame design · ${act.length} joints · top storey (${esc(J.top)}) exempt`,
+        `<div class="bc-split">${profile([{ n: 'major axis', c: '--s1', pts: J.prof.filter(p => !p.exempt).map(p => ({ story: p.story, z: p.z, v: p.maj })) }, { n: 'minor axis', c: '--s2', pts: J.prof.filter(p => !p.exempt).map(p => ({ story: p.story, z: p.z, v: p.min })) }], { title: 'Largest beam/column capacity ratio per storey', xlabel: '1.3·ΣM_Rb / ΣM_Rc', limit: 1, fmt: v => fmt(v, 2) })}
+        ${tbl([['Column', r => esc(r.label)], ['Storey', r => esc(r.story)], ['Major', r => `${fmt(+r.bc, 2)} <small class="muted">${esc(r.bcCase || '')}</small>`, 'num'], ['Minor', r => `${fmt(+r.bcm, 2)} <small class="muted">${esc(r.bcmCase || '')}</small>`, 'num'], ['Joint shear', r => fmt(r.jsU, 2), 'num'], ['U', r => api.ubar(r.U)]], crit)}</div>
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.length} joint(s) with 1.3·ΣM<sub>Rb</sub> &gt; ΣM<sub>Rc</sub> (${byStory.slice(0, 6).map(esc).join(', ')}${byStory.length > 6 ? ', …' : ''}): a storey mechanism (soft storey) can form - increase the column section or longitudinal reinforcement (ΣM<sub>Rc</sub>), or reduce the beam top / bottom reinforcement beyond what is required (ΣM<sub>Rb</sub>), and design the ETABS frame again.` : 'ΣM<sub>Rc</sub> ≥ 1.3·ΣM<sub>Rb</sub> at every joint below the top storey: beam-sway mechanism (EN 1998-1 4.4.2.3(4)).'}${jsBad.length ? ` Joint shear ratio &gt; 1 at ${jsBad.length} joint(s) - enlarge the joint (column) or the concrete grade (5.5.3.3).` : ''}</div>
+        <p class="muted bc-pad">Ratios as reported by ETABS (Design → Concrete Frame Design, Eurocode 2 with Eurocode 8): M<sub>Rc</sub> of the columns with the axial force of the seismic combination, M<sub>Rb</sub> of the beams with the reinforcement provided by the design. The rule is for frame and frame-equivalent dual buildings in DCM / DCH (4.4.2.3(4)); wall and wall-equivalent dual systems are not covered by it. The top storey of a multi-storey building is exempt (EN 1998-1 4.4.2.3). The 12 largest ratios are listed.</p>`);
     }
     if (R.pound.length) {
       const P = R.pound.filter(r => r.req != null), bad = P.filter(r => r.U > 1 + 1e-9), mm0 = v => fmt(v * 1000, 0);
@@ -881,7 +915,7 @@
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
       if (d.bc === 'demo') {
-        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
+        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.joints = demoJoints(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
         b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
         Object.assign(b.roles, DEMO_ROLES); Object.assign(b.set, { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, Bx: 24, By: 18, fos: 1.0 });
         let n = 0;   // demo ETABS-linked members (beams, columns, footings) for the P-Δ member design
@@ -918,6 +952,7 @@
             .then(() => { const ms = EC.etabs.live.L.model ? EC.etabs.live.L.model.combos : [], qp = b.set.qpCombo && ms.includes(b.set.qpCombo) ? b.set.qpCombo : ms.find(c => /qp|quasi|perm/i.test(c));
               if (!qp) { b.data.axial = null; return; }
               return EC.etabs.live.get('/axial?c=' + encodeURIComponent(qp)).then(aj => { b.data.axial = aj; }, () => { b.data.axial = null; }); })
+            .then(() => EC.etabs.live.get('/joints').then(jj => { b.data.joints = jj.joints || []; b.data.jointsErr = ''; }, e => { b.data.joints = []; b.data.jointsErr = e.message; }))
             .then(() => EC.etabs.live.get('/supports?' + cs.filter(c => b.roles[c] === 'uls' || b.roles[c] === 'seis').map(c => 'c=' + encodeURIComponent(c)).join('&')).then(sj => { b.data.supports = sj.supports || []; }, () => { b.data.supports = []; }))
             .then(() => readNotional(b).catch(() => { b.data.nf = null; b.data.ncombos = null; }));
         }).then(() => {
@@ -937,5 +972,5 @@
     };
   }
 
-  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); return d; }, _demoRoles: DEMO_ROLES };
+  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.joints = demoJoints(); return d; }, _demoRoles: DEMO_ROLES };
 })();

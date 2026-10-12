@@ -27,6 +27,8 @@ Endpoints (JSON):
                                    sel=1: only the members selected in ETABS
     GET /modifiers                 stiffness / mass modifiers of the frame and area properties (and per-object overrides),
                                    with the material and what each property is used for (columns, beams, walls, slabs)
+    GET /joints                    beam-column joints of the ETABS concrete frame design: beam/column capacity ratio and
+                                   joint shear ratio per column (strong column / weak beam check)
     GET /axial?c=<combo>           columns (by label) and wall piers: plan position, area, material and axial force per storey
                                    for the quasi-permanent combination (axial shortening check)
     GET /supports?c=<combo>&c=...  restrained joints (plan x, y) with their reactions for the combinations (uplift / pile tension)
@@ -56,7 +58,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.14'
+VERSION = '1.15'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -251,6 +253,9 @@ class Etabs:
             return supports_from_model(m, combos, cset)
         finally:
             m.SetPresentUnits(old)
+
+    def joints(self):
+        return joints_from_model(self.attach())
 
     def axial(self, combo):
         m = self.attach()
@@ -920,6 +925,43 @@ def supports_from_model(m, combos, cset):
     return {'supports': [v for v in out.values() if v]}
 
 
+def joints_from_model(m):
+    """beam-column joints from the ETABS concrete frame design (run it first): per column, the beam/column capacity
+    ratio (EN 1998-1 4.4.2.3(4): 1.3 ΣM_Rb / ΣM_Rc, ≤ 1) and the joint shear ratio, major and minor axis"""
+    dc = m.DesignConcrete
+    try:
+        r = ok(dc.GetSummaryResultsJoint('All', 0, [], [], [], [], [], [], [], [], [], [], [], 1), 'DesignConcrete.GetSummaryResultsJoint')
+    except BridgeError as e:
+        raise BridgeError('No concrete frame design results - run Design > Concrete Frame Design > Start Design/Check in ETABS (' + str(e) + ')')
+    n, frame, lcjs, js, lcjsm, jsm, lcbc, bc, lcbcm, bcm, err, warn = r[:12]
+    out = []
+    for i in range(n or 0):
+        try:
+            label, story = ok(m.FrameObj.GetLabelFromName(frame[i], '', ''), 'FrameObj.GetLabelFromName')[:2]
+        except Exception:
+            label, story = frame[i], ''
+        out.append({'name': frame[i], 'label': label, 'story': story, 'bc': bc[i], 'bcm': bcm[i], 'bcCase': lcbc[i], 'bcmCase': lcbcm[i],
+                    'js': js[i], 'jsm': jsm[i], 'jsCase': lcjs[i], 'err': err[i] if err else '', 'warn': warn[i] if warn else ''})
+    if not out:
+        raise BridgeError('No concrete frame design results - run Design > Concrete Frame Design > Start Design/Check in ETABS')
+    return {'joints': out}
+
+
+def mock_joints():
+    """demo joints: 20 columns × 10 storeys (the top storey is exempt, 4.4.2.3); the joints at the section changes
+    (top of Story3: C600 below, C500 above; top of Story7: C500 → C400) have the highest ratios, the perimeter ones most"""
+    out = []
+    pts = [(x, y) for y in (0, 6, 12, 18) for x in (0, 6, 12, 18, 24)]
+    for i in range(10):
+        for k, (x, y) in enumerate(pts):
+            edge = x in (0, 24) or y in (0, 18)
+            base = 0.62 + 0.03 * i + (0.08 if edge else 0) + (0.22 if i in (2, 6) else 0)
+            out.append({'name': str(500 + 20 * i + k), 'label': 'C%d' % (k + 1), 'story': 'Story%d' % (i + 1),
+                        'bc': round(min(base, 1.4), 3), 'bcm': round(min(base * 0.9, 1.4), 3), 'bcCase': 'G+0.3Q+EX', 'bcmCase': 'G+0.3Q+EY',
+                        'js': round(0.35 + 0.02 * i, 3), 'jsm': round(0.3 + 0.02 * i, 3), 'jsCase': 'G+0.3Q+EX', 'err': '', 'warn': ''})
+    return {'joints': out}
+
+
 def axial_from_model(m, combo, is_combo):
     """vertical stacks for the shortening check: columns by label (one line through the storeys) and wall piers, with
     plan position and per storey the area (m2), material (Concrete / Steel, f MPa) and axial compression N (kN) of `combo`"""
@@ -1166,6 +1208,9 @@ class Mock:
             {'kind': 'area', 'name': 'W250 C40', 'mat': 'Concrete', 'use': {'walls': 40}, 'mods': A(f22=0.7, f12=0.7, m11=0.7, m22=0.7), 'over': []},
             {'kind': 'area', 'name': 'S200 C30', 'mat': 'Concrete', 'use': {'slabs': 60}, 'mods': A(m11=0.25, m22=0.25, m12=0.25, Mass=0.9), 'over': []}]}
 
+    def joints(self):
+        return mock_joints()
+
     def axial(self, combo):
         if not combo:
             raise BridgeError('Select the quasi-permanent load combination')
@@ -1404,6 +1449,8 @@ def make_handler(src, origins):
                     return self.send(200, src.modifiers())
                 if u.path == '/loads':
                     return self.send(200, src.loads())
+                if u.path == '/joints':
+                    return self.send(200, src.joints())
                 if u.path == '/axial':
                     return self.send(200, src.axial(q.get('c', [''])[0]))
                 if u.path == '/supports':

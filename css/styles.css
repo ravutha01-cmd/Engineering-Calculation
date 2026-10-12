@@ -893,16 +893,16 @@ tr.ld-removed td { opacity: .75; }
 .calc details.fx[open] > summary { margin-bottom: 4px; display: inline-block; }
 
 /* input panel: default parameters folded away */
-.inputs details.defpar { margin: 6px 12px 14px; border: 1px dashed var(--border-strong); border-radius: 10px; background: var(--surface-2); }
-.inputs details.defpar > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 10px 12px; cursor: pointer; list-style: none; }
-.inputs details.defpar > summary::-webkit-details-marker { display: none; }
-.inputs details.defpar > summary::before { content: '›'; font-size: 18px; line-height: 1; color: var(--muted); transition: transform .15s; width: 10px; }
-.inputs details.defpar[open] > summary::before { transform: rotate(90deg); }
-.inputs details.defpar .dp-t { font-weight: 700; font-size: 13px; }
-.inputs details.defpar .dp-n { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); }
-.inputs details.defpar small { flex-basis: 100%; padding-left: 18px; color: var(--muted); font-size: 11.5px; }
-.inputs details.defpar .dp-body { padding: 0 0 6px; border-top: 1px dashed var(--border-strong); }
-.inputs details.defpar .grp { background: transparent; }
+:is(.inputs, .bc-dp) details.defpar { margin: 6px 12px 14px; border: 1px dashed var(--border-strong); border-radius: 10px; background: var(--surface-2); }
+:is(.inputs, .bc-dp) details.defpar > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 10px 12px; cursor: pointer; list-style: none; }
+:is(.inputs, .bc-dp) details.defpar > summary::-webkit-details-marker { display: none; }
+:is(.inputs, .bc-dp) details.defpar > summary::before { content: '›'; font-size: 18px; line-height: 1; color: var(--muted); transition: transform .15s; width: 10px; }
+:is(.inputs, .bc-dp) details.defpar[open] > summary::before { transform: rotate(90deg); }
+:is(.inputs, .bc-dp) details.defpar .dp-t { font-weight: 700; font-size: 13px; }
+:is(.inputs, .bc-dp) details.defpar .dp-n { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); }
+:is(.inputs, .bc-dp) details.defpar small { flex-basis: 100%; padding-left: 18px; color: var(--muted); font-size: 11.5px; }
+:is(.inputs, .bc-dp) details.defpar .dp-body { padding: 0 0 6px; border-top: 1px dashed var(--border-strong); }
+:is(.inputs, .bc-dp) details.defpar .grp { background: transparent; }
 
 /* typical details (js/typdet): same tokens as the plots, light + dark */
 svg.tdet { max-width: 560px; }

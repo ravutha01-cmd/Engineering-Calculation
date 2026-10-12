@@ -39,6 +39,7 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] 2026-10-11 · P-Δ θ was divided by the storey height twice (d_r already a drift ratio) - θ came out ~h times too small (unconservative). Now θ = P·(d_r/h)/V
 - [x] 2026-10-11 · Building checks: Print opened the print dialog twice (the page and the app both handled the click)
 - [x] 2026-10-11 · Soft storey cited EN 1998-1 4.2.3.3(4)P for the stiffness criterion - it is 4.2.3.3(3) (4.2.3.3(4) is the storey resistance ratio, now the weak-storey check)
+- [x] 2026-10-12 · Building checks follow docs/CALCULATION_GUIDELINES.md 5: default parameters (ν, α drift limit, wind drift limit, overturning safety; φ, ε_cs, tilt limit; γ_d) fold into a “Default parameters” block with the count of changed values, as in the worksheet input panel
 
 ## Next
 - [ ] Ductile wall design envelope from ETABS pier forces: moment envelope with tension shift a1 and shear magnification ε (DCM 1.5) - EN 1998-1 5.4.2.4, 5.5.2.4.1

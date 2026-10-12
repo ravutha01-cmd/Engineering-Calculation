@@ -191,6 +191,8 @@
       <h4 class="tool">Design by hand calculation<small>Mathcad worksheets</small></h4>
       ${tool('hand', CATS)}
       ${a('library', 'book', 'Mathcad library', `<span class="count">${EC.library.length}</span>`, r0 === 'library')}
+      <h4 class="tool">Design analysis<small>draw → analyse → Mathcad design</small></h4>
+      ${EC.analysis.tools.map(t => a('analysis', t.icon, t.name, `<span class="count">${p.elements.filter(e => e.fda && e.fda.tool === t.k).length}</span>`, r0 === 'analysis')).join('')}
       <h4 class="tool">Design with ETABS link<small>analysis results → design</small></h4>
       ${a('etabs', 'upload', 'Link to ETABS', '', r0 === 'etabs')}
       ${a('loads', 'wind', 'Loads & combinations', '', r0 === 'loads')}
@@ -590,10 +592,10 @@
     chrome(r);
     const m = $('#main');
     const v = r[0] || 'dashboard';
-    m.innerHTML = v === 'elements' ? vElements(r[1], 'hand') : v === 'linked' ? vElements(r[1], 'etabs') : v === 'el' ? vElement(r[1]) : v === 'schedules' ? vSchedules() : v === 'programme' ? vProgramme() : v === 'library' ? vLibrary() : v === 'etabs' ? EC.etabs.view() : v === 'building' ? EC.building.view() : v === 'loads' ? EC.loads.view() : v === 'project' ? vProject() : vDashboard();
+    m.innerHTML = v === 'elements' ? vElements(r[1], 'hand') : v === 'linked' ? vElements(r[1], 'etabs') : v === 'el' ? vElement(r[1]) : v === 'schedules' ? vSchedules() : v === 'programme' ? vProgramme() : v === 'library' ? vLibrary() : v === 'etabs' ? EC.etabs.view() : v === 'building' ? EC.building.view() : v === 'loads' ? EC.loads.view() : v === 'analysis' ? EC.analysis.view(r) : v === 'project' ? vProject() : vDashboard();
     if (v === 'elements' || v === 'linked') { const q = LF.q.toLowerCase().trim(); if (q) $$('tr[data-open][data-q]', m).forEach(r => { r.hidden = !q.split(/\s+/).every(w => r.dataset.q.includes(w)); }); selSync(); }
-    if (v === 'etabs') EC.etabs.mount(m); else if (v === 'building') EC.building.mount(m); else if (v === 'loads') EC.loads.mount(m); else m.onclick = m.onchange = null;
-    if (v !== 'el' && v !== 'etabs' && v !== 'building' && v !== 'loads') m.scrollTop = 0;
+    if (v === 'etabs') EC.etabs.mount(m); else if (v === 'building') EC.building.mount(m); else if (v === 'loads') EC.loads.mount(m); else if (v === 'analysis') EC.analysis.mount(m, r); else m.onclick = m.onchange = null;
+    if (v !== 'el' && v !== 'etabs' && v !== 'building' && v !== 'loads' && !(v === 'analysis' && r[1])) m.scrollTop = 0;
     $('#app').classList.remove('nav-open');
     const p = proj();
     document.title = `${v === 'el' ? ((p.elements.find(e => e.id === r[1]) || {}).mark || '') + ' · ' : ''}${p.name} · CAMBO STRUCT`;
@@ -614,7 +616,7 @@
     const p = proj(), go = h => () => { location.hash = h; };
     const items = [];
     p.elements.forEach(e => items.push({ g: 'Elements', t: e.mark, s: typeName(e.type) + (e.level ? ' · ' + e.level : '') + (e.grid ? ' · ' + e.grid : ''), b: e.status, ic: (CATS.find(c => MOD[e.type] && c.k === MOD[e.type].cat) || {}).icon || 'layers', run: () => { activeTab = 'summary'; location.hash = '#/el/' + e.id; } }));
-    [['dashboard', 'dashboard', 'Dashboard'], ['elements', 'layers', 'Hand-calculated elements', 'Design by hand calculation (Mathcad)']].concat(CATS.map(c => ['elements/' + c.k, c.icon, c.l, 'Hand calculation (Mathcad)']), [['library', 'book', 'Mathcad library', 'Design by hand calculation'], ['etabs', 'upload', 'Link to ETABS', 'Design with ETABS link'], ['loads', 'wind', 'Loads & combinations: auto-create EN 1990 combinations in ETABS', 'Design with ETABS link'], ['building', 'gantt', 'Building checks: drift, P-Δ, torsion, overturning, buckling', 'Design with ETABS link'], ['linked', 'layers', 'ETABS-linked elements', 'Design with ETABS link']], CATS.map(c => ['linked/' + c.k, c.icon, c.l, 'ETABS link']), [['schedules', 'table', 'Element schedules'], ['programme', 'gantt', 'Design programme'], ['project', 'gear', 'Project settings']])
+    [['dashboard', 'dashboard', 'Dashboard'], ['elements', 'layers', 'Hand-calculated elements', 'Design by hand calculation (Mathcad)']].concat(CATS.map(c => ['elements/' + c.k, c.icon, c.l, 'Hand calculation (Mathcad)']), [['library', 'book', 'Mathcad library', 'Design by hand calculation'], ['analysis', 'pilecap', 'Design analysis · Foundation (pile caps)', 'Draw piles, columns and walls'], ['etabs', 'upload', 'Link to ETABS', 'Design with ETABS link'], ['loads', 'wind', 'Loads & combinations: auto-create EN 1990 combinations in ETABS', 'Design with ETABS link'], ['building', 'gantt', 'Building checks: drift, P-Δ, torsion, overturning, buckling', 'Design with ETABS link'], ['linked', 'layers', 'ETABS-linked elements', 'Design with ETABS link']], CATS.map(c => ['linked/' + c.k, c.icon, c.l, 'ETABS link']), [['schedules', 'table', 'Element schedules'], ['programme', 'gantt', 'Design programme'], ['project', 'gear', 'Project settings']])
       .forEach(([h, i, l, sub]) => items.push({ g: 'Go to', t: l, s: sub, ic: i, run: go('#/' + h) }));
     CATS.forEach(c => c.types.forEach(t => items.push({ g: 'New element', t: 'New ' + typeName(t), s: c.l, ic: 'plus', run: () => createEl(t) })));
     items.push({ g: 'Actions', t: 'Toggle light / dark mode', ic: 'moon', run: () => $('#themeBtn').click() });
@@ -672,13 +674,13 @@
   function dupElement(id) {
     const p = proj(), e = p.elements.find(x => x.id === id); if (!e) return;
     const n = JSON.parse(JSON.stringify(e)); n.id = uid(); n.mark = nextMark(e.type); n.status = 'Not started'; if (n.etabs) n.etabs.copy = e.mark;
-    p.elements.splice(p.elements.indexOf(e) + 1, 0, n); save(); toast(`Duplicated as ${n.mark}`); location.hash = '#/el/' + n.id;
+    p.elements.splice(p.elements.indexOf(e) + 1, 0, n); save(); toast(`Duplicated as ${n.mark}`); location.hash = (n.fda ? '#/analysis/' : '#/el/') + n.id;
   }
   function delElement(id) {
     const p = proj(), e = p.elements.find(x => x.id === id); if (!e) return;
     modal('Delete element', `<p>Delete <b>${esc(e.mark)}</b> (${esc(typeName(e.type))}) and its calculation? This cannot be undone.</p>`, () => {
       p.elements = p.elements.filter(x => x.id !== id); cache.delete(id); save();
-      if (route()[0] === 'el') location.hash = listHref(e); else render();
+      if (route()[0] === 'el') location.hash = listHref(e); else if (route()[0] === 'analysis') location.hash = '#/analysis'; else render();
     }, 'Delete');
   }
   function refreshOutput(e) {
@@ -825,6 +827,8 @@
   };
   EC.etabs.install({ proj, save, toast, modal, ic, fmt, ubar, uid, today, addDays, render: () => render() });
   EC.building.install({ proj, save, toast, ic, fmt, ubar, uid, today, addDays, render: () => render() });
+  EC.analysis.install({ proj, save, toast, modal, ic, fmt, ubar, route, STATUS, render: () => render(),
+    newEl: (t, extra) => { const e = Object.assign({ id: uid(), type: t, mark: nextMark(t), level: '', grid: '', qty: 1, status: 'Not started', start: today(), due: addDays(today(), 14), assignee: proj().engineer || '', inputs: {} }, extra || {}); proj().elements.push(e); save(); return e; } });
   EC.loads.install({ proj, save, toast, ic, fmt, render: () => render() });
   EC.mcui.install({
     MOD, STATUS, proj, save, toast, modal, ic, fmt, ubar, route, catName: k => (CATS.find(c => c.k === k) || {}).l || k,
@@ -832,6 +836,7 @@
     onResult: e => {
       const r = route();
       if (r[0] === 'el') return;
+      if (r[0] === 'analysis') { if (r[1]) EC.analysis.onResult(e); return; }
       clearTimeout(resT); resT = setTimeout(() => { if (route()[0] !== 'el' && !document.querySelector('.modal-bg') && !(document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName))) render(); }, 300);
     }
   });

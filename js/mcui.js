@@ -157,8 +157,8 @@
     const M = ['M', r, c, cells.map(x => (typeof x === 'string' ? ['s', x] : x))];
     return i.u ? ['o', '*', M, i.u] : M;
   }
-  function inputsHTML(e, doc) {
-    const ins = doc.inputs || [];
+  function inputsHTML(e, doc, skip) {
+    const ins = (doc.inputs || []).filter(i => !skip || !skip.includes(i.n));   // skip: inputs owned by a design-analysis drawing
     const ov = e.inputs || {};
     const groups = [];
     ins.forEach(i => { let g = groups[groups.length - 1]; if (!g || g.t !== i.g) groups.push(g = { t: i.g, f: [] }); g.f.push(i); });
@@ -533,7 +533,7 @@
         <div><label>Due</label><input data-m="due" type="date" value="${esc(e.due || '')}"></div>
         <div><label>Designer</label><input data-m="assignee" value="${esc(e.assignee || '')}"></div>
       </div></div>
-      <div class="editor">
+      ${e.fda && EC.analysis ? EC.analysis.banner(e) : ''}<div class="editor">
         <div class="card inputs"><div class="inp-head"><b>Input data</b><span class="badge" style="background:var(--input-bg);border-color:var(--input-border)">yellow regions</span>${nEdit ? `<span class="badge n-edit">${nEdit} edited</span>` : ''}<button class="btn sm" style="margin-left:auto" data-mreset title="Restore the worksheet values">Defaults</button></div>${inputsHTML(e, doc)}</div>
         <div id="out">${vOutput(e)}</div>
       </div>`;
@@ -621,7 +621,7 @@
   }
   let rt = null;
   function changed(e) { e.u = Date.now(); api.save(); clearTimeout(rt); rt = setTimeout(() => refresh(e), 350); }
-  const curEl = () => { if (!api) return null; const r = api.route(); if (r[0] !== 'el') return null; const e = api.proj().elements.find(x => x.id === r[1]); return e && api.MOD[e.type] && api.MOD[e.type].mc ? e : null; };
+  const curEl = () => { if (!api) return null; const r = api.route(); if (r[0] !== 'el' && r[0] !== 'analysis') return null; const e = api.proj().elements.find(x => x.id === r[1]); return e && api.MOD[e.type] && api.MOD[e.type].mc ? e : null; };
   const inputDef = (e, n) => (docs[api.MOD[e.type].mc].inputs || []).find(i => i.n === n);
 
   document.addEventListener('input', ev => {
@@ -697,7 +697,7 @@
     if (d.mrec !== undefined) {
       const bg = api.modal('Save record', `<div class="form"><label>Note (optional)</label><input id="recNote" placeholder="e.g. Issued for checking, rev A"></div>`, () => {
         const res = e.res || {};
-        e.records = (e.records || []).concat([{ at: Date.now(), note: bg.querySelector('#recNote').value, by: e.assignee || api.proj().engineer || '', inputs: JSON.parse(JSON.stringify(e.inputs || {})), Umax: res.Umax == null ? null : res.Umax, ok: !!res.ok, result: res.result || '' }]).slice(-25);
+        e.records = (e.records || []).concat([Object.assign({ at: Date.now(), note: bg.querySelector('#recNote').value, by: e.assignee || api.proj().engineer || '', inputs: JSON.parse(JSON.stringify(e.inputs || {})), Umax: res.Umax == null ? null : res.Umax, ok: !!res.ok, result: res.result || '' }, e.fda ? { fda: JSON.parse(JSON.stringify(e.fda)) } : {})]).slice(-25);
         e.u = Date.now(); api.save(); api.toast('Record saved'); tab = 'rec'; api.render();
       }, 'Save');
       setTimeout(() => { const n = bg.querySelector('#recNote'); if (n) n.focus(); }, 30);
@@ -707,8 +707,8 @@
       const x = (e.records || []).find(q => String(q.at) === d.mrestore); if (!x) return;
       api.modal('Restore record', `<p>Load the inputs saved on <b>${esc(new Date(x.at).toLocaleString())}</b>? The current inputs are saved as a new record first.</p>`, () => {
         const res = e.res || {};
-        e.records = (e.records || []).concat([{ at: Date.now(), note: 'Auto: before restore', by: '', inputs: JSON.parse(JSON.stringify(e.inputs || {})), Umax: res.Umax, ok: !!res.ok }]).slice(-25);
-        e.inputs = JSON.parse(JSON.stringify(x.inputs || {})); e.u = Date.now(); api.save(); api.toast('Record restored'); tab = 'summary'; api.render();
+        e.records = (e.records || []).concat([{ at: Date.now(), note: 'Auto: before restore', by: '', inputs: JSON.parse(JSON.stringify(e.inputs || {})), Umax: res.Umax, ok: !!res.ok, fda: e.fda ? JSON.parse(JSON.stringify(e.fda)) : undefined }]).slice(-25);
+        e.inputs = JSON.parse(JSON.stringify(x.inputs || {})); if (x.fda) e.fda = JSON.parse(JSON.stringify(x.fda)); e.u = Date.now(); api.save(); api.toast('Record restored'); tab = 'summary'; api.render();
       }, 'Restore');
       return;
     }
@@ -718,6 +718,7 @@
   EC.mcui = {
     install(a) { api = a; },
     register, result, vElement, loadSheet, ensure, docs,
+    compute, vOutput, refresh, inputsHTML, flatten: id => EC.mcadc.flatten(docs[id]),
     libTypes: x => Object.keys(api.MOD).filter(t => api.MOD[t].mc && x.files.includes(api.MOD[t].mcFile)),
     schedRow: e => (e.res && e.res.inp) || [],
     keyText: e => ((e.res && e.res.keys) || []).filter(k => !k[2] && /[A-Za-z]/.test(k[1]) && /\d/.test(k[1])).map(k => k[1]).slice(0, 2).join(' · ')

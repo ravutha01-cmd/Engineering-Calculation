@@ -10,7 +10,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ROLES = { seis: 'Seismic', wind: 'Wind SLS', uls: 'ULS', off: 'Not used' };
   const ROLE_ORDER = ['seis', 'wind', 'uls', 'off'];
-  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false };
+  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false, epsV: 1.5, nuLim: 0.4 };
   let busy = '', err = '';
 
   const B = () => { const p = api.proj(); p.building = p.building || {}; const b = p.building; b.set = Object.assign({}, DEF, b.set || {}); b.roles = b.roles || {}; return b; };
@@ -94,6 +94,16 @@
       out.push({ name: String(500 + 20 * i + k), label: 'C' + (k + 1), story: 'Story' + (i + 1), bc: r3(Math.min(base, 1.4)), bcm: r3(Math.min(base * 0.9, 1.4)), bcCase: 'G+0.3Q+EX', bcmCase: 'G+0.3Q+EY', js: r3(0.35 + 0.02 * i), jsm: r3(0.3 + 0.02 * i), jsCase: 'G+0.3Q+EX', err: '', warn: '' });
     });
     return out;
+  }
+
+  /* demo wall piers (same as the --mock bridge /piers): W1-W2 7 m along X, W3-W4 6 m along Y; each takes 35 % of the
+     storey shear and overturning moment in its direction of the seismic cases; N as the demo /axial */
+  function demoPiers(d) {
+    return [[7, 'X'], [7, 'X'], [6, 'Y'], [6, 'Y']].map(([L, dir], k) => ({ name: 'W' + (k + 1), levels: Array.from({ length: 10 }, (_, i) => {
+      const st = 'Story' + (i + 1), [t, f] = i < 5 ? [0.25, 40] : [0.2, 30], fs = d.forces.filter(r => r.story === st && (!r.loc || /^bot/i.test(r.loc)));
+      const M = Math.max(0, ...fs.map(r => Math.abs(dir === 'X' ? r.MY : r.MX))), V = Math.max(0, ...fs.map(r => Math.abs(dir === 'X' ? r.VX : r.VY))), r1 = v => Math.round(v * 10) / 10;
+      return { story: st, lw: L, t, fck: f, M: r1(0.35 * M), V: r1(0.35 * V), N: r1((42 / 4 * 9.2 + L * t * 3.2 * 25) * (10 - i)), case: 'G+0.3Q+E' + dir };
+    }) }));
   }
 
   /* ---------- checks ---------- */
@@ -400,6 +410,30 @@
       });
       const prof = st.map(x => { const rs = rows.filter(r => r.story === x.name); return rs.length ? { story: x.name, z: x.elev, maj: Math.max(...rs.map(r => +r.bc || 0)), min: Math.max(...rs.map(r => +r.bcm || 0)), exempt: x.name === top } : null; }).filter(Boolean);
       out.scwb = { rows, prof, top };
+    }
+    // 19. ductile walls (DCM) - EN 1998-1 5.4.2.4: moment envelope = analysis moments shifted up by the tension shift
+    //     a1 = z·cotθ/2 (z = 0.8·l_w, θ = 45°, EN 1992-1-1 9.2.1.3(2)) and linear from the base (Fig. 5.3, slender walls
+    //     h_w/l_w > 2) (5); shear V_Ed = ε·V'_Ed, ε = 1.5 (7); critical height h_cr = max(l_w, h_w/6) ≤ 2·l_w, ≤ h_s (n ≤ 6)
+    //     or 2·h_s (n ≥ 7) (5.4.3.4.2(1)); normalised axial load ν_d = N_Ed/(A_c·f_cd) ≤ 0.4 (5.4.3.4.1(2))
+    out.walls = null;
+    if ((d.piers || []).length) {
+      const zOf = {}, hOf = {}; st.forEach(x => { zOf[x.name] = x.elev; hOf[x.name] = x.h; });
+      const eps = +s.epsV || 1.5, nuL = +s.nuLim || 0.4, nSt = st.length;
+      const W = d.piers.map(p => {
+        const lv = p.levels.filter(l => zOf[l.story] !== undefined).sort((a, c) => zOf[a.story] - zOf[c.story]); if (!lv.length) return null;
+        const z0 = zOf[lv[0].story] - hOf[lv[0].story], hw = zOf[lv[lv.length - 1].story] - z0, b0 = lv[0], lw = +b0.lw;
+        const a1 = 0.8 * lw / 2, hs = hOf[b0.story], hcr = Math.min(Math.max(lw, hw / 6), 2 * lw, nSt <= 6 ? hs : 2 * hs), slender = hw / lw > 2;
+        const prof = lv.map(l => {
+          const zb = zOf[l.story] - hOf[l.story] - z0;   // height of the storey bottom above the wall base
+          const lin = slender ? b0.M * Math.min(1, (hw - zb + a1) / hw) : 0;
+          const shifted = Math.max(0, ...lv.filter(q => zOf[q.story] - hOf[q.story] - z0 <= zb + a1 + 1e-6 && zOf[q.story] - hOf[q.story] - z0 >= zb - 1e-6).map(q => +q.M));
+          const fcd = (+l.fck || 30) / 1.5, nu = l.N / (l.lw * l.t * fcd * 1000);
+          return { story: l.story, z: zOf[l.story] - hOf[l.story], zb, Man: +l.M, Menv: Math.max(+l.M, shifted, lin), Van: +l.V, VEd: eps * l.V, N: +l.N, nu, case: l.case, lw: +l.lw, t: +l.t };
+        });
+        const nuMax = Math.max(...prof.map(r => r.nu));
+        return { name: p.name, lw, t: +b0.t, hw, a1, hcr, slender, prof, base: prof[0], nuMax, U: nuMax / nuL };
+      }).filter(Boolean);
+      out.walls = { W, eps, nuL };
     }
     return out;
   }
@@ -717,6 +751,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       ${sumCard('base', 'Overturning', R.base.some(x => Number.isFinite(x.fos)) ? oU : null, 'required ÷ provided safety')}
       ${sumCard('modal', 'Modal mass participation', R.modal ? R.modal.U : null, R.modal ? `ΣU<sub>X</sub> ${fmt(R.modal.sum.X * 100, 1)} % · ΣU<sub>Y</sub> ${fmt(R.modal.sum.Y * 100, 1)} % · T<sub>1</sub> ${fmt(R.modal.T1, 2)} s` : '')}
       ${R.soft.length ? sumCard('soft', 'Soft storey k<sub>i</sub>/k<sub>i+1</sub>', Umax(R.soft), (() => { const w = R.soft.filter(r => r.r1 != null).reduce((a, r) => (!a || r.r1 < a.r1 ? r : a), null); return w ? `min ${fmt(w.r1, 2)} at ${esc(w.story)} ${w.dir} (0.7)` : ''; })()) : ''}
+      ${R.walls ? sumCard('walls', 'Ductile walls ν<sub>d</sub> / 0.4', Umax(R.walls.W), (() => { const w = R.walls.W.reduce((a, x) => (!a || x.base.Menv > a.base.Menv ? x : a), null); return `${esc(w.name)}: M<sub>Ed</sub> = ${fmt(w.base.Menv, 0)} kN·m, V<sub>Ed</sub> = ${fmt(w.base.VEd, 0)} kN at the base`; })()) : ''}
       ${R.scwb ? sumCard('scwb', 'Strong column / weak beam 1.3ΣM<sub>Rb</sub>/ΣM<sub>Rc</sub>', Umax(R.scwb.rows), (() => { const w = R.scwb.rows.filter(r => !r.exempt).reduce((a, r) => (!a || r.U > a.U ? r : a), null); return w ? `max at ${esc(w.label)} ${esc(w.story)} · ${R.scwb.rows.filter(r => !r.exempt && r.U > 1 + 1e-9).length} joint(s) &gt; 1` : ''; })()) : ''}
       ${R.pound.length ? (() => { const w = R.pound.filter(r => r.req != null).reduce((a, r) => (!a || r.req > a.req ? r : a), null), any = +s.gapX > 0 || +s.gapY > 0; if (!w) return '';
         const txt = `required ${fmt(w.req * 1000, 0)} mm (${w.dir}, ${esc(w.story)})`;
@@ -781,6 +816,15 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
         ${tbl([['Storey', r => esc(r.story)], ['Dir.', r => r.dir], ['V<sub>i</sub> kN', r => fmt(r.V, 0), 'num'], ['d<sub>r</sub> mm', r => fmt(r.d * 1000, 2), 'num'], ['k<sub>i</sub> kN/m', r => r.k ? fmt(r.k, 0) : '–', 'num'], ['k<sub>i</sub>/k<sub>i+1</sub>', r => r.r1 != null ? fmt(r.r1, 2) : '–', 'num'], ['k<sub>i</sub>/k̄<sub>3 above</sub>', r => r.r3 != null ? fmt(r.r3, 2) : '–', 'num'], ['Class', r => esc(r.cls)], ['U', r => r.r1 != null ? api.ubar(r.U) : '']], top(R.soft))}</div>
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(r => `${esc(r.story)} ${r.dir}: ${esc(r.cls).toLowerCase()} (k<sub>i</sub>/k<sub>i+1</sub> = ${fmt(r.r1, 2)})`).join(' · ')} → the building is not regular in elevation (EN 1998-1 4.2.3.1): use the modal response spectrum analysis (Table 4.1) and reduce q<sub>0</sub> by 20 % (5.2.2.2(3)); better, stiffen the soft storey.` : 'Stiffness constant or reducing gradually upwards in X and Y: regular in elevation for the stiffness criterion (EN 1998-1 4.2.3.3(3)).'}</div>
         <p class="muted bc-pad">k<sub>i</sub> from the seismic case with the largest base shear in each direction (storey shear and storey drift of the same case). EN 1998-1 gives the criterion without numbers; the ASCE 7 limits are a common quantification.</p>`);
+    }
+    if (R.walls) {
+      const WW = R.walls, g = WW.W.reduce((a, x) => (!a || x.base.Menv > a.base.Menv ? x : a), null), bad = WW.W.filter(x => x.U > 1 + 1e-9);
+      html += card('walls', 'Ductile walls: design envelope from the ETABS piers', 'EN 1998-1 5.4.2.4(5), (7) · 5.4.3.4.1(2) · 5.4.3.4.2(1) · EN 1992-1-1 9.2.1.3(2)', `moment envelope shifted by a<sub>1</sub> = 0.4·l<sub>w</sub> and linear from the base (h<sub>w</sub>/l<sub>w</sub> &gt; 2) · V<sub>Ed</sub> = ε·V'<sub>Ed</sub>, ε = ${fmt(WW.eps, 2)} · ν<sub>d</sub> ≤ ${fmt(WW.nuL, 2)}`,
+        `${dp(['epsV', 'nuLim'], `${num('epsV', 'ε shear magnification', '-', '0.05', 'DCM 1.5 (5.4.2.4(7)); DCH eq. 5.25')}${num('nuLim', 'ν<sub>d</sub> limit', '-', '0.05', 'DCM 0.4 (5.4.3.4.1(2)), DCH 0.35')}`)}
+        <div class="bc-split">${profile([{ n: g.name + ' analysis M', c: '--s1', pts: g.prof.map(r => ({ story: r.story, z: r.z, v: r.Man })) }, { n: g.name + ' design envelope', c: '--s2', pts: g.prof.map(r => ({ story: r.story, z: r.z, v: r.Menv })) }], { title: 'Wall moment: analysis and design envelope', xlabel: 'M kN·m (storey bottom)', unit: 'kN·m', fmt: v => fmt(v, 0) })}
+        ${tbl([['Wall', x => esc(x.name)], ['l<sub>w</sub> × t m', x => `<span style="white-space:nowrap">${fmt(x.lw, 2)} × ${fmt(x.t, 2)}</span>`, 'num'], ['h<sub>w</sub>/l<sub>w</sub>', x => fmt(x.hw / x.lw, 1), 'num'], ['h<sub>cr</sub> m', x => fmt(x.hcr, 2), 'num'], ['a<sub>1</sub> m', x => fmt(x.a1, 2), 'num'], ['M<sub>Ed</sub> base kN·m', x => fmt(x.base.Menv, 0), 'num'], ["V'<sub>Ed</sub> kN", x => fmt(x.base.Van, 0), 'num'], ['V<sub>Ed</sub> = εV\' kN', x => fmt(x.base.VEd, 0), 'num'], ['ν<sub>d</sub> max', x => fmt(x.nuMax, 3), 'num'], ['U', x => api.ubar(x.U)]], WW.W)}</div>
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `ν<sub>d</sub> &gt; ${fmt(WW.nuL, 2)} in ${bad.map(x => esc(x.name)).join(', ')} → thicker or longer wall, or higher f<sub>ck</sub> (5.4.3.4.1(2)).` : `ν<sub>d</sub> ≤ ${fmt(WW.nuL, 2)} in every wall.`} Design the walls for the envelope: in ${esc(g.name)} M<sub>Ed</sub> rises from ${fmt(g.prof[Math.min(3, g.prof.length - 1)].Man, 0)} (analysis) to ${fmt(g.prof[Math.min(3, g.prof.length - 1)].Menv, 0)} kN·m at ${esc(g.prof[Math.min(3, g.prof.length - 1)].story)}; boundary elements and confinement over h<sub>cr</sub> = ${fmt(g.hcr, 2)} m (5.4.3.4.2).</div>
+        <p class="muted bc-pad">Pier forces from ETABS at the bottom of each storey, enveloped over the seismic and ULS combinations. The envelope is the larger of the analysis moment shifted up by a<sub>1</sub> and the straight line from M<sub>Ed,base</sub> (Fig. 5.3) for slender walls. DCH: ε from eq. 5.25 with γ<sub>Rd</sub>·M<sub>Rd</sub>/M<sub>Ed</sub> and S<sub>e</sub>(T<sub>C</sub>)/S<sub>e</sub>(T<sub>1</sub>) - enter it above.</p>`);
     }
     if (!R.scwb && b.data.jointsErr) html += card('scwb', 'Strong column / weak beam: capacity design of the joints', 'EN 1998-1 4.4.2.3(4)', '', `<p class="muted bc-pad">${esc(b.data.jointsErr)}. Then read the building again.</p>`);
     if (R.scwb) {
@@ -918,7 +962,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
       if (d.bc === 'demo') {
-        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.joints = demoJoints(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
+        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.joints = demoJoints(); b.data.piers = demoPiers(b.data); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
         b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
         Object.assign(b.roles, DEMO_ROLES); Object.assign(b.set, { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, Bx: 24, By: 18, fos: 1.0 });
         let n = 0;   // demo ETABS-linked members (beams, columns, footings) for the P-Δ member design
@@ -955,6 +999,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
             .then(() => { const ms = EC.etabs.live.L.model ? EC.etabs.live.L.model.combos : [], qp = b.set.qpCombo && ms.includes(b.set.qpCombo) ? b.set.qpCombo : ms.find(c => /qp|quasi|perm/i.test(c));
               if (!qp) { b.data.axial = null; return; }
               return EC.etabs.live.get('/axial?c=' + encodeURIComponent(qp)).then(aj => { b.data.axial = aj; }, () => { b.data.axial = null; }); })
+            .then(() => EC.etabs.live.get('/piers?' + cs.filter(c => b.roles[c] === 'uls' || b.roles[c] === 'seis').map(c => 'c=' + encodeURIComponent(c)).join('&')).then(pj => { b.data.piers = pj.piers || []; }, () => { b.data.piers = []; }))
             .then(() => EC.etabs.live.get('/joints').then(jj => { b.data.joints = jj.joints || []; b.data.jointsErr = ''; }, e => { b.data.joints = []; b.data.jointsErr = e.message; }))
             .then(() => EC.etabs.live.get('/supports?' + cs.filter(c => b.roles[c] === 'uls' || b.roles[c] === 'seis').map(c => 'c=' + encodeURIComponent(c)).join('&')).then(sj => { b.data.supports = sj.supports || []; }, () => { b.data.supports = []; }))
             .then(() => readNotional(b).catch(() => { b.data.nf = null; b.data.ncombos = null; }));
@@ -975,5 +1020,5 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
     };
   }
 
-  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.joints = demoJoints(); return d; }, _demoRoles: DEMO_ROLES };
+  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.joints = demoJoints(); d.piers = demoPiers(d); return d; }, _demoRoles: DEMO_ROLES };
 })();

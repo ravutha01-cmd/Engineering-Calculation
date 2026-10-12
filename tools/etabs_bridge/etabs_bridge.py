@@ -28,6 +28,7 @@ Endpoints (JSON):
     GET /modifiers                 stiffness / mass modifiers of the frame and area properties (and per-object overrides),
                                    with the material and what each property is used for (columns, beams, walls, slabs)
     GET /piers?c=<combo>&c=...    wall piers: l_w, thickness, f_ck per storey and the envelope of M3, V2, N at the bottom of each storey
+    GET /steel                     steel members of the ETABS steel frame design: governing ratio, type, location, combination
     GET /joints                    beam-column joints of the ETABS concrete frame design: beam/column capacity ratio and
                                    joint shear ratio per column (strong column / weak beam check)
     GET /axial?c=<combo>           columns (by label) and wall piers: plan position, area, material and axial force per storey
@@ -59,7 +60,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.16'
+VERSION = '1.17'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -257,6 +258,9 @@ class Etabs:
 
     def joints(self):
         return joints_from_model(self.attach())
+
+    def steel(self):
+        return steel_from_model(self.attach())
 
     def piers(self, combos):
         m = self.attach()
@@ -1018,6 +1022,46 @@ def mock_piers(forces):
     return {'piers': out}
 
 
+STEEL_RATIO = {1: 'PMM', 2: 'V major', 3: 'V minor', 4: 'BC major', 5: 'BC minor', 6: 'Other'}
+
+
+def steel_from_model(m):
+    """steel members of the ETABS steel frame design (run it first): governing ratio, its type (PMM interaction, shear),
+    location and combination, with storey, label, orientation and section"""
+    try:
+        r = ok(m.DesignSteel.GetSummaryResults('All', 0, [], [], [], [], [], [], [], 1), 'DesignSteel.GetSummaryResults')
+    except BridgeError as e:
+        raise BridgeError('No steel frame design results - run Design > Steel Frame Design > Start Design/Check in ETABS (' + str(e) + ')')
+    n, frame, ratio, rtype, loc, combo, err, warn = r[:8]
+    out = []
+    for i in range(n or 0):
+        try:
+            label, story = ok(m.FrameObj.GetLabelFromName(frame[i], '', ''), 'FrameObj.GetLabelFromName')[:2]
+            kind = ORIENT.get(int(ok(m.FrameObj.GetDesignOrientation(frame[i], 0), 'GetDesignOrientation')[0]), 'other')
+            sec = ok(m.FrameObj.GetSection(frame[i], '', ''), 'FrameObj.GetSection')[0]
+        except Exception:
+            label, story, kind, sec = frame[i], '', 'other', ''
+        out.append({'name': frame[i], 'label': label, 'story': story, 'kind': kind, 'sec': sec, 'ratio': ratio[i],
+                    'type': STEEL_RATIO.get(int(rtype[i]), str(rtype[i])), 'loc': loc[i], 'combo': combo[i],
+                    'err': err[i] if err else '', 'warn': warn[i] if warn else ''})
+    if not out:
+        raise BridgeError('No steel frame design results - run Design > Steel Frame Design > Start Design/Check in ETABS')
+    return {'members': out}
+
+
+def mock_steel():
+    """demo steel: HEB300 bracing in the two end bays (8 braces, storeys 1-8) and IPE400 roof beams (Story10)"""
+    out = []
+    for i in range(8):
+        for k in range(1, 2):
+            out.append({'name': str(800 + i), 'label': 'D%d' % (k + 2 * i), 'story': 'Story%d' % (i + 1), 'kind': 'braces', 'sec': 'HEB300',
+                        'ratio': round(0.98 - 0.07 * i + (0.09 if i == 0 else 0), 3), 'type': 'PMM', 'loc': 0.0, 'combo': 'G+0.3Q+EX', 'err': '', 'warn': ''})
+    for k in range(6):
+        out.append({'name': str(900 + k), 'label': 'RB%d' % (k + 1), 'story': 'Story10', 'kind': 'beams', 'sec': 'IPE400',
+                    'ratio': round(0.62 + 0.05 * k, 3), 'type': 'PMM' if k != 5 else 'V major', 'loc': 3.0, 'combo': 'ULS1 1.35G+1.5Q', 'err': '', 'warn': ''})
+    return {'members': out}
+
+
 def mock_joints():
     """demo joints: 20 columns × 10 storeys (the top storey is exempt, 4.4.2.3); the joints at the section changes
     (top of Story3: C600 below, C500 above; top of Story7: C500 → C400) have the highest ratios, the perimeter ones most"""
@@ -1282,6 +1326,9 @@ class Mock:
     def joints(self):
         return mock_joints()
 
+    def steel(self):
+        return mock_steel()
+
     def piers(self, combos):
         if not combos:
             raise BridgeError('Select at least one load combination')
@@ -1527,6 +1574,8 @@ def make_handler(src, origins):
                     return self.send(200, src.loads())
                 if u.path == '/piers':
                     return self.send(200, src.piers(q.get('c', [])))
+                if u.path == '/steel':
+                    return self.send(200, src.steel())
                 if u.path == '/joints':
                     return self.send(200, src.joints())
                 if u.path == '/axial':

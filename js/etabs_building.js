@@ -106,6 +106,14 @@
     }) }));
   }
 
+  /* demo steel members (same as the --mock bridge /steel): HEB300 bracing storeys 1-8, IPE400 roof beams */
+  function demoSteel() {
+    const out = [], r3 = v => Math.round(v * 1000) / 1000;
+    for (let i = 0; i < 8; i++) out.push({ name: String(800 + i), label: 'D' + (1 + 2 * i), story: 'Story' + (i + 1), kind: 'braces', sec: 'HEB300', ratio: r3(0.98 - 0.07 * i + (i === 0 ? 0.09 : 0)), type: 'PMM', loc: 0, combo: 'G+0.3Q+EX', err: '', warn: '' });
+    for (let k = 0; k < 6; k++) out.push({ name: String(900 + k), label: 'RB' + (k + 1), story: 'Story10', kind: 'beams', sec: 'IPE400', ratio: r3(0.62 + 0.05 * k), type: k !== 5 ? 'PMM' : 'V major', loc: 3, combo: 'ULS1 1.35G+1.5Q', err: '', warn: '' });
+    return out;
+  }
+
   /* ---------- checks ---------- */
   const maxBy = (xs, f) => xs.reduce((a, x) => (a === null || f(x) > f(a) ? x : a), null);
   function compute(b) {
@@ -114,6 +122,7 @@
     const st = d.stories.slice().sort((a, c) => a.elev - c.elev);
     const H = st.length ? st[st.length - 1].elev - (st[0].elev - st[0].h) : 0;
     const out = { st, H };
+    const zOf2 = n => { const x = st.find(q => q.name === n); return x ? x.elev : 0; };
     // 1. seismic inter-storey drift - EC8 4.4.3.2: dr = qd·de ; dr·ν ≤ α·h
     out.drift = []; out.wind = [];
     st.forEach(x => ['X', 'Y'].forEach(dir => {
@@ -462,6 +471,21 @@
       });
       if (list.length) out.fdn = { list, q, gRd, Om, k, capped: (+s.omega || 1) > q };
     }
+    // 21. steel frame design summary - the ETABS steel frame design (EN 1993-1-1 6.2 cross-section, 6.3.3 member
+    //     interaction eq. 6.61 / 6.62): governing ratio of every member, ≤ 1; cross-check with the ETABS-linked
+    //     steel elements of the app (their own utilisation)
+    out.steel = null;
+    if ((d.steel || []).length) {
+      const els = api.proj && api.proj() ? api.proj().elements || [] : [];
+      const rows = d.steel.map(r => {
+        const e = els.find(x => x.etabs && !x.etabs.copy && x.etabs.label === r.label && x.etabs.story === r.story);
+        let app = null; try { if (e && EC.modules && EC.modules[e.type] && EC.modules[e.type].calc) app = EC.modules[e.type].calc(e.inputs).Umax; } catch (er) { app = null; }
+        return Object.assign({}, r, { z: zOf2(r.story), U: +r.ratio || 0, e, app });
+      });
+      const kinds = [...new Set(rows.map(r => r.kind))];
+      const prof = kinds.map(k => ({ k, pts: st.map(x => { const rs = rows.filter(r => r.kind === k && r.story === x.name); return rs.length ? { story: x.name, z: x.elev, v: Math.max(...rs.map(r => r.U)) } : null; }).filter(Boolean) }));
+      out.steel = { rows, kinds, prof };
+    }
     return out;
   }
 
@@ -785,6 +809,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
         return any ? sumCard('pound', 'Seismic joint required / provided', Umax(R.pound), txt) : `<a class="card bc-sum" href="#bc-pound"><div class="label">Seismic joint required</div><div class="value">${fmt(w.req * 1000, 0)} <small>mm</small></div><div class="foot"><span>${w.dir} at ${esc(w.story)} · enter the joint width provided</span></div></a>`; })() : ''}
       ${R.diaph ? sumCard('diaph', 'Diaphragm in-plane shear τ/τ<sub>Rd</sub>', Umax(R.diaph.rows), (() => { const w = R.diaph.rows.reduce((a, r) => (!a || r.T > a.T ? r : a), null); return `chord T<sub>max</sub> = ${fmt(w.T, 0)} kN (${esc(w.story)} ${w.dir}) · A<sub>s</sub> = ${fmt(w.As, 0)} mm²`; })()) : ''}
       ${R.short ? sumCard('short', 'Differential shortening Δ/L', Umax(R.short.stacks), (() => { const w = R.short.stacks.reduce((a, k) => (!a || k.tot > a.tot ? k : a), null); return `roof δ<sub>max</sub> = ${fmt(w.tot * 1000, 1)} mm (${esc(w.name)}) · limit L/${R.short.lim}`; })()) : ''}
+      ${R.steel ? sumCard('steel', 'Steel frame design ratio', Umax(R.steel.rows), `${R.steel.rows.length} members · ${R.steel.rows.filter(r => r.U > 1 + 1e-9).length} over 1.0 · ${R.steel.rows.filter(r => r.err).length} with design errors`) : ''}
       ${R.fdn ? sumCard('fdn', 'Foundation forces γ<sub>Rd</sub>Ω = ' + fmt(R.fdn.k, 2), Umax(R.fdn.list), (() => { const w = R.fdn.list.reduce((a, p) => (!a || p.NmaxAll > a.NmaxAll ? p : a), null); return `N<sub>Fd,max</sub> = ${fmt(w.NmaxAll, 0)} kN (${esc(w.label)}) · ${R.fdn.list.filter(p => p.T > 0).length} support(s) in tension`; })()) : ''}
       ${R.sup.list.length ? sumCard('sup', 'Support uplift F<sub>t,d</sub>/R<sub>t,d</sub>', Umax(R.sup.list), (() => { const w = R.sup.list.reduce((a, p) => (!a || p.min.FZ < a.min.FZ ? p : a), null); return `FZ<sub>min</sub> = ${fmt(w.min.FZ, 0)} kN at ${esc(w.label)}`; })()) : ''}
       ${(() => { const rs = R.wc.map(w => wcResult(wcEl(w.dir))).filter(x => x && x.U != null); return R.wc.length ? sumCard('wcomf', 'Wind comfort a<sub>peak</sub>/a<sub>lim</sub>', rs.length ? Math.max(...rs.map(x => x.U)) : null, rs.length ? `top acceleration ${R.wc.map(w => { const x = wcResult(wcEl(w.dir)); return w.dir + ' ' + (x && x.a ? x.a : '–'); }).join(' · ')}` : '') : ''; })()}
@@ -894,6 +919,16 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `Differential shortening above L/${R.short.lim} at ${bad.slice(0, 6).map(k => `${esc(k.name)}–${esc(k.nb)} (1/${fmt(1 / k.tilt, 0)} at ${esc(k.at)})`).join(', ')}${bad.length > 6 ? ', …' : ''} → set the columns long (pre-camber the formwork by the predicted difference), lower the column stress σ<sub>c</sub> or check the slabs and partitions for the imposed rotation.` : `Differential shortening between neighbouring columns and walls within L/${R.short.lim}.`} Roof: ${esc(mx.name)} ${mm(mx.tot)} mm, ${esc(mn.name)} ${mm(mn.tot)} mm - allow for it at cladding, lift and service joints.</div>
         <p class="muted bc-pad">N from ETABS for the quasi-permanent combination (columns by label through the storeys, walls by pier), E<sub>cm</sub> from f<sub>ck</sub>; steel E = 210 GPa without creep or shrinkage. The slab differential counts only the load placed after each floor is cast (N of the storey above; the floors are levelled during construction); shrinkage, similar in all stacks, is left out of it. A staged-construction analysis in ETABS gives the time-dependent values more exactly.</p>`);
     }
+    if (!R.steel && b.data.steelErr) html += card('steel', 'Steel frame design (ETABS)', 'EN 1993-1-1 6.2, 6.3.3', '', `<p class="muted bc-pad">${esc(b.data.steelErr)}. Then read the building again.</p>`);
+    if (R.steel) {
+      const S2 = R.steel, crit = S2.rows.slice().sort((a, c) => c.U - a.U).slice(0, 12), bad = S2.rows.filter(r => r.U > 1 + 1e-9), errs = S2.rows.filter(r => r.err), cross = S2.rows.filter(r => r.app != null);
+      const kc = { columns: '--s1', beams: '--s2', braces: '--s3', other: '--s4' };
+      html += card('steel', 'Steel frame design: ETABS ratios', 'EN 1993-1-1 6.2 · 6.3.3 eq. 6.61 / 6.62 · ETABS steel frame design', `governing ratio of every steel member (interaction P-M-M or shear) ≤ 1 · ${S2.rows.length} members`,
+        `<div class="bc-split">${profile(S2.prof.map(p => ({ n: p.k, c: kc[p.k] || '--s4', pts: p.pts })), { title: 'Largest steel ratio per storey', xlabel: 'design ratio', limit: 1, fmt: v => fmt(v, 2) })}
+        ${tbl([['Member', r => esc(r.label)], ['Storey', r => esc(r.story)], ['Type', r => esc(r.kind)], ['Section', r => esc(r.sec)], ['Ratio', r => `${fmt(r.U, 3)} <small class="muted">${esc(r.type)}</small>`, 'num'], ['Combination', r => `<small>${esc(r.combo)}</small>`], ['App U', r => (r.app != null ? fmt(r.app, 3) : '–'), 'num'], ['U', r => api.ubar(r.U)]], crit)}</div>
+        <div class="bc-verdict ${bad.length || errs.length ? 'bad' : 'ok'}">${bad.length ? `${bad.length} steel member(s) over 1.0 (${bad.slice(0, 6).map(r => `${esc(r.label)} ${esc(r.story)} ${fmt(r.U, 2)} ${esc(r.type)}`).join(', ')}${bad.length > 6 ? ', …' : ''}) → larger section or shorter buckling length (bracing), then design the ETABS frame again.` : 'All steel members ≤ 1.0 in the ETABS design.'}${errs.length ? ` ${errs.length} member(s) with design errors in ETABS (e.g. ${esc(errs[0].label)}: ${esc(errs[0].err)}).` : ''}${cross.length ? ` Cross-check with the ETABS-linked app elements: ${cross.map(r => `${esc(r.label)} ETABS ${fmt(r.U, 2)} / app ${fmt(r.app, 2)}`).slice(0, 4).join(' · ')}.` : ''}</div>
+        <p class="muted bc-pad">Ratios as reported by the ETABS steel frame design (Eurocode 3 code, the design combinations of the model) - make sure the ETABS code, the NA values and the effective lengths match the design basis. Seismic steel (EN 1998-1 6) capacity-design checks are not covered here. The 12 largest ratios are listed; “App U” is the utilisation of the same member designed in the app, where it is linked.</p>`);
+    }
     if (R.fdn) {
       const F = R.fdn, L2 = F.list, crit = L2.slice().sort((a, c) => a.Nmin - c.Nmin).slice(0, 12), up = L2.filter(p => p.T > 0), bad = up.filter(p => p.U > 1 + 1e-9);
       html += card('fdn', 'Foundation design forces: capacity design', 'EN 1998-1 4.4.2.6(2)-(3) · EN 1998-5 5.3.1', `E<sub>Fd</sub> = E<sub>F,G</sub> + γ<sub>Rd</sub>·Ω·E<sub>F,E</sub> · q = ${fmt(F.q, 2)} → γ<sub>Rd</sub> = ${fmt(F.gRd, 1)} · Ω = ${fmt(F.Om, 2)}${F.capped ? ' (limited to q)' : ''} → γ<sub>Rd</sub>Ω = ${fmt(F.k, 2)} · E<sub>F,G</sub> = (Max+Min)/2, E<sub>F,E</sub> = (Max−Min)/2 of the seismic combinations`,
@@ -999,7 +1034,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
       if (d.bc === 'demo') {
-        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.joints = demoJoints(); b.data.piers = demoPiers(b.data); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
+        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.joints = demoJoints(); b.data.piers = demoPiers(b.data); b.data.steel = demoSteel(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
         b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
         Object.assign(b.roles, DEMO_ROLES); Object.assign(b.set, { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, Bx: 24, By: 18, fos: 1.0 });
         let n = 0;   // demo ETABS-linked members (beams, columns, footings) for the P-Δ member design
@@ -1037,6 +1072,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
               if (!qp) { b.data.axial = null; return; }
               return EC.etabs.live.get('/axial?c=' + encodeURIComponent(qp)).then(aj => { b.data.axial = aj; }, () => { b.data.axial = null; }); })
             .then(() => EC.etabs.live.get('/piers?' + cs.filter(c => b.roles[c] === 'uls' || b.roles[c] === 'seis').map(c => 'c=' + encodeURIComponent(c)).join('&')).then(pj => { b.data.piers = pj.piers || []; }, () => { b.data.piers = []; }))
+            .then(() => EC.etabs.live.get('/steel').then(sj => { b.data.steel = sj.members || []; b.data.steelErr = ''; }, e => { b.data.steel = []; b.data.steelErr = e.message; }))
             .then(() => EC.etabs.live.get('/joints').then(jj => { b.data.joints = jj.joints || []; b.data.jointsErr = ''; }, e => { b.data.joints = []; b.data.jointsErr = e.message; }))
             .then(() => EC.etabs.live.get('/supports?' + cs.filter(c => b.roles[c] === 'uls' || b.roles[c] === 'seis').map(c => 'c=' + encodeURIComponent(c)).join('&')).then(sj => { b.data.supports = sj.supports || []; }, () => { b.data.supports = []; }))
             .then(() => readNotional(b).catch(() => { b.data.nf = null; b.data.ncombos = null; }));
@@ -1057,5 +1093,5 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
     };
   }
 
-  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.joints = demoJoints(); d.piers = demoPiers(d); return d; }, _demoRoles: DEMO_ROLES };
+  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.joints = demoJoints(); d.piers = demoPiers(d); d.steel = demoSteel(); return d; }, _demoRoles: DEMO_ROLES };
 })();

@@ -16,9 +16,9 @@ import base64, glob, json, os, sys, subprocess, datetime
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 work = sys.argv[1]
 mdir = os.path.join(work, 'mcdx'); os.makedirs(mdir, exist_ok=True)
-pat = os.path.expanduser('~/.claude/projects/*/*/tool-results/mcp-Google_Drive-download_file_content-*.txt')
+pat = os.path.expanduser('~/.claude/projects/*/*/tool-results/mcp-Google[_-]Drive-download_file_content-*.txt')
 got = []
-for f in sorted(glob.glob(pat), key=os.path.getmtime):
+for f in sorted(glob.glob(pat.replace('[_-]','?')), key=os.path.getmtime):
     try:
         d = json.load(open(f))
     except Exception:

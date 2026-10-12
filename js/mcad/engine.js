@@ -885,6 +885,17 @@
               else { src = ov; }
               rec.ov = true;
             }
+            const rvs = t[0] === 'o' && t[1] === 'idx' ? t.slice(3).map(x => { const a = x[0] === 'v' && S.env.m.get(x[1]); return a && a[a.length - 1][1] instanceof Range ? [a, a[a.length - 1][1]] : null; }) : [];
+            if (rvs.length && rvs.every(Boolean)) { // x[i,j] := f(i,j) over range variables defines every element
+              const loop = d => {
+                if (d === rvs.length) { S.define(t, S.ev(src, null), null); return; }
+                const [a, r] = rvs[d];
+                for (const k of r.toArray()) { a[a.length - 1][1] = k; loop(d + 1); }
+              };
+              try { loop(0); } finally { rvs.forEach(([a, r]) => { a[a.length - 1][1] = r; }); }
+              rec.val = S.env.get(t[2][1]); rec.name = t[2][1];
+              continue;
+            }
             const v = S.ev(src, null);
             S.define(t, v, null);
             rec.val = v; rec.name = name;

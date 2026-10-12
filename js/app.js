@@ -390,13 +390,17 @@
     if (!e) return `<div class="empty">Element not found. <a href="#/elements">Back to elements</a></div>`;
     const mod = MOD[e.type];
     if (mod.mc) return EC.mcui.vElement(e);
-    const inputs = mod.groups.map(g => `<div class="grp"><h4>${esc(g.t)}</h4>${g.f.map(f => {
+    const isDef = (f, g) => !f.cols && EC.isDefaultParam(f.l, f.k, g.t);
+    const nDef = mod.groups.reduce((n, g) => n + g.f.filter(f => isDef(f, g)).length, 0);
+    const nDefEd = mod.groups.reduce((n, g) => n + g.f.filter(f => isDef(f, g) && e.inputs[f.k] !== undefined && e.inputs[f.k] !== f.d).length, 0);
+    const grpHtml = def => mod.groups.map(g => ({ t: g.t, f: g.f.filter(f => isDef(f, g) === def) })).filter(g => g.f.length).map(g => `<div class="grp"><h4>${esc(g.t)}</h4>${g.f.map(f => {
       const v = e.inputs[f.k] !== undefined ? e.inputs[f.k] : f.d;
       if (f.cols) return `<div class="tblin"><div class="fl">${EC.sym(f.l)}</div><div class="tbl-wrap"><table><thead><tr>${f.cols.map(c => `<th>${EC.sym(c)}</th>`).join('')}<th></th></tr></thead><tbody>${(v || []).map((r, ri) => `<tr>${f.cols.map((c, ci) => `<td><input data-t="${f.k}" data-r="${ri}" data-c="${ci}" type="number" step="any" value="${esc(r[ci] === undefined ? '' : r[ci])}"></td>`).join('')}<td><button class="btn sm" data-trdel="${f.k}" data-r="${ri}" title="Delete row">${ic('x')}</button></td></tr>`).join('')}</tbody></table></div><button class="btn sm" data-tradd="${f.k}">${ic('plus')}Row</button></div>`;
       const ctl = f.opts ? `<select data-k="${f.k}">${f.opts.map(o => `<option value="${esc(o.v)}" ${String(o.v) === String(v) ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}</select>`
         : `<input data-k="${f.k}" type="${typeof f.d === 'number' ? 'number' : 'text'}" step="any" value="${esc(v)}" inputmode="decimal">`;
       return f.opts && !f.u ? `<div class="field wide"><span class="fl">${EC.sym(f.l)}</span>${ctl}</div>` : `<div class="field"><span class="fl">${EC.sym(f.l)}</span>${ctl}<span class="fu">${esc(f.u || '')}</span></div>`;
     }).join('')}</div>`).join('');
+    const inputs = grpHtml(false) + (nDef ? EC.defParBlock(grpHtml(true), nDef, nDefEd) : '');
     const opt = (arr, v) => arr.map(s => `<option ${s === v ? 'selected' : ''}>${esc(s)}</option>`).join('');
     return `<div class="page-head no-print"><div><a href="${listHref(e)}" class="btn sm" style="margin-bottom:8px">${ic('back')}${e.etabs ? 'ETABS link · ' : ''}${esc(CATS.find(c => c.k === mod.cat).l)}</a>
         <h1><span style="color:var(--accent)">${esc(e.mark)}</span> · ${esc(mod.name)}</h1><div class="sub">${esc(mod.code)} · ${e.etabs ? `Designed from ETABS results (${esc(e.etabs.label)}, ${esc(e.etabs.story)})` : 'Mathcad reference: ' + esc(mod.mathcad)}</div></div>

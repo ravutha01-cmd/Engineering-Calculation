@@ -10,8 +10,17 @@
   const full = new Map();      // element id -> {h, r}
   const queue = []; let worker = null, wReady = false, reqN = 0; const waiting = {};
   let api = null;
-  const opts = { sub: true, all: false, areas: false };
+  const opts = { sub: true, all: false, areas: false, full: false };
   try { Object.assign(opts, JSON.parse(localStorage.getItem('cambo.wsopts') || '{}')); } catch (e) { /* ignore */ }
+
+  /* ---------- default parameters: shown collapsed in the input panel (also used by native elements) ---------- */
+  const DEFRX = /\[NDP\]|partial factor|\bγ|^γ|factor for sustained|time of loading|modulus of elasticity|elastic modulus|\bE_s\b|unit weight|density|creep|shrink|aggregate|bond condition|crack width limit|deflection limit|limit L ?\/|ductility|redistribution|\bψ|combination factor|\bα_?c[ct]\b|number of (concrete )?fibres|iteration|tolerance|national annex|k_E\b|ultimate strain|strain limit/i;
+  const DEFKEY = /^(γ|ψ|gamma|psi|k_tc|α_cc|α_ct|E_s|Es|D_lower|Dl|D_upper|φ_cr|ε_cs|w_lim|L_lim|n_f|Bond|be)$|^(γ|gamma)/;
+  const DEFGRP = /partial factor|parameters? \(|ndp|national annex/i;
+  const MAINRX = /cover|concrete class|strength|\bf_?ck|\bf_?yk|exposure|diameter|number of bars|spacing|class\b/i;   // never folded away
+  EC.isDefaultParam = (label, key, group) => !MAINRX.test(label || '') && (DEFKEY.test(key || '') || DEFRX.test(label || '') || DEFGRP.test(group || ''));
+  const defOpen = () => { try { return localStorage.getItem('cambo.defopen') === '1'; } catch (e) { return false; } };
+  EC.defParBlock = (html, n, nEdited) => `<details class="defpar" ${defOpen() ? 'open' : ''} ontoggle="try{localStorage.setItem('cambo.defopen',this.open?'1':'0')}catch(e){}"><summary><span class="dp-t">Default parameters</span><span class="dp-n">${n}</span>${nEdited ? `<span class="badge n-edit">${nEdited} changed</span>` : ''}<small>Partial factors, NDPs, material constants, limits - open to change</small></summary><div class="dp-body">${html}</div></details>`;
 
   /* ---------- catalog -> element types ---------- */
   function register(MOD) {
@@ -182,7 +191,11 @@
       return `<div class="tblin${edited}"><div class="fl">${esc(lab)}${single ? ' ' + sym(cols[0].n) + (cols[0].u ? ` <small>(${esc(R.unitText(cols[0].u))})</small>` : '') : ''}</div><div class="tbl-wrap"><table><thead><tr>${head}<th></th></tr></thead><tbody>${body}</tbody></table></div><button class="btn sm" data-mradd="${esc(cols.map(i => i.n).join('|'))}">+ Row</button></div>`;
     };
     const cell = (i, r, j, v) => `<td><input data-mc="${esc(i.n)}" data-r="${r}" data-c="${j}" ${typeof v === 'number' ? 'type="number" step="any"' : ''} value="${esc(v == null ? '' : v)}"></td>`;
-    return groups.map(g => {
+    // standard parameters (partial factors, NDPs, material constants, limits) fold into one collapsed section
+    const isDef = i => i.kind !== 'mat' && EC.isDefaultParam(i.l || '', i.n, i.g || '');
+    const part = def => groups.map(g => ({ t: g.t, f: g.f.filter(i => isDef(i) === def) })).filter(g => g.f.length);
+    const dg = part(true), nd = dg.reduce((n, g) => n + g.f.length, 0), ne = dg.reduce((n, g) => n + g.f.filter(i => ov[i.n] !== undefined).length, 0);
+    const render = gs => gs.map(g => {
       let html = '', k = 0;
       while (k < g.f.length) {
         const i = g.f[k];
@@ -195,7 +208,10 @@
       }
       const t = g.t.split(' › ');
       return `<div class="grp"><h4>${esc(t[t.length - 1] || 'Input')}</h4>${html}</div>`;
-    }).join('') || '<div class="empty">This worksheet has no editable inputs.</div>';
+    }).join('');
+    const main = render(part(false));
+    if (!main && !nd) return '<div class="empty">This worksheet has no editable inputs.</div>';
+    return main + (nd ? EC.defParBlock(render(dg), nd, ne) : '');
   }
 
   /* ---------- calculation report (worksheet regions in report form) ---------- */
@@ -321,7 +337,7 @@
       cls = cls || 'inp';
     } else if (rhs && !isLiteral(rhs) && e[0] === 'def' && !pairs) {
       fLine = `<span class="f">${fm((lhs ? R.ident(lhs) : R.mm(e[1])) + '<mo>=</mo>' + R.mm(rhs))}</span>`;
-      if (opts.sub && v && v.sub) fLine += `<span class="n">${fm('<mo>=</mo>' + R.mm(v.sub))}</span>`;
+      if (opts.sub && v && v.sub && (opts.full || !hasComplex(rhs))) fLine += `<span class="n">${fm('<mo>=</mo>' + R.mm(v.sub))}</span>`;
     } else if (ovr) cls = 'inp';
     let verdict = '';
     if (v && v.v && v.v.s !== undefined && (STOK.test(v.v.s) || STBAD.test(v.v.s))) {
@@ -329,6 +345,8 @@
       resH = '';
     }
     const valLine = resH ? `<span class="val${v && v.v && v.v.m && !(v.v.cells.length <= 4 && v.v.cells.every(x => x && !x.m)) ? ' blk' : ''}${ovr ? ' edited' : ''}">${lhs ? lhsH + ' = ' : ''}${resH}</span>` : (verdict && lhs ? `<span class="vname">${lhsH}</span>` : '');
+    // clean report: conditional / program formulas fold away behind a toggle, the result stays in front
+    if (fLine && !opts.full && hasComplex(rhs)) return { cls: (v && v.err ? 'bad ' : '') + cls, html: `${valLine}${verdict}<details class="fx"><summary>formula</summary>${fLine}</details>${err}` };
     const html = `${fLine}${fLine ? '<br>' : ''}${valLine}${verdict}${err}`;
     return { cls: (v && v.err ? 'bad ' : '') + cls, html: html || `<span class="f">${fm(R.mm(e))}</span>` };
   }
@@ -343,12 +361,14 @@
     const labelOf = {}, isLabel = {};
     flat.forEach((reg, i) => {
       if (reg.k !== 'm' || reg.inSt) return;
+      // Mathcad stores a formula's y at or below its label (tall fractions): take the closest unused
+      // text at or just above the formula; a text on the same line always wins
       let best = -1, d = 1e9;
       for (let k = Math.max(0, i - 6); k < Math.min(flat.length, i + 6); k++) {
         const t = flat[k];
-        if (t.k !== 't' || cont[k] !== cont[i] || t.x >= reg.x - 40) continue;
-        const dy = Math.abs(t.y - reg.y);
-        if (dy < 14 && dy < d) { d = dy; best = k; }
+        if (t.k !== 't' || isLabel[k] || cont[k] !== cont[i] || t.x >= reg.x - 40) continue;
+        const up = reg.y - t.y;
+        if (up >= -4 && up < 52 && up < d) { d = up; best = k; }
       }
       if (best < 0 && reg.x >= 290 && i > 0 && flat[i - 1].k === 't' && !isLabel[i - 1] && cont[i - 1] === cont[i] && !/<h[234]>/.test(flat[i - 1].h) && reg.y - flat[i - 1].y < 45 && plainText(flat[i - 1].h).length < 160) best = i - 1;
       if (best < 0 && reg.x < 290) {
@@ -361,13 +381,14 @@
       }
       if (best >= 0) { labelOf[i] = best; isLabel[best] = true; }
     });
-    let out = '', first = true, row = null; const skip = new Set();
+    let out = '', first = true, row = null, ptb = null, step = 0; const skip = new Set();
+    const flushTab = () => { if (!ptb) return; out += `<div class="ptab ${ptb.kind}"><table><thead><tr><th>${ptb.kind === 'inp' ? 'Design data' : 'Parameters'}</th><th>Symbol</th><th>Value</th></tr></thead><tbody>${ptb.rows.join('')}</tbody></table></div>`; ptb = null; };
     const flush = () => { if (!row) return; const sp = splitLabel(row.lab); out += `<div class="row ${row.cls}"><div class="lab">${esc(sp.lab)}${sp.ref ? `<span class="ref">${esc(sp.ref)}</span>` : ''}</div><div class="math">${row.lines.join('<div class="sep"></div>')}</div></div>`; row = null; };
     for (let i = 0; i < flat.length; i++) {
       const reg = flat[i];
-      if (reg.k === 'area') { flush(); out += reg.end ? '</div></details>' : `<details class="warea" ${opts.areas || !reg.col ? 'open' : ''}><summary>Supporting calculation (collapsed area in the Mathcad worksheet)</summary><div>`; continue; }
+      if (reg.k === 'area') { flush(); flushTab(); out += reg.end ? '</div></details>' : `<details class="warea" ${opts.areas || !reg.col ? 'open' : ''}><summary>Supporting calculation (collapsed area in the Mathcad worksheet)</summary><div>`; continue; }
       if (reg.k === 'st') {
-        flush();
+        flush(); flushTab();
         const cols = []; let k = i + 1;
         while (k < flat.length && flat[k].inSt) cols.push(k++);
         const vs = cols.map(c => r.vals[c] && r.vals[c].v);
@@ -381,16 +402,23 @@
       }
       if (reg.k === 't') {
         if (isLabel[i]) continue;
-        flush();
         const m = reg.h.match(/<h([234])>/);
         const txt = plainText(reg.h);
         if (!txt) continue;
-        if (m) { out += first ? `<div class="ctitle">${esc(txt)}</div>` : `<div class="${m[1] === '4' ? 'h2' : 'h1'}">${esc(txt)}</div>`; first = false; continue; }
+        if (!opts.full && !m && /^(plot|drawing|points along|plot vectors|vertices|coordinates)\b/i.test(txt)) continue;
+        if (!opts.full && !m && ptb && txt.length < 120 && !/^(note|nb|warning|important)\b/i.test(txt)) continue;   // captions inside a data table
+        flush(); flushTab();
+        if (m) {
+          if (first) out += `<div class="ctitle">${esc(txt)}</div>`;
+          else if (m[1] === '4' || opts.full) out += `<div class="${m[1] === '4' ? 'h2' : 'h1'}">${esc(txt)}</div>`;
+          else { step++; const t2 = txt.replace(/^\d+[.)]?\s*/, ''); out += `<div class="h1 step"><span class="stepn">Step ${step}</span>${esc(t2.charAt(0) + t2.slice(1).toLowerCase())}</div>`; }
+          first = false; continue;
+        }
         first = false;
         out += /^(note|nb|warning|important)\b|\[verify\]|\[practice\]/i.test(txt) ? `<div class="note">${esc(txt)}</div>` : `<div class="text">${esc(txt)}</div>`;
         continue;
       }
-      if (reg.k === 'p') { flush(); out += `<figure class="rplot">${R.plot(reg, r.vals[i])}</figure>`; continue; }
+      if (reg.k === 'p') { flush(); flushTab(); out += `<figure class="rplot">${R.plot(reg, r.vals[i])}</figure>`; continue; }
       if (reg.k !== 'm') continue;
       if (skip.has(i)) continue;
       const nm = reg.e[0] === 'def' && reg.e[1][0] === 'v' ? reg.e[1][1] : null;
@@ -435,6 +463,21 @@
           continue;
         }
       }
+      if (!opts.full) {
+        const kind = cleanKind(reg, r.vals[i]);
+        if (kind === 'skip') { if (labelOf[i] != null && !(row && row.li === labelOf[i])) isLabel[labelOf[i]] = true; continue; }
+        if (kind === 'inp' || kind === 'par') {
+          if (row && labelOf[i] != null && row.li === labelOf[i]) { /* second formula of the same row */ } else {
+            flush();
+            const lab = labelOf[i] != null ? plainText(flat[labelOf[i]].h) : '';
+            const sp = splitLabel(lab), nm = reg.e[0] === 'def' && reg.e[1][0] === 'v' ? reg.e[1][1] : '';
+            if (!ptb || ptb.kind !== kind) { flushTab(); ptb = { kind, rows: [] }; }
+            ptb.rows.push(`<tr class="${nm && ov[nm] !== undefined ? 'edited' : ''}"><td>${esc(sp.lab || nm)}${sp.ref ? `<span class="ref">${esc(sp.ref)}</span>` : ''}</td><td class="sy">${nm ? symH(nm) : ''}</td><td class="vv">${tabVal(reg, r.vals[i])}</td></tr>`);
+            continue;
+          }
+        }
+      }
+      flushTab();
       let line;
       try { line = mathLine(reg, r.vals[i], ov); } catch (er) { line = { cls: '', html: `<code>${esc(R.text(reg.e))}</code>` }; }
       const lab = labelOf[i] != null ? plainText(flat[labelOf[i]].h) : '';
@@ -442,8 +485,29 @@
       flush();
       row = { li: labelOf[i], lab, cls: line.cls, lines: [line.html] };
     }
-    flush();
+    flush(); flushTab();
     return out;
+  }
+  /* clean report: what a region is for */
+  const COMPLEX = /^(if|augment|stack|lookup|vlookup|hlookup|match|READEXCEL|linterp|interp|root|polyroots|submatrix|csort|rsort|reverse|concat|num2str|str2num|error|IsString)$/;
+  function hasComplex(x) { if (!Array.isArray(x)) return false; if (x[0] === 'P') return true; if (x[0] === 'c' && Array.isArray(x[1]) && COMPLEX.test(x[1][1])) return true; return x.some(hasComplex); }
+  function cleanKind(reg, v) {
+    const e = reg.e, c = (reg.c || '').toUpperCase(), key = c === '#DDEBF7' || c === '#E2EFDA';
+    if (e[0] === 'def' && e[1][0] === 'fn') return key ? 'row' : 'skip';                      // user functions / programs: helpers
+    const lhs = e[0] === 'def' && e[1][0] === 'v' ? e[1][1] : null;
+    const shown = e[0] === 'def' && Array.isArray(e[2]) && e[2][0] === 'ev';
+    const rhs = e[0] === 'def' ? (shown ? e[2][1] : e[2]) : e[1];
+    if (!key && lhs && /^(X|Y|x|y)_|^(Xp|Yp|Pts|pts|plot)/.test(lhs)) return 'skip';             // plot / drawing coordinates
+    if (v && v.err) return 'row';
+    if (c === '#FFF2CC' || (Array.isArray(rhs) && rhs[0] === 'cb')) return 'inp';
+    if (e[0] === 'def' && isLiteral(rhs) && !(v && v.v && v.v.m && v.v.cells.length > 4)) return key ? 'row' : 'par';
+    if (!key && !shown && Array.isArray(rhs) && rhs[0] === 'P') return 'skip';                  // hidden program blocks
+    return 'row';
+  }
+  function tabVal(reg, v) {
+    const e = reg.e, rhs = e[0] === 'def' ? (Array.isArray(e[2]) && e[2][0] === 'ev' ? e[2][1] : e[2]) : e[1];
+    if (Array.isArray(rhs) && rhs[0] === 'cb') { const k = v && v.sel != null ? v.sel : rhs[3]; return esc(rhs[1][k] || ''); }
+    return v && v.v ? (v.v.s !== undefined ? esc(v.v.s) : valH(v.v)) : '';
   }
 
   /* ---------- element page ---------- */
@@ -486,7 +550,7 @@
     const summary = `<div class="verdict-banner ${verdict}">${api.ic(s.ok ? 'check' : 'alert')}<div>${esc(s.result || (s.ok ? 'All checks satisfied' : 'REVISE - see NOT OK items'))}<div style="font-weight:400;font-size:12px;opacity:.85">${s.rows.length} checks · ${s.nBad} not OK${r.errors ? ` · ${r.errors} regions with errors` : ''} · calculated in ${r.ms} ms</div></div><div class="big">U<sub>max</sub> = ${U == null ? '–' : api.fmt(U, 3)}</div></div>
       ${s.rows.length ? `<div class="tbl-wrap"><table class="tbl sumtbl"><thead><tr><th>Item</th><th>${s.rows.some(x => x.U != null) || !s.rows.some(x => x.val != null) ? 'Utilisation U' : 'Value'}</th><th>Status</th></tr></thead><tbody>${s.rows.map(x => { const ok = !x.st || /^(OK|PASS|N\/A|-|INFO|SATISFIED)/i.test(x.st.trim()); return `<tr><td class="item">${esc(x.item)}</td><td>${x.U != null ? api.ubar(x.U) : x.val != null ? `<b class="num">${api.fmt(x.val, 3)}</b>` : ''}</td><td><span class="res ${ok ? 'ok' : 'bad'}">${esc(x.st || '')}</span></td></tr>`; }).join('')}</tbody></table></div>` : ''}
       ${keyTable(r, doc, 'ckey', 'Key results')}`;
-    const tools = `<div class="wtools no-print"><label><input type="checkbox" data-wopt="sub" ${opts.sub ? 'checked' : ''}> Show substituted values</label><label><input type="checkbox" data-wopt="areas" ${opts.areas ? 'checked' : ''}> Open programs &amp; supporting calculations</label><span class="hint">Formulas from ${esc(mod.mcFile)} – unchanged</span></div>`;
+    const tools = `<div class="wtools no-print"><label title="Every region of the Mathcad worksheet, as written"><input type="checkbox" data-wopt="full" ${opts.full ? 'checked' : ''}> Full worksheet (all Mathcad steps)</label><label><input type="checkbox" data-wopt="sub" ${opts.sub ? 'checked' : ''}> Show substituted values</label><label><input type="checkbox" data-wopt="areas" ${opts.areas ? 'checked' : ''}> Open programs &amp; supporting calculations</label><span class="hint">Formulas from ${esc(mod.mcFile)} – unchanged</span></div>`;
     const calc = tab === 'calc' ? `${tools}<div class="calc">${reportHTML(e, doc, r)}</div>` : '<div class="calc"></div>';
     const detail = detailHTML(e, doc, r);
     const spec = `<dl class="spec">${[['Element', `${e.mark} – ${mod.name}`], ['Location', `${e.level || '–'}, ${e.grid || '–'} (${e.qty || 1} no.)`], ['Design basis', mod.title], ['Worksheet', mod.mathcad]].map(x => `<dt>${esc(x[0])}</dt><dd>${esc(x[1])}</dd>`).join('')}</dl>

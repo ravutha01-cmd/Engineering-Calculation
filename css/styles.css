@@ -868,3 +868,38 @@ tr.ld-removed td { opacity: .75; }
 @media print { .bulk-bar, .list-tools { display: none !important; } }
 .bulk-form .fu { text-transform: none; letter-spacing: 0; font-size: 12.5px; } .sel-tbl td.num { white-space: nowrap; }
 .etabs-msg.info.ld-ok::before { content: '✓'; width: 20px; height: 20px; border: 0; background: var(--accent); color: var(--surface); animation: none; font-size: 12px; }
+
+/* ---------- calculation report: clean step-by-step style ---------- */
+.calc .h1.step { display: flex; align-items: center; gap: 10px; margin: 26px 0 10px; padding: 0 0 8px; border-bottom: 2px solid var(--accent); text-transform: none; letter-spacing: 0; font-size: 16px; color: var(--ink); }
+.calc .stepn { flex: none; padding: 3px 10px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.calc .ptab { margin: 6px 0 14px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.calc .ptab table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.calc .ptab th { text-align: left; padding: 7px 12px; background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+.calc .ptab th:nth-child(2) { width: 110px; } .calc .ptab th:nth-child(3) { width: 34%; }
+.calc .ptab td { padding: 6px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.calc .ptab tr:last-child td { border-bottom: 0; }
+.calc .ptab td .ref { display: block; font-size: 11px; color: var(--muted); }
+.calc .ptab td.sy { color: var(--ink-2); }
+.calc .ptab td.vv { font-weight: 600; font-variant-numeric: tabular-nums; }
+.calc .ptab.inp td.vv { background: color-mix(in srgb, var(--input-bg) 70%, transparent); }
+.calc .ptab tr.edited td.vv { box-shadow: inset 3px 0 0 var(--accent); }
+.calc .ptab.par { border-style: dashed; }
+@media (max-width: 760px) { .calc .ptab th:nth-child(2), .calc .ptab td.sy { display: none; } .calc .ptab th:nth-child(3) { width: auto; } }
+.calc details.fx { display: inline-block; margin-left: 10px; vertical-align: baseline; }
+.calc details.fx > summary { display: inline; cursor: pointer; font-size: 11.5px; color: var(--muted); list-style: none; padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; }
+.calc details.fx > summary::-webkit-details-marker { display: none; }
+.calc details.fx > summary:hover { color: var(--accent); border-color: var(--accent); }
+.calc details.fx[open] { display: block; margin: 6px 0 0; overflow-x: auto; }
+.calc details.fx[open] > summary { margin-bottom: 4px; display: inline-block; }
+
+/* input panel: default parameters folded away */
+.inputs details.defpar { margin: 6px 12px 14px; border: 1px dashed var(--border-strong); border-radius: 10px; background: var(--surface-2); }
+.inputs details.defpar > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 10px 12px; cursor: pointer; list-style: none; }
+.inputs details.defpar > summary::-webkit-details-marker { display: none; }
+.inputs details.defpar > summary::before { content: '›'; font-size: 18px; line-height: 1; color: var(--muted); transition: transform .15s; width: 10px; }
+.inputs details.defpar[open] > summary::before { transform: rotate(90deg); }
+.inputs details.defpar .dp-t { font-weight: 700; font-size: 13px; }
+.inputs details.defpar .dp-n { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); }
+.inputs details.defpar small { flex-basis: 100%; padding-left: 18px; color: var(--muted); font-size: 11.5px; }
+.inputs details.defpar .dp-body { padding: 0 0 6px; border-top: 1px dashed var(--border-strong); }
+.inputs details.defpar .grp { background: transparent; }

@@ -426,7 +426,7 @@
     const sumRows = r.summary.map(s => `<tr><td class="item">${EC.sym(s.item)}${s.r ? ` <span class="badge">${esc(s.r)}</span>` : ''}</td><td>${s.U === null ? '' : ubar(s.U)}</td><td>${s.ok ? '<span class="res ok">' + ic('check') + 'OK</span>' : '<span class="res bad">' + ic('x') + 'NOT OK</span>'}</td></tr>`).join('');
     const summary = `<div class="verdict-banner ${r.ok ? 'ok' : 'bad'}">${ic(r.ok ? 'check' : 'alert')}<div>${r.ok ? 'All checks satisfied - design OK' : 'REVISE - see NOT OK items'}<div style="font-weight:400;font-size:12px;opacity:.85">${r.summary.length} checks · ${r.summary.filter(s => !s.ok).length} not OK</div></div><div class="big">U<sub>max</sub> = ${fmt(r.Umax, 3)}</div></div>
       <div class="tbl-wrap"><table class="tbl sumtbl"><thead><tr><th>Item</th><th>Utilisation U</th><th>Status</th></tr></thead><tbody>${sumRows}</tbody></table></div>`;
-    const calc = `<div class="calc"><div class="ctitle">${esc(mod.name)} ${esc(e.mark)} – ${esc(mod.code)}</div>${r.report.map(row).join('')}
+    const calc = `<div class="calc"><div class="ctitle">${esc(mod.name)} ${esc(e.mark)} – ${esc(mod.code)}</div>${reportRows(r.report)}
       <div class="h1">${r.report.filter(x => x.k === 'h1').length + 1}. SUMMARY</div>${summary}</div>`;
     const spec = `<dl class="spec">${[['Element', `${e.mark} – ${mod.name}`], ['Location', `${e.level || '–'}, ${e.grid || '–'} (${e.qty || 1} no.)`], ['Design code', mod.code]].concat(r.spec || []).map(s => `<dt>${esc(s[0])}</dt><dd>${EC.sym(s[1])}</dd>`).join('')}</dl>
       <p class="text" style="color:var(--muted);font-size:12px;margin-top:12px">General: workmanship to EN 13670; reinforcement B500B to EN 10080 / ISO 6935-2; laps and anchorages to EN 1992-1-1 Section 11 unless shown; cover tolerance Δc_dev = 10 mm.</p>`;
@@ -438,8 +438,16 @@
     return `${head}<div class="card"><div class="tabs no-print" style="padding:0 10px;margin:0">${tabs.map(t => `<button data-tab="${t[0]}" class="${activeTab === t[0] ? 'active' : ''}">${t[1]}${t[0] === 'summary' ? ` <span class="res ${r.ok ? 'ok' : 'bad'}" style="padding:0 6px">${fmt(r.Umax, 2)}</span>` : ''}</button>`).join('')}</div>
       <div class="body">${[['summary', summary], ['calc', calc], ['spec', spec], ['detail', detail]].map(([k, h]) => `<div class="tab-pane" data-pane="${k}" style="${activeTab === k ? '' : 'display:none'}">${h}</div>`).join('')}</div></div>`;
   }
+  /* clean report: consecutive input rows (and plain constants) become one Design data table */
+  function reportRows(rep) {
+    let out = '', buf = [];
+    const flushT = () => { if (!buf.length) return; out += `<div class="ptab inp"><table><thead><tr><th>Design data</th><th>Symbol</th><th>Value</th></tr></thead><tbody>${buf.map(x => `<tr><td>${esc(x.l)}${x.r ? `<span class="ref">${EC.sym(x.r)}</span>` : ''}</td><td class="sy">${EC.sym(x.s || '')}</td><td class="vv">${typeof x.v === 'number' ? fmt(x.v, x.dp) : EC.sym(String(x.v))}${x.u ? ' ' + esc(x.u) : ''}</td></tr>`).join('')}</tbody></table></div>`; buf = []; };
+    rep.forEach(x => { if (x.k === 'v' && x.inp && !x.f && !x.n) { buf.push(x); return; } flushT(); out += row(x); });
+    flushT();
+    return out;
+  }
   function row(x) {
-    if (x.k === 'h1') return `<div class="h1">${esc(x.t)}</div>`;
+    if (x.k === 'h1') { const m = String(x.t).match(/^(\d+)[.)]?\s*(.*)$/); if (!m) return `<div class="h1">${esc(x.t)}</div>`; return `<div class="h1 step"><span class="stepn">Step ${m[1]}</span>${esc(EC.stepTitle(m[2]))}</div>`; }
     if (x.k === 'h2') return `<div class="h2">${esc(x.t)}</div>`;
     if (x.k === 'text') return `<div class="text">${EC.sym(x.t)}</div>`;
     if (x.k === 'note') return `<div class="note">${EC.sym(x.t)}</div>`;

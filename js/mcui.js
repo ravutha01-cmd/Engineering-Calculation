@@ -13,6 +13,9 @@
   const opts = { sub: true, all: false, areas: false, full: false };
   try { Object.assign(opts, JSON.parse(localStorage.getItem('cambo.wsopts') || '{}')); } catch (e) { /* ignore */ }
 
+  /* step headings: worksheet capitals -> sentence case, abbreviations kept */
+  EC.stepTitle = t => { t = String(t || '').trim(); if (t !== t.toUpperCase()) return t; const l = t.charAt(0) + t.slice(1).toLowerCase();
+    return l.replace(/\b(uls|sls|stm|en|ec\d*|rc|ndp|fem?|pt|cg|bs|iso|equ|str|geo|upl|hyd|nhs?|psi|spt|cpt|ptfe|sdof|mdof|udl|sw|ec[0-9])\b/gi, m => m.toUpperCase()).replace(/\b([a-z])(\d+)\b/g, (m, a, n) => a.toUpperCase() + n); };
   /* ---------- default parameters: shown collapsed in the input panel (also used by native elements) ---------- */
   const DEFRX = /\[NDP\]|partial factor|\bγ|^γ|factor for sustained|time of loading|modulus of elasticity|elastic modulus|\bE_s\b|unit weight|density|creep|shrink|aggregate|bond condition|crack width limit|deflection limit|limit L ?\/|ductility|redistribution|\bψ|combination factor|\bα_?c[ct]\b|number of (concrete )?fibres|iteration|tolerance|national annex|k_E\b|ultimate strain|strain limit/i;
   const DEFKEY = /^(γ|ψ|gamma|psi|k_tc|α_cc|α_ct|E_s|Es|D_lower|Dl|D_upper|φ_cr|ε_cs|w_lim|L_lim|n_f|Bond|be)$|^(γ|gamma)/;
@@ -411,7 +414,7 @@
         if (m) {
           if (first) out += `<div class="ctitle">${esc(txt)}</div>`;
           else if (m[1] === '4' || opts.full) out += `<div class="${m[1] === '4' ? 'h2' : 'h1'}">${esc(txt)}</div>`;
-          else { step++; const t2 = txt.replace(/^\d+[.)]?\s*/, ''); out += `<div class="h1 step"><span class="stepn">Step ${step}</span>${esc(t2.charAt(0) + t2.slice(1).toLowerCase())}</div>`; }
+          else { step++; const t2 = txt.replace(/^\d+[.)]?\s*/, ''); out += `<div class="h1 step"><span class="stepn">Step ${step}</span>${esc(EC.stepTitle(t2))}</div>`; }
           first = false; continue;
         }
         first = false;

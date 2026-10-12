@@ -27,6 +27,7 @@ Endpoints (JSON):
                                    sel=1: only the members selected in ETABS
     GET /modifiers                 stiffness / mass modifiers of the frame and area properties (and per-object overrides),
                                    with the material and what each property is used for (columns, beams, walls, slabs)
+    GET /piers?c=<combo>&c=...    wall piers: l_w, thickness, f_ck per storey and the envelope of M3, V2, N at the bottom of each storey
     GET /joints                    beam-column joints of the ETABS concrete frame design: beam/column capacity ratio and
                                    joint shear ratio per column (strong column / weak beam check)
     GET /axial?c=<combo>           columns (by label) and wall piers: plan position, area, material and axial force per storey
@@ -58,7 +59,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.15'
+VERSION = '1.16'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -256,6 +257,18 @@ class Etabs:
 
     def joints(self):
         return joints_from_model(self.attach())
+
+    def piers(self, combos):
+        m = self.attach()
+        if not combos:
+            raise BridgeError('Select at least one load combination')
+        cset = set(self.model_info()['combos'])
+        old = m.GetPresentUnits()
+        m.SetPresentUnits(KN_M_C)
+        try:
+            return piers_from_model(m, combos, cset)
+        finally:
+            m.SetPresentUnits(old)
 
     def axial(self, combo):
         m = self.attach()
@@ -947,6 +960,64 @@ def joints_from_model(m):
     return {'joints': out}
 
 
+def piers_from_model(m, combos, cset):
+    """wall piers: section per storey (length l_w, thickness, material) and the envelope of the pier forces at the bottom
+    of every storey over the combinations (|M3| in plane, |V2|, largest compression N)"""
+    setup = m.Results.Setup
+    setup.DeselectAllCasesAndCombosForOutput()
+    for c in combos:
+        ok(setup.SetComboSelectedForOutput(c, True) if c in cset else setup.SetCaseSelectedForOutput(c, True), 'select ' + c)
+    r = ok(m.Results.PierForce(0, [], [], [], [], [], [], [], [], [], []), 'Results.PierForce')
+    n, sto, pier, case, loc, P, V2, _V3, _T, _M2, M3 = r[:11]
+    env = {}
+    for i in range(n or 0):
+        if 'bot' not in str(loc[i]).lower():
+            continue
+        e = env.setdefault((pier[i], sto[i]), {'M': 0.0, 'V': 0.0, 'N': 0.0, 'case': case[i]})
+        if abs(M3[i]) > e['M']:
+            e['M'], e['case'] = abs(M3[i]), case[i]
+        e['V'] = max(e['V'], abs(V2[i]))
+        e['N'] = max(e['N'], -P[i])
+    mats, out = {}, []
+    for pn in ok(m.PierLabel.GetNameList(0, []), 'PierLabel.GetNameList')[1] or []:
+        try:
+            sp = ok(m.PierLabel.GetSectionProperties(pn, 0, [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], []), 'PierLabel.GetSectionProperties')
+        except BridgeError:
+            continue
+        ns, names, _ang, _na, _nl, wb, tb, _wt, _tt, matp = sp[:10]
+        levels = []
+        for i in range(ns or 0):
+            if matp[i] not in mats:
+                try:
+                    mats[matp[i]] = ok(m.PropMaterial.GetOConcrete_1(matp[i], 0, False, 0, 0, 0, 0, 0, 0, 0, 0), 'GetOConcrete_1')[0] / 1000
+                except Exception:
+                    mats[matp[i]] = 0.0
+            e = env.get((pn, names[i]))
+            if e:
+                levels.append({'story': names[i], 'lw': wb[i], 't': tb[i], 'fck': mats[matp[i]], 'M': e['M'], 'V': e['V'], 'N': e['N'], 'case': e['case']})
+        if levels:
+            out.append({'name': pn, 'levels': levels})
+    return {'piers': out}
+
+
+def mock_piers(forces):
+    """demo core walls W1-W4 (7 m along X, 6 m along Y, 250 mm C40 storeys 1-5, 200 mm C30 above): each wall takes 35 %
+    of the storey shear and overturning moment in its direction; N = core slab share + own weight (as the demo /axial)"""
+    out = []
+    for k, (L, d) in enumerate([(7.0, 'X'), (7.0, 'X'), (6.0, 'Y'), (6.0, 'Y')]):
+        lv = []
+        for i in range(10):
+            st = 'Story%d' % (i + 1)
+            t, f = (0.25, 40) if i < 5 else (0.2, 30)
+            fs = [r for r in forces if r['story'] == st and (r.get('loc') or 'Bottom').lower().startswith('bot')]
+            M = max([abs(r['MY'] if d == 'X' else r['MX']) for r in fs] or [0])
+            V = max([abs(r['VX'] if d == 'X' else r['VY']) for r in fs] or [0])
+            N = (42 / 4 * 9.2 + L * t * 3.2 * 25) * (10 - i)
+            lv.append({'story': st, 'lw': L, 't': t, 'fck': f, 'M': round(0.35 * M, 1), 'V': round(0.35 * V, 1), 'N': round(N, 1), 'case': 'G+0.3Q+E' + d})
+        out.append({'name': 'W%d' % (k + 1), 'levels': lv})
+    return {'piers': out}
+
+
 def mock_joints():
     """demo joints: 20 columns × 10 storeys (the top storey is exempt, 4.4.2.3); the joints at the section changes
     (top of Story3: C600 below, C500 above; top of Story7: C500 → C400) have the highest ratios, the perimeter ones most"""
@@ -1211,6 +1282,11 @@ class Mock:
     def joints(self):
         return mock_joints()
 
+    def piers(self, combos):
+        if not combos:
+            raise BridgeError('Select at least one load combination')
+        return mock_piers(self.building(combos)['forces'])
+
     def axial(self, combo):
         if not combo:
             raise BridgeError('Select the quasi-permanent load combination')
@@ -1449,6 +1525,8 @@ def make_handler(src, origins):
                     return self.send(200, src.modifiers())
                 if u.path == '/loads':
                     return self.send(200, src.loads())
+                if u.path == '/piers':
+                    return self.send(200, src.piers(q.get('c', [])))
                 if u.path == '/joints':
                     return self.send(200, src.joints())
                 if u.path == '/axial':

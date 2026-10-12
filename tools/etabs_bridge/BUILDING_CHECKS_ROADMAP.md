@@ -34,6 +34,7 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] Strong column / weak beam: beam/column capacity ratios (1.3·ΣM_Rb/ΣM_Rc) and joint shear ratios from the ETABS concrete frame design (bridge `/joints`, DesignConcrete.GetSummaryResultsJoint) - EN 1998-1 4.4.2.3(4) eq. 4.29, top storey exempt (4.4.2.3)
 
 - [x] Ductile walls (DCM): bridge `/piers` (pier sections and the M3 / V2 / N envelope per storey), moment envelope with tension shift a1 and the linear envelope of slender walls (EN 1998-1 5.4.2.4(5), Fig. 5.3), V_Ed = 1.5·V'_Ed (5.4.2.4(7)), h_cr (5.4.3.4.2(1)), ν_d ≤ 0.4 (5.4.3.4.1(2))
+- [x] Foundation design forces with capacity design: E_Fd = E_F,G + γ_Rd·Ω·E_F,E per support from the ETABS reactions of the seismic combinations split into (Max+Min)/2 and (Max−Min)/2 (EN 1998-1 4.4.2.6(2)-(3)), γ_Rd by q, Ω ≤ q, tension check with R_t;d and W_f
 ## Fixes
 - [x] 2026-10-11 · Notional loads asked the user to set them by hand when the notional table was not found (it was searched only among the tables that already had data). Now fully automatic: all tables searched (also empty ones, fields read with GetAllFieldsInTable); without such a table, a gravity analysis gives N per floor and H_i = θi·N is applied as storey joint loads (EN 1992-1-1 5.2(8))
 - [x] 2026-10-11 · Building checks guessed EN 1990 EQU combinations (CS-EQU) as seismic - now ULS
@@ -43,6 +44,6 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] 2026-10-12 · Building checks follow docs/CALCULATION_GUIDELINES.md 5: default parameters (ν, α drift limit, wind drift limit, overturning safety; φ, ε_cs, tilt limit; γ_d) fold into a “Default parameters” block with the count of changed values, as in the worksheet input panel
 
 ## Next
-- [ ] Foundation design forces from ETABS with capacity design: E_Fd = E_F,G + γ_Rd·Ω·E_F,E (γ_Rd = 1.2 / 1.0 for q ≤ 3, Ω from the linked elements) - EN 1998-1 4.4.2.6(2)-(4), 5.8.1
 - [ ] Steel frame design summary from ETABS: interaction ratios of every steel member (DesignSteel.GetSummaryResults, EN 1993-1-1 6.2 / 6.3.3 eq. 6.61-6.62) by storey and type, with the governing combination - overview and linked-member cross-check
 - [ ] Punching shear at the slab-column connections from ETABS: V_Ed per column and floor (column axial force difference), β from the eccentricity (EN 1992-1-1 6.4.3(3)-(6)), v_Ed at u_1 vs v_Rd,c and v_Rd,max at u_0 (6.4.4, 6.4.5) with the slab thickness and reinforcement
+- [ ] Column design forces from ETABS for DCM / DCH: capacity-design shear V_Ed = γ_Rd·ΣM_Rc/l_cl (EN 1998-1 5.4.2.3, 5.5.2.2) and the axial load limit ν_d ≤ 0.65 / 0.55 (5.4.3.2.1(3), 5.5.3.2.1(3)) per column and storey

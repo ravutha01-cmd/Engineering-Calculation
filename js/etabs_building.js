@@ -10,7 +10,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ROLES = { seis: 'Seismic', wind: 'Wind SLS', uls: 'ULS', off: 'Not used' };
   const ROLE_ORDER = ['seis', 'wind', 'uls', 'off'];
-  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false, epsV: 1.5, nuLim: 0.4 };
+  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false, epsV: 1.5, nuLim: 0.4, omega: 1.0 };
   let busy = '', err = '';
 
   const B = () => { const p = api.proj(); p.building = p.building || {}; const b = p.building; b.set = Object.assign({}, DEF, b.set || {}); b.roles = b.roles || {}; return b; };
@@ -435,6 +435,33 @@
       }).filter(Boolean);
       out.walls = { W, eps, nuL };
     }
+    // 20. foundation design forces - EN 1998-1 4.4.2.6(2): E_Fd = E_F,G + γ_Rd·Ω·E_F,E, γ_Rd = 1.0 for q ≤ 3, 1.2
+    //     otherwise; Ω = R_di/E_di ≤ q. For each seismic combination with Max / Min (response spectrum) the support
+    //     reactions split exactly into E_F,G = (Max + Min)/2 and E_F,E = (Max − Min)/2
+    out.fdn = null;
+    if ((d.supports || []).length) {
+      const ls = EC.loads && EC.loads.settings ? EC.loads.settings() : null, q = ls && +ls.q > 0 ? +ls.q : 3.9;
+      const gRd = q <= 3 ? 1.0 : 1.2, Om = Math.min(+s.omega || 1, q), k = gRd * Om, Wf = +s.Wf || 0, Rt = +s.Rtd || 0;
+      const withG = c => { const r = d.base.find(q => q.combo === c); return r && Math.abs(r.FZ) > 1; };
+      const list = [];
+      d.supports.forEach(p => {
+        const cs = [...new Set(p.rows.filter(r => role(r.combo) === 'seis' && withG(r.combo)).map(r => r.combo))];   // G + ψ2Q + E, not E alone
+        let best = null;
+        cs.forEach(c => {
+          const mx = p.rows.find(r => r.combo === c && /max/i.test(r.step || '')), mn = p.rows.find(r => r.combo === c && /min/i.test(r.step || ''));
+          if (!mx || !mn) return;
+          const G = f => (mx[f] + mn[f]) / 2, E = f => Math.abs(mx[f] - mn[f]) / 2;
+          const NG = G('FZ'), NE = E('FZ'), H = Math.hypot(Math.abs(G('FX')) + k * E('FX'), Math.abs(G('FY')) + k * E('FY'));
+          const r = { combo: c, NG, NE, Nmax: NG + k * NE, Nmin: NG - k * NE, H };
+          if (!best || r.Nmin < best.Nmin) best = Object.assign(r, { NmaxAll: Math.max(r.Nmax, best ? best.NmaxAll : -Infinity) });
+          else best.NmaxAll = Math.max(best.NmaxAll, r.Nmax);
+        });
+        if (!best) return;
+        const T = Math.max(0, -best.Nmin - 0.9 * Wf);
+        list.push(Object.assign(best, { label: p.label, x: +p.x, y: +p.y, T, U: T > 0 ? (Rt > 0 ? T / Rt : 9.99) : 0, min: { FZ: best.Nmin, combo: best.combo }, max: { FZ: best.NmaxAll } }));
+      });
+      if (list.length) out.fdn = { list, q, gRd, Om, k, capped: (+s.omega || 1) > q };
+    }
     return out;
   }
 
@@ -758,6 +785,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
         return any ? sumCard('pound', 'Seismic joint required / provided', Umax(R.pound), txt) : `<a class="card bc-sum" href="#bc-pound"><div class="label">Seismic joint required</div><div class="value">${fmt(w.req * 1000, 0)} <small>mm</small></div><div class="foot"><span>${w.dir} at ${esc(w.story)} · enter the joint width provided</span></div></a>`; })() : ''}
       ${R.diaph ? sumCard('diaph', 'Diaphragm in-plane shear τ/τ<sub>Rd</sub>', Umax(R.diaph.rows), (() => { const w = R.diaph.rows.reduce((a, r) => (!a || r.T > a.T ? r : a), null); return `chord T<sub>max</sub> = ${fmt(w.T, 0)} kN (${esc(w.story)} ${w.dir}) · A<sub>s</sub> = ${fmt(w.As, 0)} mm²`; })()) : ''}
       ${R.short ? sumCard('short', 'Differential shortening Δ/L', Umax(R.short.stacks), (() => { const w = R.short.stacks.reduce((a, k) => (!a || k.tot > a.tot ? k : a), null); return `roof δ<sub>max</sub> = ${fmt(w.tot * 1000, 1)} mm (${esc(w.name)}) · limit L/${R.short.lim}`; })()) : ''}
+      ${R.fdn ? sumCard('fdn', 'Foundation forces γ<sub>Rd</sub>Ω = ' + fmt(R.fdn.k, 2), Umax(R.fdn.list), (() => { const w = R.fdn.list.reduce((a, p) => (!a || p.NmaxAll > a.NmaxAll ? p : a), null); return `N<sub>Fd,max</sub> = ${fmt(w.NmaxAll, 0)} kN (${esc(w.label)}) · ${R.fdn.list.filter(p => p.T > 0).length} support(s) in tension`; })()) : ''}
       ${R.sup.list.length ? sumCard('sup', 'Support uplift F<sub>t,d</sub>/R<sub>t,d</sub>', Umax(R.sup.list), (() => { const w = R.sup.list.reduce((a, p) => (!a || p.min.FZ < a.min.FZ ? p : a), null); return `FZ<sub>min</sub> = ${fmt(w.min.FZ, 0)} kN at ${esc(w.label)}`; })()) : ''}
       ${(() => { const rs = R.wc.map(w => wcResult(wcEl(w.dir))).filter(x => x && x.U != null); return R.wc.length ? sumCard('wcomf', 'Wind comfort a<sub>peak</sub>/a<sub>lim</sub>', rs.length ? Math.max(...rs.map(x => x.U)) : null, rs.length ? `top acceleration ${R.wc.map(w => { const x = wcResult(wcEl(w.dir)); return w.dir + ' ' + (x && x.a ? x.a : '–'); }).join(' · ')}` : '') : ''; })()}
       ${R.acc.cases.some(c => c.U != null) ? sumCard('acc', 'Accidental eccentricity 0.05 / e', Umax(R.acc.cases), R.acc.cases.map(c => `${esc(c.case)} ${c.ecc != null ? fmt(c.ecc, 3) : '–'}`).join(' · ')) : ''}
@@ -865,6 +893,15 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
         ${tbl([['Stack', k => esc(k.name)], ['Kind', k => k.kind], ['σ<sub>c</sub> base MPa', k => fmt(k.sig0, 1), 'num'], ['δ roof mm <small>el + creep + sh</small>', k => `${mm(k.tot)} <small class="muted">${mm(k.el)} + ${mm(k.cr)} + ${mm(k.sh)}</small>`, 'num'], ['vs', k => esc(k.nb), ''], ['L m', k => fmt(k.L, 2), 'num'], ['Δ mm', k => `${mm(k.diff)} <small class="muted">${esc(k.at)}</small>`, 'num'], ['Δ/L', k => (k.tilt > 0 ? '1/' + fmt(1 / k.tilt, 0) : '–'), 'num'], ['U', k => api.ubar(k.U)]], top12)}</div>
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `Differential shortening above L/${R.short.lim} at ${bad.slice(0, 6).map(k => `${esc(k.name)}–${esc(k.nb)} (1/${fmt(1 / k.tilt, 0)} at ${esc(k.at)})`).join(', ')}${bad.length > 6 ? ', …' : ''} → set the columns long (pre-camber the formwork by the predicted difference), lower the column stress σ<sub>c</sub> or check the slabs and partitions for the imposed rotation.` : `Differential shortening between neighbouring columns and walls within L/${R.short.lim}.`} Roof: ${esc(mx.name)} ${mm(mx.tot)} mm, ${esc(mn.name)} ${mm(mn.tot)} mm - allow for it at cladding, lift and service joints.</div>
         <p class="muted bc-pad">N from ETABS for the quasi-permanent combination (columns by label through the storeys, walls by pier), E<sub>cm</sub> from f<sub>ck</sub>; steel E = 210 GPa without creep or shrinkage. The slab differential counts only the load placed after each floor is cast (N of the storey above; the floors are levelled during construction); shrinkage, similar in all stacks, is left out of it. A staged-construction analysis in ETABS gives the time-dependent values more exactly.</p>`);
+    }
+    if (R.fdn) {
+      const F = R.fdn, L2 = F.list, crit = L2.slice().sort((a, c) => a.Nmin - c.Nmin).slice(0, 12), up = L2.filter(p => p.T > 0), bad = up.filter(p => p.U > 1 + 1e-9);
+      html += card('fdn', 'Foundation design forces: capacity design', 'EN 1998-1 4.4.2.6(2)-(3) · EN 1998-5 5.3.1', `E<sub>Fd</sub> = E<sub>F,G</sub> + γ<sub>Rd</sub>·Ω·E<sub>F,E</sub> · q = ${fmt(F.q, 2)} → γ<sub>Rd</sub> = ${fmt(F.gRd, 1)} · Ω = ${fmt(F.Om, 2)}${F.capped ? ' (limited to q)' : ''} → γ<sub>Rd</sub>Ω = ${fmt(F.k, 2)} · E<sub>F,G</sub> = (Max+Min)/2, E<sub>F,E</sub> = (Max−Min)/2 of the seismic combinations`,
+        `<div class="bc-inputs">${num('omega', 'Ω overstrength R<sub>di</sub>/E<sub>di</sub>', '-', '0.05', 'of the column / wall above, 1 ≤ Ω ≤ q (4.4.2.6(2))')}</div>
+        <div class="bc-split">${supPlan(L2)}
+        ${tbl([['Support', p => esc(p.label)], ['N<sub>F,G</sub> kN', p => fmt(p.NG, 0), 'num'], ['N<sub>F,E</sub> kN', p => fmt(p.NE, 0), 'num'], ['N<sub>Fd,max</sub> kN', p => fmt(p.NmaxAll, 0), 'num'], ['N<sub>Fd,min</sub> kN', p => `${fmt(p.Nmin, 0)} <small class="muted">${esc(p.combo)}</small>`, 'num'], ['H<sub>Fd</sub> kN', p => fmt(p.H, 0), 'num'], ['F<sub>t;d</sub> kN', p => (p.T > 0 ? fmt(p.T, 0) : '–'), 'num'], ['U', p => (p.T > 0 ? api.ubar(Math.min(p.U, 9.99)) : '')]], crit)}</div>
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `With the capacity-design forces ${bad.length} support(s) go into tension above R<sub>t;d</sub> (${bad.slice(0, 6).map(p => `${esc(p.label)} ${fmt(p.T, 0)} kN`).join(', ')}) → tension piles / anchors or a heavier foundation (W<sub>f</sub>, R<sub>t;d</sub> in the support uplift card).` : up.length ? `Tension at ${up.length} support(s), within R<sub>t;d</sub>.` : 'All supports stay in compression with the capacity-design forces.'} Design the footings, pile caps and piles for N<sub>Fd</sub> and H<sub>Fd</sub> of this table (EN 1998-5 5.3.1) - not for the plain analysis reactions.</div>
+        <p class="muted bc-pad">Ω = R<sub>di</sub>/E<sub>di</sub> ≤ q of the dissipative element that most influences the foundation (the wall or column above: M<sub>Rd</sub>/M<sub>Ed</sub> at its base, from the linked element); for a common foundation of several elements, the largest Ω (4.4.2.6(3)-(4)). Seismic combinations without Max / Min rows (static, single sign) are not split and are left out. The 12 supports with the lowest N<sub>Fd,min</sub> are listed.</p>`);
     }
     if (R.sup.list.length) {
       const L = R.sup.list, up = L.filter(p => p.T > 0), bad = up.filter(p => p.U > 1 + 1e-9), crit = L.slice().sort((a, c) => a.min.FZ - c.min.FZ).slice(0, 12);

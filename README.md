@@ -52,6 +52,12 @@ Pro accounts with registration come later.
   - **Design by hand calculation (Mathcad)**: pick a Mathcad worksheet, enter section, materials and forces by hand. Lists at `#/elements`; the Mathcad library is in this section.
   - **Design with ETABS link**: a live link to the open ETABS model through the CSI API (no Excel export). Pick the load combinations, read beam / column / brace / pier forces and support reactions, envelope them and create or update linked elements designed for the governing combination. After re-running the analysis, **Sync linked elements** pushes the new forces into every linked element and keeps your section and bar edits. Link at `#/etabs`, linked elements at `#/linked`. An exported table (Excel / CSV / paste) is still accepted as an offline fallback.
 
+### Design analysis (draw → analyse → Mathcad design)
+
+A third design tool, in its own sidebar section (`#/analysis`). You draw the structure and the Mathcad worksheet designs it. The drawing only produces the worksheet's input tables, so no formula is retyped. See `docs/DESIGN_ANALYSIS_TOOLS.md`.
+
+- **Foundation · pile caps**: draw piles, columns and walls on a true-scale plan (grid snap, drag, undo), or start from a template (1–12 piles, a wall on piles, a combined cap, a core) or a pile grid. Type N, M_y, M_x, H_x and H_y per column / wall for each load combination. The `PileCap_Multi_EC2-2023_Standalone` worksheet runs once per combination. The plan shows the pile reactions coloured by R / N_Rd,p, and tables give the per-combination results with the envelope. The full EN 1992-1-1:2023 report of the governing combination sits below the drawing. Walls become worksheet load nodes (≤ 1 m segments, statics kept).
+
 ### Loads & combinations (ETABS)
 
 **Design with ETABS link → Loads & combinations** writes to the open ETABS model:
@@ -171,6 +177,7 @@ js/calc/common.js     calculation engine: materials, report builder, EC2 routine
 js/calc/*.js          quick design modules (earlier version, still open old elements)
 js/mcad/              Mathcad engine, compute, MathML renderer, worker, catalog
 js/mcui.js            worksheet elements: inputs, worksheet view, detailing, records
+js/analysis/          design analysis tools (drawing -> worksheet inputs): core.js, pilecap*.js
 js/config.js          Google client ID and Drive location (public, no secrets)
 js/auth.js            Demo / Admin accounts, sign-in page, Google sign-in
 js/sync.js            autosave + cloud sync (Google Drive / Claude account)

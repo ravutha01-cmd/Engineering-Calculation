@@ -60,7 +60,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.17'
+VERSION = '1.18'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -1139,20 +1139,20 @@ def axial_from_model(m, combo, is_combo):
 def mock_axial(combo, demo):
     """demo stacks: the 20 columns (tributary areas of the 6 m grid, 9.2 kN/m2 quasi-permanent) and the 4 core walls
     (42 m2 of core slab + own weight) - same as the Building checks demo"""
-    out = []
+    out, fac = [], 1.42 if str(combo).upper().startswith('ULS') else 1.0   # ULS gravity ≈ 1.42 × quasi-permanent
     pts = [(x, y) for y in (0, 6, 12, 18) for x in (0, 6, 12, 18, 24)]
     trib = lambda x, y: (3 if x in (0, 24) else 6) * (3 if y in (0, 18) else 6)
     for k, (x, y) in enumerate(pts):
         lv = []
         for i in range(10):
             a, f = (0.36, 40) if i < 3 else (0.25, 35) if i < 7 else (0.16, 30)
-            lv.append({'story': 'Story%d' % (i + 1), 'A': a, 'mat': 'Concrete', 'f': f, 'N': round(trib(x, y) * 9.2 * (10 - i), 1)})
+            lv.append({'story': 'Story%d' % (i + 1), 'A': a, 'mat': 'Concrete', 'f': f, 'N': round(trib(x, y) * 9.2 * fac * (10 - i), 1)})
         out.append({'name': 'C%d' % (k + 1), 'kind': 'column', 'x': x, 'y': y, 'levels': lv})
     for k, (x, y, L) in enumerate([(15.5, 6, 7), (15.5, 12, 7), (12, 9, 6), (18, 9, 6)]):
         lv = []
         for i in range(10):
             t, f = (0.25, 40) if i < 5 else (0.2, 30)
-            lv.append({'story': 'Story%d' % (i + 1), 'A': L * t, 'mat': 'Concrete', 'f': f, 'N': round((42 / 4 * 9.2 + L * t * 3.2 * 25) * (10 - i), 1)})
+            lv.append({'story': 'Story%d' % (i + 1), 'A': L * t, 'mat': 'Concrete', 'f': f, 'N': round((42 / 4 * 9.2 + L * t * 3.2 * 25) * fac * (10 - i), 1)})
         out.append({'name': 'W%d' % (k + 1), 'kind': 'wall', 'x': x, 'y': y, 'levels': lv})
     return {'combo': combo, 'stacks': out}
 

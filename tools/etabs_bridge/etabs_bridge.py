@@ -28,6 +28,7 @@ Endpoints (JSON):
     GET /modifiers                 stiffness / mass modifiers of the frame and area properties (and per-object overrides),
                                    with the material and what each property is used for (columns, beams, walls, slabs)
     GET /piers?c=<combo>&c=...    wall piers: l_w, thickness, f_ck per storey and the envelope of M3, V2, N at the bottom of each storey
+    GET /columns                   concrete columns of the ETABS concrete design: required longitudinal steel and shear steel
     GET /steel                     steel members of the ETABS steel frame design: governing ratio, type, location, combination
     GET /joints                    beam-column joints of the ETABS concrete frame design: beam/column capacity ratio and
                                    joint shear ratio per column (strong column / weak beam check)
@@ -60,7 +61,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.18'
+VERSION = '1.19'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -261,6 +262,15 @@ class Etabs:
 
     def steel(self):
         return steel_from_model(self.attach())
+
+    def columns(self):
+        m = self.attach()
+        old = m.GetPresentUnits()
+        m.SetPresentUnits(KN_M_C)
+        try:
+            return columns_from_model(m)
+        finally:
+            m.SetPresentUnits(old)
 
     def piers(self, combos):
         m = self.attach()
@@ -1049,6 +1059,44 @@ def steel_from_model(m):
     return {'members': out}
 
 
+def columns_from_model(m):
+    """concrete columns of the ETABS concrete frame design (run it first): largest required longitudinal steel (m2) and
+    shear reinforcement (m2/m) per column, with label, storey and the combination"""
+    try:
+        r = ok(m.DesignConcrete.GetSummaryResultsColumn('All', 0, [], [], [], [], [], [], [], [], [], [], [], [], 1), 'DesignConcrete.GetSummaryResultsColumn')
+    except BridgeError as e:
+        raise BridgeError('No concrete column design results - run Design > Concrete Frame Design > Start Design/Check in ETABS (' + str(e) + ')')
+    n, frame, _opt, _loc, pcombo, parea, pratio, vcombo, av, _vcm, avm = r[:11]
+    out = {}
+    for i in range(n or 0):
+        o = out.get(frame[i])
+        if o is None:
+            try:
+                label, story = ok(m.FrameObj.GetLabelFromName(frame[i], '', ''), 'FrameObj.GetLabelFromName')[:2]
+            except Exception:
+                label, story = frame[i], ''
+            o = out[frame[i]] = {'name': frame[i], 'label': label, 'story': story, 'As': 0.0, 'Av': 0.0, 'Avm': 0.0, 'combo': '', 'vcombo': ''}
+        if parea[i] > o['As']:
+            o['As'], o['combo'] = parea[i], pcombo[i]
+        if av[i] > o['Av']:
+            o['Av'], o['vcombo'] = av[i], vcombo[i]
+        o['Avm'] = max(o['Avm'], avm[i])
+    if not out:
+        raise BridgeError('No concrete column design results - run Design > Concrete Frame Design > Start Design/Check in ETABS')
+    return {'columns': list(out.values())}
+
+
+def mock_columns():
+    """demo column design: 1 % of the section as required longitudinal steel (C600 storeys 1-3, C500 4-7, C400 8-10)"""
+    out = []
+    for i in range(10):
+        h = 0.6 if i < 3 else 0.5 if i < 7 else 0.4
+        for k in range(20):
+            out.append({'name': str(500 + 20 * i + k), 'label': 'C%d' % (k + 1), 'story': 'Story%d' % (i + 1), 'As': round(0.01 * h * h, 6),
+                        'Av': 0.0005, 'Avm': 0.0005, 'combo': 'G+0.3Q+EX', 'vcombo': 'G+0.3Q+EX'})
+    return {'columns': out}
+
+
 def mock_steel():
     """demo steel: HEB300 bracing in the two end bays (8 braces, storeys 1-8) and IPE400 roof beams (Story10)"""
     out = []
@@ -1329,6 +1377,9 @@ class Mock:
     def steel(self):
         return mock_steel()
 
+    def columns(self):
+        return mock_columns()
+
     def piers(self, combos):
         if not combos:
             raise BridgeError('Select at least one load combination')
@@ -1574,6 +1625,8 @@ def make_handler(src, origins):
                     return self.send(200, src.loads())
                 if u.path == '/piers':
                     return self.send(200, src.piers(q.get('c', [])))
+                if u.path == '/columns':
+                    return self.send(200, src.columns())
                 if u.path == '/steel':
                     return self.send(200, src.steel())
                 if u.path == '/joints':

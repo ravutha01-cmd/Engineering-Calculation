@@ -30,6 +30,9 @@ Endpoints (JSON):
     GET /piers?c=<combo>&c=...    wall piers: l_w, thickness, f_ck per storey and the envelope of M3, V2, N at the bottom of each storey
     GET /beams?c=<QP combo>        concrete beams of the ETABS concrete design: section, length, required end steel, links and the
                                    gravity shear at the ends of the combination (beam capacity-design shear)
+    GET /slabdefl?c=<QP combo>     slab bays between the columns (orthogonal grid of the column / wall-corner points of each storey):
+                                   largest sag of the slab mesh relative to the bay corners for the combination, span, slab
+                                   property and its bending modifier (EN 1992-1-1 7.4.1(4)-(5))
     GET /columns                   concrete columns of the ETABS concrete design: required longitudinal steel and shear steel
     GET /steel                     steel members of the ETABS steel frame design: governing ratio, type, location, combination
     GET /joints                    beam-column joints of the ETABS concrete frame design: beam/column capacity ratio and
@@ -63,7 +66,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.20'
+VERSION = '1.21'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -274,6 +277,18 @@ class Etabs:
         m.SetPresentUnits(KN_M_C)
         try:
             return beams_from_model(m, combo, combo in cset)
+        finally:
+            m.SetPresentUnits(old)
+
+    def slabdefl(self, combo):
+        m = self.attach()
+        if not combo:
+            raise BridgeError('Select the quasi-permanent load combination (G + psi2 Q)')
+        cset = set(self.model_info()['combos'])
+        old = m.GetPresentUnits()
+        m.SetPresentUnits(KN_M_C)
+        try:
+            return slabdefl_from_model(m, combo, combo in cset)
         finally:
             m.SetPresentUnits(old)
 
@@ -1142,6 +1157,105 @@ def beams_from_model(m, combo, is_combo):
     return {'combo': combo, 'beams': out}
 
 
+def slabdefl_from_model(m, combo, is_combo):
+    """slab bays between the supports of each storey and their sag for `combo`: supports = top points of the columns and the top
+    corner points of the walls at the storey; bays = rectangles of the orthogonal grid through the supports with a support at
+    3 or 4 corners; sag = largest downward U3 of the floor-slab mesh points inside the bay minus the mean U3 of its corners (m)"""
+    setup = m.Results.Setup
+    setup.DeselectAllCasesAndCombosForOutput()
+    ok(setup.SetComboSelectedForOutput(combo, True) if is_combo else setup.SetCaseSelectedForOutput(combo, True), 'select ' + combo)
+    r = ok(m.Results.JointDispl('All', 2, 0, [], [], [], [], [], [], [], [], [], []), 'Results.JointDispl')
+    n, _obj, elm, _case, _st, _sn, _U1, _U2, U3 = r[:9]
+    u3 = {}
+    for i in range(n or 0):
+        u3[elm[i]] = min(u3.get(elm[i], 0.0), U3[i])   # envelope: most downward
+    supp, pts, props, mods = {}, {}, {}, {}
+    def pelm_xy(pe):
+        return ok(m.PointElm.GetCoordCartesian(pe, 0, 0, 0), 'PointElm.GetCoordCartesian')[:3]
+    def add_support(pt):
+        story = ok(m.PointObj.GetLabelFromName(pt, '', ''), 'PointObj.GetLabelFromName')[1]
+        pe = ok(m.PointObj.GetElm(pt, ''), 'PointObj.GetElm')[0]
+        x, y, _z = ok(m.PointObj.GetCoordCartesian(pt, 0, 0, 0), 'PointObj.GetCoordCartesian')[:3]
+        supp.setdefault(story, {})[(round(x, 3), round(y, 3))] = pe
+    for fr in ok(m.FrameObj.GetNameList(0, []), 'FrameObj.GetNameList')[1] or []:
+        try:
+            if ok(m.FrameObj.GetDesignOrientation(fr, 0), 'FrameObj.GetDesignOrientation')[0] != 1:   # 1 = column
+                continue
+            p1, p2 = ok(m.FrameObj.GetPoints(fr, '', ''), 'FrameObj.GetPoints')[:2]
+            z1, z2 = [ok(m.PointObj.GetCoordCartesian(p, 0, 0, 0), 'PointObj.GetCoordCartesian')[2] for p in (p1, p2)]
+            add_support(p2 if z2 >= z1 else p1)
+        except Exception:
+            continue
+    for ar in ok(m.AreaObj.GetNameList(0, []), 'AreaObj.GetNameList')[1] or []:
+        try:
+            orient = ok(m.AreaObj.GetDesignOrientation(ar, 0), 'AreaObj.GetDesignOrientation')[0]   # 1 = wall, 2 = floor
+            if orient == 1:
+                corners = ok(m.AreaObj.GetPoints(ar, 0, []), 'AreaObj.GetPoints')[1] or []
+                zs = [ok(m.PointObj.GetCoordCartesian(p, 0, 0, 0), 'PointObj.GetCoordCartesian')[2] for p in corners]
+                for p, z in zip(corners, zs):
+                    if z >= max(zs) - 1e-3:
+                        add_support(p)
+            elif orient == 2:
+                story = ok(m.AreaObj.GetLabelFromName(ar, '', ''), 'AreaObj.GetLabelFromName')[1]
+                prop = ok(m.AreaObj.GetProperty(ar, ''), 'AreaObj.GetProperty')[0]
+                if prop not in mods:
+                    try:
+                        mp = list(ok(m.PropArea.GetModifiers(prop, []), 'PropArea.GetModifiers')[0])
+                    except Exception:
+                        mp = [1.0] * 10
+                    mods[prop] = mp
+                try:
+                    mo = list(ok(m.AreaObj.GetModifiers(ar, []), 'AreaObj.GetModifiers')[0])
+                except Exception:
+                    mo = [1.0] * 10
+                mb = (mods[prop][3] * mo[3] + mods[prop][4] * mo[4]) / 2   # m11, m22: slab bending modifier
+                for ae in ok(m.AreaObj.GetElm(ar, 0, []), 'AreaObj.GetElm')[1] or []:
+                    for pe in ok(m.AreaElm.GetPoints(ae, 0, []), 'AreaElm.GetPoints')[1] or []:
+                        if pe not in pts:
+                            x, y, _z = pelm_xy(pe)
+                            pts[pe] = (story, x, y)
+                            props[pe] = (prop, mb)
+        except Exception:
+            continue
+    out = []
+    for story, sp in supp.items():
+        xs, ys = sorted({k[0] for k in sp}), sorted({k[1] for k in sp})
+        mesh = [(pe, x, y) for pe, (s_, x, y) in pts.items() if s_ == story and pe in u3]
+        for x0, x1 in zip(xs, xs[1:]):
+            for y0, y1 in zip(ys, ys[1:]):
+                if x1 - x0 < 1.5 or y1 - y0 < 1.5:
+                    continue
+                cs = [sp[c] for c in ((x0, y0), (x1, y0), (x0, y1), (x1, y1)) if c in sp and sp[c] in u3]
+                inside = [(pe, x, y) for pe, x, y in mesh if x0 - 1e-3 <= x <= x1 + 1e-3 and y0 - 1e-3 <= y <= y1 + 1e-3]
+                if len(cs) < 3 or len(inside) < 3:
+                    continue
+                ref = sum(u3[c] for c in cs) / len(cs)
+                pe, x, y = min(inside, key=lambda t: u3[t[0]])
+                d = ref - u3[pe]
+                prop, mb = props[pe]
+                out.append({'story': story, 'x0': x0, 'x1': x1, 'y0': y0, 'y1': y1, 'Lx': x1 - x0, 'Ly': y1 - y0, 'd': max(d, 0.0),
+                            'at': [x, y], 'n': len(inside), 'prop': prop, 'm': mb})
+    if not out:
+        raise BridgeError('No slab bays found - the floor slabs need a mesh and columns or walls at the bay corners, and the model must be analysed')
+    return {'combo': combo, 'panels': out}
+
+
+def mock_slabdefl(combo):
+    """demo slab bays 6 x 6 m between the columns (x 0 ... 24, y 0 ... 18), S200 C30 with the slab bending modifier 0.25:
+    sag of G + 0.3Q relative to the corners (1.7 c + 0.6 mm)/0.25, c = 0.5 interior / 0.65 edge / 0.8 corner bay,
+    roof plant x 1.8 on the two middle bays of Story10"""
+    out = []
+    for i in range(10):
+        for x in range(0, 24, 6):
+            for y in range(0, 18, 6):
+                ex, ey = x in (0, 18), y in (0, 12)
+                c = 0.8 if ex and ey else 0.65 if ex or ey else 0.5
+                plant = 1.8 if i == 9 and y == 6 and x in (6, 12) else 1
+                out.append({'story': 'Story%d' % (i + 1), 'x0': x, 'x1': x + 6, 'y0': y, 'y1': y + 6, 'Lx': 6, 'Ly': 6,
+                            'd': round((1.7 * c + 0.6) / 0.25 * plant * 100) / 1e5, 'at': [x + 3, y + 3], 'n': 25, 'prop': 'S200 C30', 'm': 0.25})
+    return {'combo': combo, 'panels': out}
+
+
 def mock_beams(combo):
     """demo beams B300x600 C30, 6 m spans on the grid (X lines y = 0, 6, 12, 18; Y lines x = 0 ... 24), every storey;
     top steel 1200 / 900 mm2 (interior / edge ends), bottom 800 mm2, links 800 / 500 mm2/m (interior / edge beams); V_g = 9.2 kN/m2 x 3 m x 6 m / 2"""
@@ -1463,6 +1577,11 @@ class Mock:
             raise BridgeError('Select the quasi-permanent load combination (G + psi2 Q)')
         return mock_beams(combo)
 
+    def slabdefl(self, combo):
+        if not combo:
+            raise BridgeError('Select the quasi-permanent load combination (G + psi2 Q)')
+        return mock_slabdefl(combo)
+
     def piers(self, combos):
         if not combos:
             raise BridgeError('Select at least one load combination')
@@ -1710,6 +1829,8 @@ def make_handler(src, origins):
                     return self.send(200, src.piers(q.get('c', [])))
                 if u.path == '/beams':
                     return self.send(200, src.beams(q.get('c', [''])[0]))
+                if u.path == '/slabdefl':
+                    return self.send(200, src.slabdefl(q.get('c', [''])[0]))
                 if u.path == '/columns':
                     return self.send(200, src.columns())
                 if u.path == '/steel':

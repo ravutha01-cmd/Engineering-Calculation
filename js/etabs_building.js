@@ -10,7 +10,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ROLES = { seis: 'Seismic', wind: 'Wind SLS', uls: 'ULS', off: 'Not used' };
   const ROLE_ORDER = ['seis', 'wind', 'uls', 'off'];
-  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, rhoL: 0.006, punchCov: 0.035, flatSlab: false, dcl: 'M', hb: 0.6, colCov: 0.05, beamCov: 0.05, colW: 0.5, cotTh: 1.0, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false, epsV: 1.5, nuLim: 0.4, omega: 1.0 };
+  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, rhoL: 0.006, punchCov: 0.035, flatSlab: false, dcl: 'M', hb: 0.6, colCov: 0.05, beamCov: 0.05, colW: 0.5, cotTh: 1.0, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false, epsV: 1.5, nuLim: 0.4, omega: 1.0, slabCr: 2.0, slabEta: 0.6, slabL1: 250, slabL2: 500, slabLT: false };
   let busy = '', err = '';
 
   const B = () => { const p = api.proj(); p.building = p.building || {}; const b = p.building; b.set = Object.assign({}, DEF, b.set || {}); b.roles = b.roles || {}; return b; };
@@ -130,6 +130,19 @@
       [0, 6, 12, 18, 24].forEach(x => [0, 6, 12].forEach(y => add(i, x === 0 || x === 24, y === 0, y === 12)));
     }
     return { combo: 'SLS-QP G+0.3Q', beams: out };
+  }
+
+  /* demo slab panels (same as the --mock bridge /slabdefl): 6 × 6 m bays between the columns, S200 C30 with the model's
+     slab bending modifier 0.25; ETABS deflection of G+0.3Q relative to the bay corners = (1.7·c + 0.6 mm)/0.25,
+     c = 0.5 interior / 0.65 edge / 0.8 corner bay; roof plant (× 1.8) on the two middle bays of Story10 */
+  function demoSlabDefl() {
+    const out = [];
+    for (let i = 0; i < 10; i++) for (let x = 0; x < 24; x += 6) for (let y = 0; y < 18; y += 6) {
+      const ex = x === 0 || x === 18, ey = y === 0 || y === 12, c = ex && ey ? 0.8 : ex || ey ? 0.65 : 0.5, plant = i === 9 && y === 6 && (x === 6 || x === 12) ? 1.8 : 1;
+      const d = Math.round((1.7 * c + 0.6) / 0.25 * plant * 100) / 1e5;
+      out.push({ story: 'Story' + (i + 1), x0: x, x1: x + 6, y0: y, y1: y + 6, Lx: 6, Ly: 6, d, at: [x + 3, y + 3], n: 25, prop: 'S200 C30', m: 0.25 });
+    }
+    return { combo: 'SLS-QP G+0.3Q', panels: out };
   }
 
   /* ---------- checks ---------- */
@@ -578,6 +591,25 @@
       });
       if (rows.length) out.beams = { rows, gRd, H, combo: BM.combo, cot };
     }
+    // 25. slab deflection - EN 1992-1-1 7.4.1(4)-(5): sag of each slab bay between the columns relative to its corners from the
+    //     ETABS joint displacements of the quasi-permanent combination. ETABS linear analysis → long-term:
+    //     δ_LT = δ_ETABS·m·k_cr·(1 + φ) (m = slab bending modifier of the model, so δ_ETABS·m is the uncracked value;
+    //     k_cr = I_g/I_eff cracked; φ creep, effective modulus 7.4.3(5)); δ after the partitions δ_inc = δ_ETABS·m·k_cr·(1 + φ − η)
+    //     (η = part of the quasi-permanent load on before the partitions, its instantaneous deflection is excluded).
+    //     Limits span/250 (appearance) and span/500 (damage to partitions); span = longer side of the bay (sag measured from the columns).
+    out.slab = null;
+    const SD = d.slabDefl;
+    if (SD && (SD.panels || []).length) {
+      const phi = +s.phi || 0, kcr = +s.slabCr || 1, eta = +s.slabEta || 0, L1 = +s.slabL1 || 250, L2 = +s.slabL2 || 500, lt = !!s.slabLT;
+      const zOf4 = {}; st.forEach(x => { zOf4[x.name] = x.elev; });
+      const rows = SD.panels.filter(p => zOf4[p.story] !== undefined && p.d != null).map(p => {
+        const L = Math.max(+p.Lx || 0, +p.Ly || 0), mm = p.m > 0 ? +p.m : 1;
+        const dLT = lt ? +p.d : +p.d * mm * kcr * (1 + phi), dInc = dLT * Math.max(0, 1 + phi - eta) / (1 + phi);
+        const U1 = L > 0 ? dLT / (L / L1) : 0, U2 = L > 0 ? dInc / (L / L2) : 0;
+        return { story: p.story, z: zOf4[p.story], bay: [p.x0, p.x1, p.y0, p.y1].map(v => String(Math.round(v * 10) / 10)).reduce((t, v, i) => t + (i === 1 || i === 3 ? '–' : i === 2 ? ' / ' : '') + v, ''), Lx: +p.Lx, Ly: +p.Ly, L, dE: +p.d, m: mm, prop: p.prop || '', dLT, dInc, U1, U2, U: Math.max(U1, U2) };
+      });
+      if (rows.length) out.slab = { rows, combo: SD.combo, phi, kcr, eta, L1, L2, lt, k: lt ? 1 : (rows[0].m * kcr * (1 + phi)) };
+    }
     return out;
   }
 
@@ -902,6 +934,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       ${R.diaph ? sumCard('diaph', 'Diaphragm in-plane shear τ/τ<sub>Rd</sub>', Umax(R.diaph.rows), (() => { const w = R.diaph.rows.reduce((a, r) => (!a || r.T > a.T ? r : a), null); return `chord T<sub>max</sub> = ${fmt(w.T, 0)} kN (${esc(w.story)} ${w.dir}) · A<sub>s</sub> = ${fmt(w.As, 0)} mm²`; })()) : ''}
       ${R.short ? sumCard('short', 'Differential shortening Δ/L', Umax(R.short.stacks), (() => { const w = R.short.stacks.reduce((a, k) => (!a || k.tot > a.tot ? k : a), null); return `roof δ<sub>max</sub> = ${fmt(w.tot * 1000, 1)} mm (${esc(w.name)}) · limit L/${R.short.lim}`; })()) : ''}
       ${R.beams ? sumCard('beamcd', `Beams DC${R.beams.H ? 'H' : 'M'} V<sub>Ed,CD</sub>/V<sub>Rd,s</sub>`, Umax(R.beams.rows), `${R.beams.rows.filter(r => r.U > 1 + 1e-9).length} of ${R.beams.rows.length} beams need more links than the ETABS design`) : ''}
+      ${R.slab ? sumCard('slabd', 'Slab deflection δ/(span/' + R.slab.L1 + ', /' + R.slab.L2 + ')', Umax(R.slab.rows), (() => { const w = R.slab.rows.reduce((a, r) => (!a || r.U > a.U ? r : a), null); return `δ<sub>LT</sub> ${fmt(w.dLT * 1000, 1)} mm, after partitions ${fmt(w.dInc * 1000, 1)} mm (${esc(w.story)}, bay ${w.bay})`; })()) : ''}
       ${R.cols ? sumCard('cols', `Columns DC${R.cols.H ? 'H' : 'M'} ν<sub>d</sub> / ${fmt(R.cols.nuLim, 2)}`, Umax(R.cols.rows), (() => { const w = R.cols.rows.reduce((a, r) => (!a || Math.max(r.Vx, r.Vy) > Math.max(a.Vx, a.Vy) ? r : a), null); return `V<sub>Ed,CD</sub> max ${fmt(Math.max(w.Vx, w.Vy), 0)} kN (${esc(w.col)} ${esc(w.story)})`; })()) : ''}
       ${R.punch && s.flatSlab ? sumCard('punch', 'Punching v<sub>Ed</sub>/v<sub>Rd,c</sub>', Math.max(...R.punch.rows.map(r => r.U1)), `${R.punch.rows.filter(r => r.U1 > 1 + 1e-9).length} connection(s) need punching reinforcement · v<sub>Rd,max</sub> ${R.punch.rows.some(r => r.U0 > 1 + 1e-9) ? 'exceeded' : 'OK'}`) : ''}
       ${R.steel ? sumCard('steel', 'Steel frame design ratio', Umax(R.steel.rows), `${R.steel.rows.length} members · ${R.steel.rows.filter(r => r.U > 1 + 1e-9).length} over 1.0 · ${R.steel.rows.filter(r => r.err).length} with design errors`) : ''}
@@ -1022,6 +1055,17 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
         ${tbl([['Beam', r => esc(r.label)], ['Storey', r => esc(r.story)], ['Section', r => esc(r.sec)], ['l<sub>cl</sub> m', r => fmt(r.lcl, 2), 'num'], ['ΣM<sub>Rb</sub> kN·m', r => fmt(r.SM, 0), 'num'], ['V<sub>g</sub> kN', r => fmt(r.Vg, 0), 'num'], ['V<sub>Ed,CD</sub> kN', r => fmt(r.VCD, 0), 'num'], ['V<sub>Rd,s</sub> kN', r => fmt(r.VRs, 0), 'num'], ['U', r => api.ubar(Math.min(r.U, 9.99))]], crit)}</div>
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.length} beam(s) where the capacity-design shear exceeds what the ETABS links resist → design the links of the critical regions (l<sub>cr</sub> = h<sub>w</sub>, 5.4.3.1.2) for V<sub>Ed,CD</sub>, not for the analysis shear.` : 'The ETABS links resist the capacity-design shear in every beam.'}${Bm.H ? ' DCH: also the cyclic shear rules of 5.5.3.1.2(2)-(3) (ζ = V<sub>min</sub>/V<sub>max</sub>, inclined bars).' : ''}</div>
         <p class="muted bc-pad">M<sub>Rb</sub> from the steel the ETABS concrete design requires at the beam ends (top for hogging, bottom for sagging) - use the provided bars for the final design. The beam-end moments are not reduced by ΣM<sub>Rc</sub>/ΣM<sub>Rb</sub> (strong columns assumed, conservative). V<sub>g</sub> = gravity shear at the ends from the quasi-permanent combination.</p>`);
+    }
+    if (R.slab) {
+      const S = R.slab, crit = S.rows.slice().sort((a, c) => c.U - a.U).slice(0, 12), bad1 = S.rows.filter(r => r.U1 > 1 + 1e-9), bad2 = S.rows.filter(r => r.U2 > 1 + 1e-9), mm = v => fmt(v * 1000, 1);
+      const perSt = key => R.st.map(x => { const rs = S.rows.filter(r => r.story === x.name); return rs.length ? { story: x.name, z: x.elev, v: Math.max(...rs.map(r => r[key])) } : null; }).filter(Boolean);
+      const ltChk = `<label class="bc-in"><span>ETABS combination is already long-term cracked</span><input type="checkbox" data-bcset="slabLT" ${s.slabLT ? 'checked' : ''} style="width:20px;height:20px"><small>e.g. a Nonlinear (Long Term Cracked) case: δ is used as read</small></label>`;
+      html += card('slabd', 'Slab deflection (quasi-permanent)', 'EN 1992-1-1 7.4.1(4)-(5) · 7.4.3', S.lt ? `δ<sub>LT</sub> = δ<sub>ETABS</sub> of ${esc(S.combo)} (long-term cracked analysis)` : `δ<sub>LT</sub> = δ<sub>ETABS</sub>·m·k<sub>cr</sub>·(1 + φ) = ${fmt(S.k, 2)}·δ<sub>ETABS</sub> · δ after the partitions = δ<sub>LT</sub>·(1 + φ − η)/(1 + φ) · ${esc(S.combo)}`,
+        `<div class="bc-inputs">${ltChk}</div>${dp(['phi', 'slabCr', 'slabEta', 'slabL1', 'slabL2'], `${num('phi', 'φ(∞,t<sub>0</sub>) creep coefficient', '-', '0.1', 'EN 1992-1-1 Fig. 3.1')}${num('slabCr', 'k<sub>cr</sub> = I<sub>g</sub>/I<sub>eff</sub> (cracking)', '-', '0.1', 'cracked two-way slab ≈ 1.5–2.5')}${num('slabEta', 'η part of the load before the partitions', '-', '0.05', 'self-weight share of G+ψ<sub>2</sub>Q')}${num('slabL1', 'Appearance limit span /', '-', '10', '7.4.1(4): 250')}${num('slabL2', 'Partitions limit span /', '-', '10', '7.4.1(5): 500')}`)}
+        <div class="bc-split">${profile([{ n: 'δ_LT/(span/' + S.L1 + ')', c: '--s1', pts: perSt('U1') }, { n: 'δ after partitions/(span/' + S.L2 + ')', c: '--s2', pts: perSt('U2') }], { title: 'Slab deflection per storey (worst bay)', xlabel: 'δ / limit', limit: 1, fmt: v => fmt(v, 2) })}
+        ${tbl([['Storey', r => esc(r.story)], ['Bay x / y m', r => `<span style="white-space:nowrap">${r.bay}</span>`], ['Span m', r => fmt(r.L, 2), 'num'], ['δ<sub>ETABS</sub> mm', r => mm(r.dE), 'num'], ['m', r => fmt(r.m, 2), 'num'], ['δ<sub>LT</sub> mm', r => `${mm(r.dLT)} <small class="muted">≤ ${mm(r.L / S.L1)}</small>`, 'num'], ['δ<sub>inc</sub> mm', r => `${mm(r.dInc)} <small class="muted">≤ ${mm(r.L / S.L2)}</small>`, 'num'], ['U', r => api.ubar(r.U)]], crit)}</div>
+        <div class="bc-verdict ${bad1.length || bad2.length ? 'bad' : 'ok'}">${bad1.length ? `δ<sub>LT</sub> above span/${S.L1} in ${bad1.length} bay(s) → camber the formwork (up to span/250, 7.4.1(4)) or stiffen the slab. ` : ''}${bad2.length ? `Deflection after the partitions above span/${S.L2} in ${bad2.length} bay(s) (${bad2.slice(0, 4).map(r => esc(r.story) + ' ' + r.bay).join(', ')}) → thicker slab, more reinforcement (lower k<sub>cr</sub>), later partitions (higher η) or deflection-tolerant partition heads.` : ''}${!bad1.length && !bad2.length ? `Every slab bay within span/${S.L1} long-term and span/${S.L2} after the partitions.` : ''}</div>
+        <p class="muted bc-pad">δ<sub>ETABS</sub> = largest sag of the slab mesh inside each bay between four columns, relative to the mean of its corners, from the ETABS linear analysis of the quasi-permanent combination; m rescales it to the gross section (slab bending modifier of the model). The span-to-depth rules of 7.4.2 or the slab's own EC2 deflection calculation (7.4.3, interpolation ζ) remain the reference for the final design.</p>`);
     }
     if (R.cols) {
       const C = R.cols, crit = C.rows.slice().sort((a, c) => c.U - a.U || Math.max(c.Vx, c.Vy) - Math.max(a.Vx, a.Vy)).slice(0, 12), bad = C.rows.filter(r => r.U > 1 + 1e-9);
@@ -1159,7 +1203,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
       if (d.bc === 'demo') {
-        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); b.data.axialE = demoAxial(1, 'G+0.3Q+EX'); b.data.colDesign = demoColumns(); b.data.beamDesign = demoBeams(); b.data.joints = demoJoints(); b.data.piers = demoPiers(b.data); b.data.steel = demoSteel(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
+        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); b.data.axialE = demoAxial(1, 'G+0.3Q+EX'); b.data.colDesign = demoColumns(); b.data.beamDesign = demoBeams(); b.data.slabDefl = demoSlabDefl(); b.data.joints = demoJoints(); b.data.piers = demoPiers(b.data); b.data.steel = demoSteel(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
         b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
         Object.assign(b.roles, DEMO_ROLES); Object.assign(b.set, { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, Bx: 24, By: 18, fos: 1.0 });
         let n = 0;   // demo ETABS-linked members (beams, columns, footings) for the P-Δ member design
@@ -1199,6 +1243,9 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
             .then(() => { const ms = EC.etabs.live.L.model ? EC.etabs.live.L.model.combos : [], qp = b.set.qpCombo && ms.includes(b.set.qpCombo) ? b.set.qpCombo : ms.find(c => /qp|quasi|perm/i.test(c));
               if (!qp) { b.data.beamDesign = null; return; }
               return EC.etabs.live.get('/beams?c=' + encodeURIComponent(qp)).then(bj => { b.data.beamDesign = bj; }, () => { b.data.beamDesign = null; }); })
+            .then(() => { const ms = EC.etabs.live.L.model ? EC.etabs.live.L.model.combos : [], qp = b.set.qpCombo && ms.includes(b.set.qpCombo) ? b.set.qpCombo : ms.find(c => /qp|quasi|perm/i.test(c));
+              if (!qp) { b.data.slabDefl = null; return; }
+              return EC.etabs.live.get('/slabdefl?c=' + encodeURIComponent(qp)).then(sj => { b.data.slabDefl = sj; }, () => { b.data.slabDefl = null; }); })
             .then(() => EC.etabs.live.get('/columns').then(cj => { b.data.colDesign = cj.columns || []; }, () => { b.data.colDesign = []; }))
             .then(() => { const se = Object.keys(b.roles).filter(c => b.roles[c] === 'seis' && (b.data.base || []).some(r => r.combo === c && Math.abs(r.FZ) > 1)).sort((a, c) => Math.abs((b.data.base.find(r => r.combo === c) || {}).FZ || 0) - Math.abs((b.data.base.find(r => r.combo === a) || {}).FZ || 0))[0];
               if (!se) { b.data.axialE = null; return; }
@@ -1228,5 +1275,5 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
     };
   }
 
-  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); d.axialE = demoAxial(1, 'G+0.3Q+EX'); d.colDesign = demoColumns(); d.beamDesign = demoBeams(); d.joints = demoJoints(); d.piers = demoPiers(d); d.steel = demoSteel(); return d; }, _demoRoles: DEMO_ROLES };
+  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); d.axialE = demoAxial(1, 'G+0.3Q+EX'); d.colDesign = demoColumns(); d.beamDesign = demoBeams(); d.slabDefl = demoSlabDefl(); d.joints = demoJoints(); d.piers = demoPiers(d); d.steel = demoSteel(); return d; }, _demoRoles: DEMO_ROLES };
 })();

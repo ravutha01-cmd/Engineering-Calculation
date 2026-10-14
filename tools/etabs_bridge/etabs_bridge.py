@@ -36,6 +36,8 @@ Endpoints (JSON):
     GET /staged[?c=<case>]         staged-construction load cases of the model and, for the case (default: the first), per
                                    column (by label) and wall pier and storey the axial force N and the vertical displacement U3
                                    of its top at the last stage (EN 1992-1-1 3.1.4, EN 1990 execution stages)
+    GET /spandrels?c=<combo>&c=... spandrels (coupling beams): length, depth, thickness, f_ck per storey and the envelope
+                                   of |V2| and |M3| at both ends over the combinations (EN 1998-1 5.5.3.5)
     GET /columns                   concrete columns of the ETABS concrete design: required longitudinal steel and shear steel
     GET /steel                     steel members of the ETABS steel frame design: governing ratio, type, location, combination
     GET /joints                    beam-column joints of the ETABS concrete frame design: beam/column capacity ratio and
@@ -69,7 +71,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.22'
+VERSION = '1.23'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -322,6 +324,18 @@ class Etabs:
         m.SetPresentUnits(KN_M_C)
         try:
             return piers_from_model(m, combos, cset)
+        finally:
+            m.SetPresentUnits(old)
+
+    def spandrels(self, combos):
+        m = self.attach()
+        if not combos:
+            raise BridgeError('Select at least one seismic load combination')
+        cset = set(self.model_info()['combos'])
+        old = m.GetPresentUnits()
+        m.SetPresentUnits(KN_M_C)
+        try:
+            return spandrels_from_model(m, combos, cset)
         finally:
             m.SetPresentUnits(old)
 
@@ -1055,6 +1069,57 @@ def piers_from_model(m, combos, cset):
     return {'piers': out}
 
 
+def spandrels_from_model(m, combos, cset):
+    """spandrel labels (coupling beams): per storey length, depth and thickness (larger end), f_ck, and the envelope of |V2|
+    and |M3| at the left / right ends over the combinations (Results.SpandrelForce)"""
+    setup = m.Results.Setup
+    setup.DeselectAllCasesAndCombosForOutput()
+    for c in combos:
+        ok(setup.SetComboSelectedForOutput(c, True) if c in cset else setup.SetCaseSelectedForOutput(c, True), 'select ' + c)
+    r = ok(m.Results.SpandrelForce(0, [], [], [], [], [], [], [], [], [], []), 'Results.SpandrelForce')
+    n, sto, spn, case, _loc, _P, V2, _V3, _T, _M2, M3 = r[:11]
+    env = {}
+    for i in range(n or 0):
+        e = env.setdefault((spn[i], sto[i]), {'V': 0.0, 'M': 0.0, 'case': case[i]})
+        if abs(V2[i]) > e['V']:
+            e['V'], e['case'] = abs(V2[i]), case[i]
+        e['M'] = max(e['M'], abs(M3[i]))
+    mats, out = {}, []
+    for sn in ok(m.SpandrelLabel.GetNameList(0, []), 'SpandrelLabel.GetNameList')[1] or []:
+        try:
+            sp = ok(m.SpandrelLabel.GetSectionProperties(sn, 0, [], [], [], [], [], [], [], [], [], [], [], [], [], [], []), 'SpandrelLabel.GetSectionProperties')
+        except BridgeError:
+            continue
+        ns, names, _na, _nl, L, dl, tl, dr, tr, matp = sp[:10]
+        levels = []
+        for i in range(ns or 0):
+            if matp[i] not in mats:
+                try:
+                    mats[matp[i]] = ok(m.PropMaterial.GetOConcrete_1(matp[i], 0, False, 0, 0, 0, 0, 0, 0, 0, 0), 'GetOConcrete_1')[0] / 1000
+                except Exception:
+                    mats[matp[i]] = 0.0
+            e = env.get((sn, names[i]))
+            if e:
+                levels.append({'story': names[i], 'L': L[i], 'h': max(dl[i], dr[i]), 't': max(tl[i], tr[i]), 'fck': mats[matp[i]], 'V': e['V'], 'M': e['M'], 'case': e['case']})
+        if levels:
+            out.append({'name': sn, 'levels': levels})
+    return {'spandrels': out}
+
+
+def mock_spandrels():
+    """demo coupling beams S1, S2 over 1.2 m door openings in the core walls W1, W2: 800 mm deep, 250 mm C40 storeys 1-5,
+    200 mm C30 above; seismic shear V = 300 + 120 i - 12 i^2 kN (largest at mid-height), M = V L / 2"""
+    out = []
+    for k in range(2):
+        lv = []
+        for i in range(10):
+            t, f = (0.25, 40) if i < 5 else (0.2, 30)
+            V = 300 + 120 * i - 12 * i * i
+            lv.append({'story': 'Story%d' % (i + 1), 'L': 1.2, 'h': 0.8, 't': t, 'fck': f, 'V': float(V), 'M': round(V * 0.6, 1), 'case': 'G+0.3Q+EX'})
+        out.append({'name': 'S%d' % (k + 1), 'levels': lv})
+    return {'spandrels': out}
+
+
 def mock_piers(forces):
     """demo core walls W1-W4 (7 m along X, 6 m along Y, 250 mm C40 storeys 1-5, 200 mm C30 above): each wall takes 35 %
     of the storey shear and overturning moment in its direction; N = core slab share + own weight (as the demo /axial)"""
@@ -1691,6 +1756,11 @@ class Mock:
     def staged(self, case):
         return mock_staged(case)
 
+    def spandrels(self, combos):
+        if not combos:
+            raise BridgeError('Select at least one seismic load combination')
+        return mock_spandrels()
+
     def slabdefl(self, combo):
         if not combo:
             raise BridgeError('Select the quasi-permanent load combination (G + psi2 Q)')
@@ -1943,6 +2013,8 @@ def make_handler(src, origins):
                     return self.send(200, src.piers(q.get('c', [])))
                 if u.path == '/beams':
                     return self.send(200, src.beams(q.get('c', [''])[0]))
+                if u.path == '/spandrels':
+                    return self.send(200, src.spandrels(q.get('c', [])))
                 if u.path == '/staged':
                     return self.send(200, src.staged(q.get('c', [''])[0]))
                 if u.path == '/slabdefl':

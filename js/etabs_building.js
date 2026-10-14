@@ -99,6 +99,11 @@
     }) };
   }
 
+  /* demo coupling beams (same as the --mock bridge /spandrels): S1, S2 over 1.2 m doors in W1, W2, 800 mm deep */
+  function demoSpandrels() {
+    return [1, 2].map(k => ({ name: 'S' + k, levels: Array.from({ length: 10 }, (_, i) => { const [t, f] = i < 5 ? [0.25, 40] : [0.2, 30], V = 300 + 120 * i - 12 * i * i; return { story: 'Story' + (i + 1), L: 1.2, h: 0.8, t, fck: f, V, M: Math.round(V * 6) / 10, case: 'G+0.3Q+EX' }; }) }));
+  }
+
   /* demo joints (same as the --mock bridge /joints): beam/column capacity ratios of the ETABS concrete design */
   function demoJoints() {
     const out = [], pts = [], r3 = v => Math.round(v * 1000) / 1000; [0, 6, 12, 18].forEach(y => [0, 6, 12, 18, 24].forEach(x => pts.push([x, y])));
@@ -646,6 +651,22 @@
       });
       if (rows.length) out.staged = { rows, cases: SG.cases || [], case: SG.case, lim, combo1: (d.axial || {}).combo || '' };
     }
+    // 27. coupling beams - EN 1998-1 5.5.3.5: the ordinary beam rules (5.5.3.1) suffice when cracking is unlikely,
+    //     V_Ed ≤ f_ctd·b_w·d (f_ctd = 0.7·0.3·f_ck^(2/3)/1.5), or flexure governs, l/h ≥ 3 (5.5.3.5(2)); otherwise two groups of
+    //     diagonal bars, V_Ed ≤ 2·A_si·f_yd·sin α (5.5.3.5(3)), α = atan((h − 2·d')/l). The section is checked against the strut
+    //     capacity V_Rd,max = 0.5·ν·f_cd·b_w·z (EN 1992-1-1 6.2.3(3), θ = 45°, ν = 0.6(1 − f_ck/250), z = 0.9d)
+    out.coup = null;
+    if ((d.spandrels || []).length) {
+      const fyd = (+s.fyk || 500) / 1.15, cov = +s.beamCov || 0.05, zOf5 = {}; st.forEach(x => { zOf5[x.name] = x.elev; });
+      const rows = [];
+      d.spandrels.forEach(sp => sp.levels.filter(l => zOf5[l.story] !== undefined && l.h > 0 && l.t > 0 && l.L > 0).forEach(l => {
+        const fck = +l.fck > 0 ? +l.fck : 30, dd = l.h - cov, fctd = 0.7 * 0.3 * Math.pow(fck, 2 / 3) / 1.5, Vcr = fctd * 1000 * l.t * dd;
+        const al = Math.atan(Math.max(l.h - 2 * cov, 0.01) / l.L), diag = !(l.V <= Vcr || l.L / l.h >= 3);
+        const Asi = diag ? l.V / (2 * fyd * 1000 * Math.sin(al)) : 0, nu = 0.6 * (1 - fck / 250), Vmax = 0.5 * nu * fck / 1.5 * 1000 * l.t * 0.9 * dd;
+        rows.push({ name: sp.name, story: l.story, z: zOf5[l.story], L: +l.L, h: +l.h, t: +l.t, fck, V: +l.V, Vcr, ar: l.L / l.h, diag, al, Asi, Vmax, U: l.V / Vmax, combo: l.case });
+      }));
+      if (rows.length) out.coup = { rows, fyd };
+    }
     return out;
   }
 
@@ -972,6 +993,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       ${R.beams ? sumCard('beamcd', `Beams DC${R.beams.H ? 'H' : 'M'} V<sub>Ed,CD</sub>/V<sub>Rd,s</sub>`, Umax(R.beams.rows), `${R.beams.rows.filter(r => r.U > 1 + 1e-9).length} of ${R.beams.rows.length} beams need more links than the ETABS design`) : ''}
       ${R.slab ? sumCard('slabd', 'Slab deflection δ/(span/' + R.slab.L1 + ', /' + R.slab.L2 + ')', Umax(R.slab.rows), (() => { const w = R.slab.rows.reduce((a, r) => (!a || r.U > a.U ? r : a), null); return `δ<sub>LT</sub> ${fmt(w.dLT * 1000, 1)} mm, after partitions ${fmt(w.dInc * 1000, 1)} mm (${esc(w.story)}, bay ${w.bay})`; })()) : ''}
       ${R.staged ? sumCard('staged', 'Staged construction Δ/L', Umax(R.staged.rows), (() => { const w = R.staged.rows.filter(r => r.rN != null).reduce((a, r) => (!a || Math.abs(r.rN - 1) > Math.abs(a.rN - 1) ? r : a), null); return w ? `N staged / one-step ${fmt(w.rN, 2)} at ${esc(w.name)} ${esc(w.story)}` : esc(R.staged.case); })()) : ''}
+      ${R.coup ? sumCard('coup', 'Coupling beams V<sub>Ed</sub>/V<sub>Rd,max</sub>', Umax(R.coup.rows), (() => { const n = R.coup.rows.filter(r => r.diag).length, w = R.coup.rows.reduce((a, r) => (!a || r.Asi > a.Asi ? r : a), null); return n ? `${n} need diagonal bars · A<sub>si</sub> max ${fmt(w.Asi * 1e6, 0)} mm² (${esc(w.name)} ${esc(w.story)})` : 'ordinary beam rules everywhere (5.5.3.5(2))'; })()) : ''}
       ${R.cols ? sumCard('cols', `Columns DC${R.cols.H ? 'H' : 'M'} ν<sub>d</sub> / ${fmt(R.cols.nuLim, 2)}`, Umax(R.cols.rows), (() => { const w = R.cols.rows.reduce((a, r) => (!a || Math.max(r.Vx, r.Vy) > Math.max(a.Vx, a.Vy) ? r : a), null); return `V<sub>Ed,CD</sub> max ${fmt(Math.max(w.Vx, w.Vy), 0)} kN (${esc(w.col)} ${esc(w.story)})`; })()) : ''}
       ${R.punch && s.flatSlab ? sumCard('punch', 'Punching v<sub>Ed</sub>/v<sub>Rd,c</sub>', Math.max(...R.punch.rows.map(r => r.U1)), `${R.punch.rows.filter(r => r.U1 > 1 + 1e-9).length} connection(s) need punching reinforcement · v<sub>Rd,max</sub> ${R.punch.rows.some(r => r.U0 > 1 + 1e-9) ? 'exceeded' : 'OK'}`) : ''}
       ${R.steel ? sumCard('steel', 'Steel frame design ratio', Umax(R.steel.rows), `${R.steel.rows.length} members · ${R.steel.rows.filter(r => r.U > 1 + 1e-9).length} over 1.0 · ${R.steel.rows.filter(r => r.err).length} with design errors`) : ''}
@@ -1115,6 +1137,16 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `Level difference after casting above L/${G.lim} at ${bad.length} place(s) (${bad.slice(0, 5).map(r => esc(r.name) + '–' + esc(r.nb) + ' ' + esc(r.story)).join(', ')}) → pre-set the column formwork by the ETABS difference or check the slabs for the imposed rotation.` : `Level differences after casting from the staged analysis within L/${G.lim}.`}${red.length ? ` The staged sequence changes N by more than 15 % at ${red.length} stack-storey(s) - design those columns / walls (and any transfer girder) for the staged forces.` : ' Staged N within ±15 % of the one-step analysis.'}</div>
         <p class="muted bc-pad">u<sub>z</sub> = ETABS vertical displacement at the end of construction of the joints placed with each floor (counted from their placement); est. = the after-casting estimate of the axial-shortening check (creep φ, elastic). Use the staged forces where they exceed the one-step ones; time-dependent staged cases include creep and shrinkage only if the ETABS case has time-dependent material properties.</p>`);
     }
+    if (R.coup) {
+      const K = R.coup, crit = K.rows.slice().sort((a, c) => c.U - a.U).slice(0, 12), bad = K.rows.filter(r => r.U > 1 + 1e-9), dg = K.rows.filter(r => r.diag);
+      const perSt = (f, sel) => R.st.map(x => { const rs = K.rows.filter(r => r.story === x.name && (!sel || sel(r))); return rs.length ? { story: x.name, z: x.elev, v: Math.max(...rs.map(f)) } : null; }).filter(Boolean);
+      html += card('coup', 'Coupling beams (wall spandrels)', 'EN 1998-1 5.5.3.5 · EN 1992-1-1 6.2.3(3)', `diagonal bars unless V<sub>Ed</sub> ≤ f<sub>ctd</sub>·b<sub>w</sub>·d or l/h ≥ 3 · V<sub>Ed</sub> ≤ 2·A<sub>si</sub>·f<sub>yd</sub>·sin α · section V<sub>Ed</sub> ≤ V<sub>Rd,max</sub> = 0.5·ν·f<sub>cd</sub>·b<sub>w</sub>·z`,
+        `${dp(['beamCov', 'fyk'], `${num('beamCov', 'd′ = h − d (bar centroid)', 'm', '0.005', 'also sets the diagonal angle α')}${num('fyk', 'f<sub>yk</sub> reinforcement', 'MPa', '10', 'f<sub>yd</sub> = f<sub>yk</sub>/1.15')}`)}
+        <div class="bc-split">${profile([{ n: 'V_Ed / V_Rd,max', c: '--s1', pts: perSt(r => r.U) }, { n: 'V_Ed / (f_ctd·b_w·d)', c: '--s2', pts: perSt(r => r.V / r.Vcr) }], { title: 'Coupling beams per storey (worst spandrel)', xlabel: 'ratio', limit: 1, fmt: v => fmt(v, 2) })}
+        ${tbl([['Spandrel', r => esc(r.name)], ['Storey', r => esc(r.story)], ['l × h × b<sub>w</sub> m', r => `<span style="white-space:nowrap">${fmt(r.L, 2)} × ${fmt(r.h, 2)} × ${fmt(r.t, 2)}</span> <small class="muted">C${fmt(r.fck, 0)}</small>`], ['V<sub>Ed</sub> kN', r => fmt(r.V, 0), 'num'], ['f<sub>ctd</sub>b<sub>w</sub>d kN', r => fmt(r.Vcr, 0), 'num'], ['l/h', r => fmt(r.ar, 2), 'num'], ['Reinforcement', r => (r.diag ? `diagonal, α ${fmt(r.al * 180 / Math.PI, 1)}° · A<sub>si</sub> ${fmt(r.Asi * 1e6, 0)} mm²` : 'beam rules 5.5.3.1')], ['V<sub>Rd,max</sub> kN', r => fmt(r.Vmax, 0), 'num'], ['U', r => api.ubar(r.U)]], crit)}</div>
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `V<sub>Ed</sub> above the strut capacity in ${bad.length} coupling beam(s) (${bad.slice(0, 5).map(r => esc(r.name) + ' ' + esc(r.story)).join(', ')}) → thicker or deeper spandrel, higher f<sub>ck</sub>, or release the coupling (lower stiffness modifier) and redesign the walls.` : 'Every coupling beam section resists V<sub>Ed</sub> (strut).'} ${dg.length ? `${dg.length} of ${K.rows.length} need two groups of diagonal bars (A<sub>si</sub> per diagonal in the table), each enclosed in column-like links (side ≥ b<sub>w</sub>/2) with a horizontal and vertical bar mesh on both faces - detailing per 5.5.3.5(3)-(5).` : 'No diagonal bars needed: V<sub>Ed</sub> ≤ f<sub>ctd</sub>b<sub>w</sub>d or l/h ≥ 3.'}</div>
+        <p class="muted bc-pad">Spandrel forces of the seismic combinations from ETABS (envelope of |V2| at both ends). 5.5.3.5 belongs to DCH walls; in DCM it is good practice for coupled walls. The diagonal bars of A<sub>si</sub> carry both shear and moment; anchor them into the walls beyond the EN 1992-1-1 anchorage length, increased as 5.5.3.5 requires.</p>`);
+    }
     if (R.cols) {
       const C = R.cols, crit = C.rows.slice().sort((a, c) => c.U - a.U || Math.max(c.Vx, c.Vy) - Math.max(a.Vx, a.Vy)).slice(0, 12), bad = C.rows.filter(r => r.U > 1 + 1e-9);
       html += card('cols', 'Columns: capacity-design shear and axial load (DCM / DCH)', 'EN 1998-1 5.4.2.3 · 5.5.2.2 · 5.4.3.2.1(3) · 5.5.3.2.1(3)', `V<sub>Ed</sub> = γ<sub>Rd</sub>·2·M<sub>Rc</sub>·min(1, ΣM<sub>Rb</sub>/ΣM<sub>Rc</sub>)/l<sub>cl</sub>, γ<sub>Rd</sub> = ${fmt(C.gRd, 1)} · ν<sub>d</sub> = N<sub>Ed</sub>/(A<sub>c</sub>f<sub>cd</sub>) ≤ ${fmt(C.nuLim, 2)} · N<sub>Ed</sub> of ${esc(C.combo)}`,
@@ -1251,7 +1283,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
       if (d.bc === 'demo') {
-        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); b.data.axialE = demoAxial(1, 'G+0.3Q+EX'); b.data.colDesign = demoColumns(); b.data.beamDesign = demoBeams(); b.data.slabDefl = demoSlabDefl(); b.data.staged = demoStaged(); b.data.joints = demoJoints(); b.data.piers = demoPiers(b.data); b.data.steel = demoSteel(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
+        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); b.data.axialE = demoAxial(1, 'G+0.3Q+EX'); b.data.colDesign = demoColumns(); b.data.beamDesign = demoBeams(); b.data.slabDefl = demoSlabDefl(); b.data.staged = demoStaged(); b.data.spandrels = demoSpandrels(); b.data.joints = demoJoints(); b.data.piers = demoPiers(b.data); b.data.steel = demoSteel(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
         b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
         Object.assign(b.roles, DEMO_ROLES); Object.assign(b.set, { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, Bx: 24, By: 18, fos: 1.0 });
         let n = 0;   // demo ETABS-linked members (beams, columns, footings) for the P-Δ member design
@@ -1294,6 +1326,8 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
             .then(() => { const ms = EC.etabs.live.L.model ? EC.etabs.live.L.model.combos : [], qp = b.set.qpCombo && ms.includes(b.set.qpCombo) ? b.set.qpCombo : ms.find(c => /qp|quasi|perm/i.test(c));
               if (!qp) { b.data.slabDefl = null; return; }
               return EC.etabs.live.get('/slabdefl?c=' + encodeURIComponent(qp)).then(sj => { b.data.slabDefl = sj; }, () => { b.data.slabDefl = null; }); })
+            .then(() => { const se = cs.filter(c => b.roles[c] === 'seis'); if (!se.length) { b.data.spandrels = []; return; }
+              return EC.etabs.live.get('/spandrels?' + se.map(c => 'c=' + encodeURIComponent(c)).join('&')).then(pj => { b.data.spandrels = pj.spandrels || []; }, () => { b.data.spandrels = []; }); })
             .then(() => EC.etabs.live.get('/staged' + (b.set.stagedCase ? '?c=' + encodeURIComponent(b.set.stagedCase) : '')).then(gj => { b.data.staged = gj && (gj.stacks || []).length ? gj : null; }, () => { b.data.staged = null; }))
             .then(() => EC.etabs.live.get('/columns').then(cj => { b.data.colDesign = cj.columns || []; }, () => { b.data.colDesign = []; }))
             .then(() => { const se = Object.keys(b.roles).filter(c => b.roles[c] === 'seis' && (b.data.base || []).some(r => r.combo === c && Math.abs(r.FZ) > 1)).sort((a, c) => Math.abs((b.data.base.find(r => r.combo === c) || {}).FZ || 0) - Math.abs((b.data.base.find(r => r.combo === a) || {}).FZ || 0))[0];
@@ -1324,5 +1358,5 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
     };
   }
 
-  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); d.axialE = demoAxial(1, 'G+0.3Q+EX'); d.colDesign = demoColumns(); d.beamDesign = demoBeams(); d.slabDefl = demoSlabDefl(); d.staged = demoStaged(); d.joints = demoJoints(); d.piers = demoPiers(d); d.steel = demoSteel(); return d; }, _demoRoles: DEMO_ROLES };
+  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); d.axialE = demoAxial(1, 'G+0.3Q+EX'); d.colDesign = demoColumns(); d.beamDesign = demoBeams(); d.slabDefl = demoSlabDefl(); d.staged = demoStaged(); d.spandrels = demoSpandrels(); d.joints = demoJoints(); d.piers = demoPiers(d); d.steel = demoSteel(); return d; }, _demoRoles: DEMO_ROLES };
 })();

@@ -41,7 +41,9 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] Beams DCM / DCH: capacity-design shear V_g+ψ2q + γ_Rd·ΣM_Rb/l_cl from the ETABS end steel and gravity shear (bridge `/beams`), compared with the ETABS links - EN 1998-1 5.4.2.2, 5.5.2.1
 - [x] Slab deflection: sag of each slab bay between the columns relative to its corners from the ETABS joint displacements of the quasi-permanent combination (bridge `/slabdefl`, Results.JointDispl of the floor mesh), long-term δ_LT = δ·m·k_cr·(1 + φ) ≤ span/250 and after the partitions ≤ span/500 - EN 1992-1-1 7.4.1(4)-(5), 7.4.3
 - [x] Staged construction read-out: last stage of the ETABS staged-construction case (bridge `/staged`) - N against the one-step quasi-permanent analysis and the floor level change after casting between neighbouring stacks ≤ L/500, next to the shortening estimate - EN 1992-1-1 3.1.4, EN 1990
+- [x] Coupling beams from ETABS spandrels (bridge `/spandrels`): beam rules when V_Ed ≤ f_ctd·b_w·d or l/h ≥ 3, else diagonal bars A_si = V_Ed/(2·f_yd·sin α); strut check V_Ed ≤ V_Rd,max - EN 1998-1 5.5.3.5, EN 1992-1-1 6.2.3(3)
 ## Fixes
+- [x] 2026-10-14 · Roadmap: the coupling-beam criterion read V_Ed > 4·b_w·d·f_ctd; EN 1998-1 5.5.3.5(2) is V_Ed ≤ f_ctd·b_w·d or l/h ≥ 3 for ordinary beam reinforcement - implemented as in the code
 - [x] 2026-10-11 · Notional loads asked the user to set them by hand when the notional table was not found (it was searched only among the tables that already had data). Now fully automatic: all tables searched (also empty ones, fields read with GetAllFieldsInTable); without such a table, a gravity analysis gives N per floor and H_i = θi·N is applied as storey joint loads (EN 1992-1-1 5.2(8))
 - [x] 2026-10-11 · Building checks guessed EN 1990 EQU combinations (CS-EQU) as seismic - now ULS
 - [x] 2026-10-11 · P-Δ θ was divided by the storey height twice (d_r already a drift ratio) - θ came out ~h times too small (unconservative). Now θ = P·(d_r/h)/V
@@ -50,6 +52,6 @@ endpoint (+ `--mock` data), Eurocode check and page section, README, test with t
 - [x] 2026-10-12 · Building checks follow docs/CALCULATION_GUIDELINES.md 5: default parameters (ν, α drift limit, wind drift limit, overturning safety; φ, ε_cs, tilt limit; γ_d) fold into a “Default parameters” block with the count of changed values, as in the worksheet input panel
 
 ## Next
-- [ ] Coupling beams of coupled walls from ETABS spandrels: diagonal reinforcement when V_Ed > 4·b_w·d·f_ctd (EN 1998-1 5.5.3.5(2)-(4)), A_si = V_Ed/(2·f_yd·sin α) from the ETABS spandrel forces (Results.SpandrelForce)
 - [ ] Differential settlement of the foundations from ETABS springs: settlement s of every spring-supported joint (Results.JointDispl U3 of the quasi-permanent combination at point / area springs), relative rotation β = Δs/L between neighbouring supports ≤ 1/500 and maximum settlement vs the serviceability limit (EN 1997-1 2.4.8, 2.4.9, Annex H)
 - [ ] Crack width of beams and slabs from ETABS: w_k = s_r,max·(ε_sm − ε_cm) with the quasi-permanent moments (Results.FrameForce M3, slab strip / area forces) and the reinforcement of the ETABS concrete design, against w_max of Table 7.1N (0.3 mm for XC2-XC4) - EN 1992-1-1 7.3.4, 7.3.2 minimum steel
+- [ ] Slender columns from ETABS: slenderness λ = l_0/i per column and storey with l_0 from the storey stiffness (braced / sway, EN 1992-1-1 5.8.3.2) against λ_lim = 20·A·B·C/√n (5.8.3.1) using N_Ed and the end moments of the ETABS combinations; second-order moment by nominal curvature (5.8.8) where λ > λ_lim

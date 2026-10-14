@@ -10,7 +10,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ROLES = { seis: 'Seismic', wind: 'Wind SLS', uls: 'ULS', off: 'Not used' };
   const ROLE_ORDER = ['seis', 'wind', 'uls', 'off'];
-  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, rhoL: 0.006, punchCov: 0.035, flatSlab: false, dcl: 'M', hb: 0.6, colCov: 0.05, beamCov: 0.05, colW: 0.5, cotTh: 1.0, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false, epsV: 1.5, nuLim: 0.4, omega: 1.0, slabCr: 2.0, slabEta: 0.6, slabL1: 250, slabL2: 500, slabLT: false };
+  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, rhoL: 0.006, punchCov: 0.035, flatSlab: false, dcl: 'M', hb: 0.6, colCov: 0.05, beamCov: 0.05, colW: 0.5, cotTh: 1.0, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false, epsV: 1.5, nuLim: 0.4, omega: 1.0, slabCr: 2.0, slabEta: 0.6, slabL1: 250, slabL2: 500, slabLT: false, stagedCase: '' };
   let busy = '', err = '';
 
   const B = () => { const p = api.proj(); p.building = p.building || {}; const b = p.building; b.set = Object.assign({}, DEF, b.set || {}); b.roles = b.roles || {}; return b; };
@@ -84,6 +84,19 @@
     pts.forEach(([x, y], k) => out.push({ name: 'C' + (k + 1), kind: 'column', x, y, levels: Array.from({ length: 10 }, (_, i) => { const [A, f] = i < 3 ? [0.36, 40] : i < 7 ? [0.25, 35] : [0.16, 30]; return { story: 'Story' + (i + 1), A, mat: 'Concrete', f, N: r1(trib(x, y) * 9.2 * fac * (10 - i)) }; }) }));
     [[15.5, 6, 7], [15.5, 12, 7], [12, 9, 6], [18, 9, 6]].forEach(([x, y, L], k) => out.push({ name: 'W' + (k + 1), kind: 'wall', x, y, levels: Array.from({ length: 10 }, (_, i) => { const [t, f] = i < 5 ? [0.25, 40] : [0.2, 30]; return { story: 'Story' + (i + 1), A: L * t, mat: 'Concrete', f, N: r1((42 / 4 * 9.2 + L * t * 3.2 * 25) * fac * (10 - i)) }; }) }));
     return { combo, stacks: out };
+  }
+
+  /* demo staged-construction case (same as the --mock bridge /staged): N = one-step quasi-permanent N × 1.05 (columns) /
+     × 0.90 (core walls); uz of each level = 2 × the elastic shortening below it from the floors cast after it */
+  function demoStaged() {
+    const h = [3.4, 3.2, 3.2, 3.2, 3.2, 3.2, 3.2, 3.2, 3.2, 3.2], E = l => 22e6 * Math.pow((l.f + 8) / 10, 0.3);
+    return { cases: ['STAGED G+0.3Q'], case: 'STAGED G+0.3Q', stacks: demoAxial().stacks.map(k => {
+      const lv = k.levels, fac = k.kind === 'column' ? 1.05 : 0.9, w = lv[lv.length - 1].N;
+      return { name: k.name, kind: k.kind, x: k.x, y: k.y, levels: lv.map((l, i) => {
+        const after = w * (lv.length - 1 - i); let u = 0; for (let j = 0; j <= i; j++) u += h[j] * after / (E(lv[j]) * lv[j].A);
+        return { story: l.story, N: Math.round(l.N * fac * 10) / 10, uz: -Math.round(2 * u * 1e6) / 1e6 };
+      }) };
+    }) };
   }
 
   /* demo joints (same as the --mock bridge /joints): beam/column capacity ratios of the ETABS concrete design */
@@ -610,6 +623,29 @@
       });
       if (rows.length) out.slab = { rows, combo: SD.combo, phi, kcr, eta, L1, L2, lt, k: lt ? 1 : (rows[0].m * kcr * (1 + phi)) };
     }
+    // 26. staged construction - EN 1992-1-1 3.1.4, EN 1990 (execution stages): last stage of the ETABS staged-construction case.
+    //     (a) load redistribution N_staged / N_one-step per stack and storey (one-step analysis loads the stiff core too much);
+    //     (b) level change of every floor after it was cast from ETABS (uz of joints added in later stages counts from their
+    //     placement) - differential to the nearest stack Δ/L ≤ 1/limit (same limit as 15); compared with the estimate of 15
+    out.staged = null;
+    const SG = d.staged;
+    if (SG && (SG.stacks || []).length) {
+      const idx = {}; st.forEach((x, i) => { idx[x.name] = i; });
+      const lim = +s.shortLim || 500, ax = {}; ((d.axial || {}).stacks || []).forEach(k => k.levels.forEach(l => { ax[k.name + '|' + l.story] = l.N; }));
+      const est = {}; ((out.short || {}).stacks || []).forEach(k => k.prof.forEach(p => { est[k.name + '|' + p.story] = p.post; }));
+      const S = SG.stacks.map(k => ({ name: k.name, kind: k.kind, x: +k.x, y: +k.y, lv: k.levels.filter(l => idx[l.story] !== undefined) })).filter(k => k.lv.length);
+      const rows = [];
+      S.forEach(a => {
+        const nb = S.filter(b2 => b2 !== a).map(b2 => [b2, Math.hypot(b2.x - a.x, b2.y - a.y)]).filter(q => q[1] > 0.5).sort((p1, p2) => p1[1] - p2[1])[0];
+        a.lv.forEach(l => {
+          const N1 = ax[a.name + '|' + l.story], u = l.uz != null ? -l.uz : null, o = nb ? nb[0].lv.find(q => q.story === l.story) : null;
+          const diff = u != null && o && o.uz != null ? Math.abs(u + o.uz) : null, tilt = diff != null ? diff / nb[1] : null;
+          rows.push({ name: a.name, kind: a.kind, story: l.story, z: st[idx[l.story]].elev, N: +l.N, N1: N1 != null ? N1 : null, rN: N1 > 0 ? l.N / N1 : null,
+            u, est: est[a.name + '|' + l.story] != null ? est[a.name + '|' + l.story] : null, nb: nb ? nb[0].name : '', L: nb ? nb[1] : null, diff, tilt, U: tilt != null ? tilt * lim : 0 });
+        });
+      });
+      if (rows.length) out.staged = { rows, cases: SG.cases || [], case: SG.case, lim, combo1: (d.axial || {}).combo || '' };
+    }
     return out;
   }
 
@@ -935,6 +971,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       ${R.short ? sumCard('short', 'Differential shortening Δ/L', Umax(R.short.stacks), (() => { const w = R.short.stacks.reduce((a, k) => (!a || k.tot > a.tot ? k : a), null); return `roof δ<sub>max</sub> = ${fmt(w.tot * 1000, 1)} mm (${esc(w.name)}) · limit L/${R.short.lim}`; })()) : ''}
       ${R.beams ? sumCard('beamcd', `Beams DC${R.beams.H ? 'H' : 'M'} V<sub>Ed,CD</sub>/V<sub>Rd,s</sub>`, Umax(R.beams.rows), `${R.beams.rows.filter(r => r.U > 1 + 1e-9).length} of ${R.beams.rows.length} beams need more links than the ETABS design`) : ''}
       ${R.slab ? sumCard('slabd', 'Slab deflection δ/(span/' + R.slab.L1 + ', /' + R.slab.L2 + ')', Umax(R.slab.rows), (() => { const w = R.slab.rows.reduce((a, r) => (!a || r.U > a.U ? r : a), null); return `δ<sub>LT</sub> ${fmt(w.dLT * 1000, 1)} mm, after partitions ${fmt(w.dInc * 1000, 1)} mm (${esc(w.story)}, bay ${w.bay})`; })()) : ''}
+      ${R.staged ? sumCard('staged', 'Staged construction Δ/L', Umax(R.staged.rows), (() => { const w = R.staged.rows.filter(r => r.rN != null).reduce((a, r) => (!a || Math.abs(r.rN - 1) > Math.abs(a.rN - 1) ? r : a), null); return w ? `N staged / one-step ${fmt(w.rN, 2)} at ${esc(w.name)} ${esc(w.story)}` : esc(R.staged.case); })()) : ''}
       ${R.cols ? sumCard('cols', `Columns DC${R.cols.H ? 'H' : 'M'} ν<sub>d</sub> / ${fmt(R.cols.nuLim, 2)}`, Umax(R.cols.rows), (() => { const w = R.cols.rows.reduce((a, r) => (!a || Math.max(r.Vx, r.Vy) > Math.max(a.Vx, a.Vy) ? r : a), null); return `V<sub>Ed,CD</sub> max ${fmt(Math.max(w.Vx, w.Vy), 0)} kN (${esc(w.col)} ${esc(w.story)})`; })()) : ''}
       ${R.punch && s.flatSlab ? sumCard('punch', 'Punching v<sub>Ed</sub>/v<sub>Rd,c</sub>', Math.max(...R.punch.rows.map(r => r.U1)), `${R.punch.rows.filter(r => r.U1 > 1 + 1e-9).length} connection(s) need punching reinforcement · v<sub>Rd,max</sub> ${R.punch.rows.some(r => r.U0 > 1 + 1e-9) ? 'exceeded' : 'OK'}`) : ''}
       ${R.steel ? sumCard('steel', 'Steel frame design ratio', Umax(R.steel.rows), `${R.steel.rows.length} members · ${R.steel.rows.filter(r => r.U > 1 + 1e-9).length} over 1.0 · ${R.steel.rows.filter(r => r.err).length} with design errors`) : ''}
@@ -1066,6 +1103,17 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
         ${tbl([['Storey', r => esc(r.story)], ['Bay x / y m', r => `<span style="white-space:nowrap">${r.bay}</span>`], ['Span m', r => fmt(r.L, 2), 'num'], ['δ<sub>ETABS</sub> mm', r => mm(r.dE), 'num'], ['m', r => fmt(r.m, 2), 'num'], ['δ<sub>LT</sub> mm', r => `${mm(r.dLT)} <small class="muted">≤ ${mm(r.L / S.L1)}</small>`, 'num'], ['δ<sub>inc</sub> mm', r => `${mm(r.dInc)} <small class="muted">≤ ${mm(r.L / S.L2)}</small>`, 'num'], ['U', r => api.ubar(r.U)]], crit)}</div>
         <div class="bc-verdict ${bad1.length || bad2.length ? 'bad' : 'ok'}">${bad1.length ? `δ<sub>LT</sub> above span/${S.L1} in ${bad1.length} bay(s) → camber the formwork (up to span/250, 7.4.1(4)) or stiffen the slab. ` : ''}${bad2.length ? `Deflection after the partitions above span/${S.L2} in ${bad2.length} bay(s) (${bad2.slice(0, 4).map(r => esc(r.story) + ' ' + r.bay).join(', ')}) → thicker slab, more reinforcement (lower k<sub>cr</sub>), later partitions (higher η) or deflection-tolerant partition heads.` : ''}${!bad1.length && !bad2.length ? `Every slab bay within span/${S.L1} long-term and span/${S.L2} after the partitions.` : ''}</div>
         <p class="muted bc-pad">δ<sub>ETABS</sub> = largest sag of the slab mesh inside each bay between four columns, relative to the mean of its corners, from the ETABS linear analysis of the quasi-permanent combination; m rescales it to the gross section (slab bending modifier of the model). The span-to-depth rules of 7.4.2 or the slab's own EC2 deflection calculation (7.4.3, interpolation ζ) remain the reference for the final design.</p>`);
+    }
+    if (R.staged) {
+      const G = R.staged, crit = G.rows.slice().sort((a, c) => c.U - a.U || Math.abs((c.rN || 1) - 1) - Math.abs((a.rN || 1) - 1)).slice(0, 12), bad = G.rows.filter(r => r.U > 1 + 1e-9), mm = v => (v == null ? '–' : fmt(v * 1000, 1));
+      const red = G.rows.filter(r => r.rN != null && Math.abs(r.rN - 1) > 0.15);
+      const perSt = (f, kind) => R.st.map(x => { const rs = G.rows.filter(r => r.story === x.name && (!kind || r.kind === kind) && f(r) != null); return rs.length ? { story: x.name, z: x.elev, v: Math.max(...rs.map(f)) } : null; }).filter(Boolean);
+      const sel = G.cases.length > 1 ? `<div class="bc-inputs"><label class="bc-in"><span>Staged-construction case</span><select class="ctl" data-bcset="stagedCase">${G.cases.map(c => `<option ${c === G.case ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select><small>read again after changing</small></label></div>` : '';
+      html += card('staged', 'Staged construction (last stage)', 'EN 1992-1-1 3.1.4 · EN 1990 execution stages', `${esc(G.case)} · level change of each floor after casting, differential to the nearest stack ≤ L/${G.lim} · N against the one-step ${esc(G.combo1 || 'quasi-permanent')} analysis`,
+        `${sel}<div class="bc-split">${profile([{ n: 'Δ/L ÷ 1/' + G.lim + ' max', c: '--s1', pts: perSt(r => r.U) }, { n: 'N staged / one-step, columns max', c: '--s2', pts: perSt(r => r.rN, 'column') }, { n: 'walls', c: '--s3', pts: perSt(r => r.rN, 'wall') }], { title: 'Staged construction per storey', xlabel: 'ratio', limit: 1, fmt: v => fmt(v, 2) })}
+        ${tbl([['Stack', r => esc(r.name)], ['Storey', r => esc(r.story)], ['N kN <small>staged / one-step</small>', r => `${fmt(r.N, 0)} <small class="muted">/ ${r.N1 != null ? fmt(r.N1, 0) : '–'}</small>`, 'num'], ['ratio', r => (r.rN != null ? fmt(r.rN, 2) : '–'), 'num'], ['u<sub>z</sub> mm <small>ETABS / est.</small>', r => `${mm(r.u)} <small class="muted">/ ${mm(r.est)}</small>`, 'num'], ['vs', r => esc(r.nb)], ['Δ mm', r => mm(r.diff), 'num'], ['Δ/L', r => (r.tilt > 0 ? '1/' + fmt(1 / r.tilt, 0) : '–'), 'num'], ['U', r => api.ubar(r.U)]], crit)}</div>
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `Level difference after casting above L/${G.lim} at ${bad.length} place(s) (${bad.slice(0, 5).map(r => esc(r.name) + '–' + esc(r.nb) + ' ' + esc(r.story)).join(', ')}) → pre-set the column formwork by the ETABS difference or check the slabs for the imposed rotation.` : `Level differences after casting from the staged analysis within L/${G.lim}.`}${red.length ? ` The staged sequence changes N by more than 15 % at ${red.length} stack-storey(s) - design those columns / walls (and any transfer girder) for the staged forces.` : ' Staged N within ±15 % of the one-step analysis.'}</div>
+        <p class="muted bc-pad">u<sub>z</sub> = ETABS vertical displacement at the end of construction of the joints placed with each floor (counted from their placement); est. = the after-casting estimate of the axial-shortening check (creep φ, elastic). Use the staged forces where they exceed the one-step ones; time-dependent staged cases include creep and shrinkage only if the ETABS case has time-dependent material properties.</p>`);
     }
     if (R.cols) {
       const C = R.cols, crit = C.rows.slice().sort((a, c) => c.U - a.U || Math.max(c.Vx, c.Vy) - Math.max(a.Vx, a.Vy)).slice(0, 12), bad = C.rows.filter(r => r.U > 1 + 1e-9);
@@ -1203,7 +1251,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
       if (d.bc === 'demo') {
-        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); b.data.axialE = demoAxial(1, 'G+0.3Q+EX'); b.data.colDesign = demoColumns(); b.data.beamDesign = demoBeams(); b.data.slabDefl = demoSlabDefl(); b.data.joints = demoJoints(); b.data.piers = demoPiers(b.data); b.data.steel = demoSteel(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
+        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); b.data.axialE = demoAxial(1, 'G+0.3Q+EX'); b.data.colDesign = demoColumns(); b.data.beamDesign = demoBeams(); b.data.slabDefl = demoSlabDefl(); b.data.staged = demoStaged(); b.data.joints = demoJoints(); b.data.piers = demoPiers(b.data); b.data.steel = demoSteel(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
         b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
         Object.assign(b.roles, DEMO_ROLES); Object.assign(b.set, { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, Bx: 24, By: 18, fos: 1.0 });
         let n = 0;   // demo ETABS-linked members (beams, columns, footings) for the P-Δ member design
@@ -1246,6 +1294,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
             .then(() => { const ms = EC.etabs.live.L.model ? EC.etabs.live.L.model.combos : [], qp = b.set.qpCombo && ms.includes(b.set.qpCombo) ? b.set.qpCombo : ms.find(c => /qp|quasi|perm/i.test(c));
               if (!qp) { b.data.slabDefl = null; return; }
               return EC.etabs.live.get('/slabdefl?c=' + encodeURIComponent(qp)).then(sj => { b.data.slabDefl = sj; }, () => { b.data.slabDefl = null; }); })
+            .then(() => EC.etabs.live.get('/staged' + (b.set.stagedCase ? '?c=' + encodeURIComponent(b.set.stagedCase) : '')).then(gj => { b.data.staged = gj && (gj.stacks || []).length ? gj : null; }, () => { b.data.staged = null; }))
             .then(() => EC.etabs.live.get('/columns').then(cj => { b.data.colDesign = cj.columns || []; }, () => { b.data.colDesign = []; }))
             .then(() => { const se = Object.keys(b.roles).filter(c => b.roles[c] === 'seis' && (b.data.base || []).some(r => r.combo === c && Math.abs(r.FZ) > 1)).sort((a, c) => Math.abs((b.data.base.find(r => r.combo === c) || {}).FZ || 0) - Math.abs((b.data.base.find(r => r.combo === a) || {}).FZ || 0))[0];
               if (!se) { b.data.axialE = null; return; }
@@ -1269,11 +1318,11 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       if (t.dataset.bcct !== undefined) { B().set.ct = +t.value; api.save(); return rer(); }
       if (t.dataset.bcset === undefined) return;
       if (t.type === 'checkbox') { B().set[t.dataset.bcset] = t.checked; api.save(); return rer(); }
-      if (t.dataset.bcset === 'qpCombo' || t.dataset.bcset === 'dcl') { B().set[t.dataset.bcset] = t.value; api.save(); return rer(); }
+      if (t.dataset.bcset === 'qpCombo' || t.dataset.bcset === 'dcl' || t.dataset.bcset === 'stagedCase') { B().set[t.dataset.bcset] = t.value; api.save(); return rer(); }
       const v = parseFloat(t.value); if (!Number.isFinite(v)) return;
       B().set[t.dataset.bcset] = v; api.save(); rer();
     };
   }
 
-  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); d.axialE = demoAxial(1, 'G+0.3Q+EX'); d.colDesign = demoColumns(); d.beamDesign = demoBeams(); d.slabDefl = demoSlabDefl(); d.joints = demoJoints(); d.piers = demoPiers(d); d.steel = demoSteel(); return d; }, _demoRoles: DEMO_ROLES };
+  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); d.axialE = demoAxial(1, 'G+0.3Q+EX'); d.colDesign = demoColumns(); d.beamDesign = demoBeams(); d.slabDefl = demoSlabDefl(); d.staged = demoStaged(); d.joints = demoJoints(); d.piers = demoPiers(d); d.steel = demoSteel(); return d; }, _demoRoles: DEMO_ROLES };
 })();

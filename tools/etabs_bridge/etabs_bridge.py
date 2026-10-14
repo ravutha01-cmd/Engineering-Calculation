@@ -33,6 +33,9 @@ Endpoints (JSON):
     GET /slabdefl?c=<QP combo>     slab bays between the columns (orthogonal grid of the column / wall-corner points of each storey):
                                    largest sag of the slab mesh relative to the bay corners for the combination, span, slab
                                    property and its bending modifier (EN 1992-1-1 7.4.1(4)-(5))
+    GET /staged[?c=<case>]         staged-construction load cases of the model and, for the case (default: the first), per
+                                   column (by label) and wall pier and storey the axial force N and the vertical displacement U3
+                                   of its top at the last stage (EN 1992-1-1 3.1.4, EN 1990 execution stages)
     GET /columns                   concrete columns of the ETABS concrete design: required longitudinal steel and shear steel
     GET /steel                     steel members of the ETABS steel frame design: governing ratio, type, location, combination
     GET /joints                    beam-column joints of the ETABS concrete frame design: beam/column capacity ratio and
@@ -66,7 +69,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.21'
+VERSION = '1.22'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -289,6 +292,15 @@ class Etabs:
         m.SetPresentUnits(KN_M_C)
         try:
             return slabdefl_from_model(m, combo, combo in cset)
+        finally:
+            m.SetPresentUnits(old)
+
+    def staged(self, case):
+        m = self.attach()
+        old = m.GetPresentUnits()
+        m.SetPresentUnits(KN_M_C)
+        try:
+            return staged_from_model(m, case)
         finally:
             m.SetPresentUnits(old)
 
@@ -1376,6 +1388,105 @@ def axial_from_model(m, combo, is_combo):
     return {'combo': combo, 'stacks': list(stacks.values())}
 
 
+def staged_cases(m):
+    """names of the nonlinear staged-construction load cases (LoadCases.GetTypeOAPI_1: nonlinear static, sub type 2)"""
+    out = []
+    for c in ok(m.LoadCases.GetNameList(0, []), 'LoadCases.GetNameList')[1] or []:
+        try:
+            t = ok(m.LoadCases.GetTypeOAPI_1(c, 0, 0, 0, 0, 0), 'LoadCases.GetTypeOAPI_1')
+            if int(t[0]) == 2 and int(t[1]) == 2:
+                out.append(c)
+        except Exception:
+            continue
+    return out
+
+
+def staged_from_model(m, case):
+    """last stage of a staged-construction case: columns by label and wall piers, per storey N (kN, compression +) at the
+    bottom and the vertical displacement uz (m, ETABS U3) of the top - joints added in later stages report the displacement
+    since they were placed, so uz is the level change after the floor was cast"""
+    cases = staged_cases(m)
+    if not cases:
+        return {'cases': [], 'case': '', 'stacks': []}
+    case = case if case in cases else cases[0]
+    setup = m.Results.Setup
+    setup.DeselectAllCasesAndCombosForOutput()
+    ok(setup.SetCaseSelectedForOutput(case, True), 'select ' + case)
+    ok(setup.SetOptionNLStatic(3), 'Results.Setup.SetOptionNLStatic')   # 3 = last step (end of construction)
+    uz_of = {}
+
+    def uz(pt):
+        if pt not in uz_of:
+            r = ok(m.Results.JointDispl(pt, 0, 0, [], [], [], [], [], [], [], [], [], []), 'Results.JointDispl')
+            uz_of[pt] = list(r[8] or [0.0])[-1]
+        return uz_of[pt]
+    stacks = {}
+    for n in ok(m.FrameObj.GetNameList(0, []), 'FrameObj.GetNameList')[1] or []:
+        try:
+            if int(ok(m.FrameObj.GetDesignOrientation(n, 0), 'GetDesignOrientation')[0]) != 1:
+                continue
+            label, story = ok(m.FrameObj.GetLabelFromName(n, '', ''), 'FrameObj.GetLabelFromName')[:2]
+            p1, p2 = ok(m.FrameObj.GetPoints(n, '', ''), 'FrameObj.GetPoints')[:2]
+            c1, c2 = [ok(m.PointObj.GetCoordCartesian(p, 0, 0, 0), 'PointObj.GetCoordCartesian')[:3] for p in (p1, p2)]
+            top = p2 if c2[2] >= c1[2] else p1
+            r = ok(m.Results.FrameForce(n, 0, 0, [], [], [], [], [], [], [], [], [], [], [], [], []), 'Results.FrameForce')
+            P = list(r[8] or [])
+            if not P:
+                continue
+            st = stacks.setdefault(('column', label), {'name': label, 'kind': 'column', 'x': c1[0], 'y': c1[1], 'levels': []})
+            st['levels'].append({'story': story, 'N': max(0.0, -min(P)), 'uz': uz(top)})
+        except Exception:
+            continue
+    try:   # wall piers: N at the bottom (PierForce) and the mean U3 of the top corners of the pier's wall panels
+        tops = {}
+        for ar in ok(m.AreaObj.GetNameList(0, []), 'AreaObj.GetNameList')[1] or []:
+            try:
+                if int(ok(m.AreaObj.GetDesignOrientation(ar, 0), 'AreaObj.GetDesignOrientation')[0]) != 1:
+                    continue
+                pier = ok(m.AreaObj.GetPier(ar, ''), 'AreaObj.GetPier')[0]
+                story = ok(m.AreaObj.GetLabelFromName(ar, '', ''), 'AreaObj.GetLabelFromName')[1]
+                cs = ok(m.AreaObj.GetPoints(ar, 0, []), 'AreaObj.GetPoints')[1] or []
+                zs = [ok(m.PointObj.GetCoordCartesian(p, 0, 0, 0), 'PointObj.GetCoordCartesian')[2] for p in cs]
+                tops.setdefault((pier, story), []).extend(uz(p) for p, z in zip(cs, zs) if z >= max(zs) - 1e-3)
+            except Exception:
+                continue
+        pf = ok(m.Results.PierForce(0, [], [], [], [], [], [], [], [], [], []), 'Results.PierForce')
+        n_, sto, pier, _case, loc, P = pf[:6]
+        Nb = {}
+        for i in range(n_ or 0):
+            if 'bot' in str(loc[i]).lower():
+                Nb[(pier[i], sto[i])] = max(Nb.get((pier[i], sto[i]), 0.0), -P[i])
+        for pn in ok(m.PierLabel.GetNameList(0, []), 'PierLabel.GetNameList')[1] or []:
+            sp = ok(m.PierLabel.GetSectionProperties(pn, 0, [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], []), 'PierLabel.GetSectionProperties')
+            ns, names, cx, cy = sp[0], sp[1], sp[10], sp[11]
+            for i in range(ns or 0):
+                u = tops.get((pn, names[i]), [])
+                st = stacks.setdefault(('wall', pn), {'name': pn, 'kind': 'wall', 'x': cx[i], 'y': cy[i], 'levels': []})
+                st['levels'].append({'story': names[i], 'N': max(0.0, Nb.get((pn, names[i]), 0.0)), 'uz': sum(u) / len(u) if u else None})
+    except Exception as e:
+        print('piers not read:', e)
+    return {'cases': cases, 'case': case, 'stacks': list(stacks.values())}
+
+
+def mock_staged(case):
+    """demo staged-construction case 'STAGED G+0.3Q' (one storey per stage, time-dependent): N = one-step quasi-permanent
+    N x 1.05 (columns) / x 0.90 (core walls) - the staged sequence moves load from the core back to the columns; uz of each
+    level = 2 x the elastic shortening below it from the floors cast after it (creep and shrinkage of the stages)"""
+    base, out = mock_axial('SLS-QP G+0.3Q', True)['stacks'], []
+    h = [3.4] + [3.2] * 9
+    for k in base:
+        lv, E = k['levels'], lambda l: 22e6 * ((l['f'] + 8) / 10) ** 0.3
+        fac = 1.05 if k['kind'] == 'column' else 0.90
+        w = lv[-1]['N']   # one floor
+        o = []
+        for i, l in enumerate(lv):
+            after = w * (len(lv) - 1 - i)   # floors cast after level i
+            u = 2 * sum(h[j] * after / (E(lv[j]) * lv[j]['A']) for j in range(i + 1))
+            o.append({'story': l['story'], 'N': round(l['N'] * fac, 1), 'uz': -round(u, 6)})
+        out.append({'name': k['name'], 'kind': k['kind'], 'x': k['x'], 'y': k['y'], 'levels': o})
+    return {'cases': ['STAGED G+0.3Q'], 'case': 'STAGED G+0.3Q', 'stacks': out}
+
+
 def mock_axial(combo, demo):
     """demo stacks: the 20 columns (tributary areas of the 6 m grid, 9.2 kN/m2 quasi-permanent) and the 4 core walls
     (42 m2 of core slab + own weight) - same as the Building checks demo"""
@@ -1576,6 +1687,9 @@ class Mock:
         if not combo:
             raise BridgeError('Select the quasi-permanent load combination (G + psi2 Q)')
         return mock_beams(combo)
+
+    def staged(self, case):
+        return mock_staged(case)
 
     def slabdefl(self, combo):
         if not combo:
@@ -1829,6 +1943,8 @@ def make_handler(src, origins):
                     return self.send(200, src.piers(q.get('c', [])))
                 if u.path == '/beams':
                     return self.send(200, src.beams(q.get('c', [''])[0]))
+                if u.path == '/staged':
+                    return self.send(200, src.staged(q.get('c', [''])[0]))
                 if u.path == '/slabdefl':
                     return self.send(200, src.slabdefl(q.get('c', [''])[0]))
                 if u.path == '/columns':

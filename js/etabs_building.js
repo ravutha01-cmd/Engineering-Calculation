@@ -10,7 +10,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ROLES = { seis: 'Seismic', wind: 'Wind SLS', uls: 'ULS', off: 'Not used' };
   const ROLE_ORDER = ['seis', 'wind', 'uls', 'off'];
-  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, rhoL: 0.006, punchCov: 0.035, flatSlab: false, dcl: 'M', hb: 0.6, colCov: 0.05, beamCov: 0.05, colW: 0.5, cotTh: 1.0, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false, epsV: 1.5, nuLim: 0.4, omega: 1.0, slabCr: 2.0, slabEta: 0.6, slabL1: 250, slabL2: 500, slabLT: false, stagedCase: '' };
+  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, rhoL: 0.006, punchCov: 0.035, flatSlab: false, dcl: 'M', hb: 0.6, colCov: 0.05, beamCov: 0.05, colW: 0.5, cotTh: 1.0, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false, epsV: 1.5, nuLim: 0.4, omega: 1.0, slabCr: 2.0, slabEta: 0.6, slabL1: 250, slabL2: 500, slabLT: false, stagedCase: '', setLim: 0.05, betaLim: 500 };
   let busy = '', err = '';
 
   const B = () => { const p = api.proj(); p.building = p.building || {}; const b = p.building; b.set = Object.assign({}, DEF, b.set || {}); b.roles = b.roles || {}; return b; };
@@ -102,6 +102,17 @@
   /* demo coupling beams (same as the --mock bridge /spandrels): S1, S2 over 1.2 m doors in W1, W2, 800 mm deep */
   function demoSpandrels() {
     return [1, 2].map(k => ({ name: 'S' + k, levels: Array.from({ length: 10 }, (_, i) => { const [t, f] = i < 5 ? [0.25, 40] : [0.2, 30], V = 300 + 120 * i - 12 * i * i; return { story: 'Story' + (i + 1), L: 1.2, h: 0.8, t, fck: f, V, M: Math.round(V * 6) / 10, case: 'G+0.3Q+EX' }; }) }));
+  }
+
+  /* demo spring supports (same as the --mock bridge /settlement): k = 90 / 120 / 150 MN/m corner / edge / interior,
+     softer zone under C8 (12, 6) 100 MN/m; s = N of the quasi-permanent combination at the base / k */
+  function demoSettlement() {
+    const out = []; let n = 0;
+    [0, 6, 12, 18].forEach(y => [0, 6, 12, 18, 24].forEach(x => {
+      const ex = x === 0 || x === 24, ey = y === 0 || y === 18, trib = (ex ? 3 : 6) * (ey ? 3 : 6), k = x === 12 && y === 6 ? 100000 : ex && ey ? 90000 : ex || ey ? 120000 : 150000;
+      n++; out.push({ name: String(n), label: 'C' + n, kind: 'point', x, y, k, s: Math.round(trib * 9.2 * 10 / k * 1e6) / 1e6 });
+    }));
+    return { combo: 'SLS-QP G+0.3Q', supports: out };
   }
 
   /* demo joints (same as the --mock bridge /joints): beam/column capacity ratios of the ETABS concrete design */
@@ -667,6 +678,22 @@
       }));
       if (rows.length) out.coup = { rows, fyd };
     }
+    // 28. differential settlement - EN 1997-1 2.4.8, 2.4.9(1), Annex H: settlement s = −U3 of the spring-supported joints
+    //     for the quasi-permanent combination; relative rotation β = |s_i − s_j|/L to the neighbouring supports (all within
+    //     1.05 × the nearest distance, the worst counts) ≤ 1/β_lim (Annex H: 1/500 acceptable for many structures) and
+    //     s ≤ s_lim (Annex H: up to 50 mm for isolated shallow foundations)
+    out.sett = null;
+    const SE = d.settlement;
+    if (SE && (SE.supports || []).length) {
+      const sl = +s.setLim || 0.05, bl = +s.betaLim || 500, P = SE.supports.filter(p => p.s != null).map(p => ({ name: p.name, label: p.label || p.name, kind: p.kind, x: +p.x, y: +p.y, k: p.k, s: +p.s }));
+      const rows = P.map(a => {
+        const ds = P.filter(b2 => b2 !== a).map(b2 => [b2, Math.hypot(b2.x - a.x, b2.y - a.y)]).filter(q => q[1] > 0.5);
+        const dmin = ds.length ? Math.min(...ds.map(q => q[1])) : 0, nb = ds.filter(q => q[1] <= 1.05 * dmin).map(q => ({ p: q[0], L: q[1], beta: Math.abs(a.s - q[0].s) / q[1] })).sort((p1, p2) => p2.beta - p1.beta)[0];
+        const Ub = nb ? nb.beta * bl : 0, Us = a.s / sl;
+        return Object.assign(a, { nb: nb ? nb.p.label : '', L: nb ? nb.L : null, beta: nb ? nb.beta : null, Ub, Us, U: Math.max(Ub, Us) });
+      });
+      if (rows.length) out.sett = { rows, combo: SE.combo, sl, bl, area: rows.some(r => r.kind === 'area') };
+    }
     return out;
   }
 
@@ -994,6 +1021,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       ${R.slab ? sumCard('slabd', 'Slab deflection δ/(span/' + R.slab.L1 + ', /' + R.slab.L2 + ')', Umax(R.slab.rows), (() => { const w = R.slab.rows.reduce((a, r) => (!a || r.U > a.U ? r : a), null); return `δ<sub>LT</sub> ${fmt(w.dLT * 1000, 1)} mm, after partitions ${fmt(w.dInc * 1000, 1)} mm (${esc(w.story)}, bay ${w.bay})`; })()) : ''}
       ${R.staged ? sumCard('staged', 'Staged construction Δ/L', Umax(R.staged.rows), (() => { const w = R.staged.rows.filter(r => r.rN != null).reduce((a, r) => (!a || Math.abs(r.rN - 1) > Math.abs(a.rN - 1) ? r : a), null); return w ? `N staged / one-step ${fmt(w.rN, 2)} at ${esc(w.name)} ${esc(w.story)}` : esc(R.staged.case); })()) : ''}
       ${R.coup ? sumCard('coup', 'Coupling beams V<sub>Ed</sub>/V<sub>Rd,max</sub>', Umax(R.coup.rows), (() => { const n = R.coup.rows.filter(r => r.diag).length, w = R.coup.rows.reduce((a, r) => (!a || r.Asi > a.Asi ? r : a), null); return n ? `${n} need diagonal bars · A<sub>si</sub> max ${fmt(w.Asi * 1e6, 0)} mm² (${esc(w.name)} ${esc(w.story)})` : 'ordinary beam rules everywhere (5.5.3.5(2))'; })()) : ''}
+      ${R.sett ? sumCard('sett', `Settlement β·${R.sett.bl} · s/s<sub>lim</sub>`, Umax(R.sett.rows), (() => { const w = R.sett.rows.reduce((a, r) => (!a || r.s > a.s ? r : a), null), b2 = R.sett.rows.filter(r => r.beta != null).reduce((a, r) => (!a || r.beta > a.beta ? r : a), null); return `s<sub>max</sub> ${fmt(w.s * 1000, 1)} mm (${esc(w.label)})${b2 && b2.beta > 0 ? ` · β 1/${fmt(1 / b2.beta, 0)} (${esc(b2.label)}–${esc(b2.nb)})` : ''}`; })()) : ''}
       ${R.cols ? sumCard('cols', `Columns DC${R.cols.H ? 'H' : 'M'} ν<sub>d</sub> / ${fmt(R.cols.nuLim, 2)}`, Umax(R.cols.rows), (() => { const w = R.cols.rows.reduce((a, r) => (!a || Math.max(r.Vx, r.Vy) > Math.max(a.Vx, a.Vy) ? r : a), null); return `V<sub>Ed,CD</sub> max ${fmt(Math.max(w.Vx, w.Vy), 0)} kN (${esc(w.col)} ${esc(w.story)})`; })()) : ''}
       ${R.punch && s.flatSlab ? sumCard('punch', 'Punching v<sub>Ed</sub>/v<sub>Rd,c</sub>', Math.max(...R.punch.rows.map(r => r.U1)), `${R.punch.rows.filter(r => r.U1 > 1 + 1e-9).length} connection(s) need punching reinforcement · v<sub>Rd,max</sub> ${R.punch.rows.some(r => r.U0 > 1 + 1e-9) ? 'exceeded' : 'OK'}`) : ''}
       ${R.steel ? sumCard('steel', 'Steel frame design ratio', Umax(R.steel.rows), `${R.steel.rows.length} members · ${R.steel.rows.filter(r => r.U > 1 + 1e-9).length} over 1.0 · ${R.steel.rows.filter(r => r.err).length} with design errors`) : ''}
@@ -1147,6 +1175,22 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `V<sub>Ed</sub> above the strut capacity in ${bad.length} coupling beam(s) (${bad.slice(0, 5).map(r => esc(r.name) + ' ' + esc(r.story)).join(', ')}) → thicker or deeper spandrel, higher f<sub>ck</sub>, or release the coupling (lower stiffness modifier) and redesign the walls.` : 'Every coupling beam section resists V<sub>Ed</sub> (strut).'} ${dg.length ? `${dg.length} of ${K.rows.length} need two groups of diagonal bars (A<sub>si</sub> per diagonal in the table), each enclosed in column-like links (side ≥ b<sub>w</sub>/2) with a horizontal and vertical bar mesh on both faces - detailing per 5.5.3.5(3)-(5).` : 'No diagonal bars needed: V<sub>Ed</sub> ≤ f<sub>ctd</sub>b<sub>w</sub>d or l/h ≥ 3.'}</div>
         <p class="muted bc-pad">Spandrel forces of the seismic combinations from ETABS (envelope of |V2| at both ends). 5.5.3.5 belongs to DCH walls; in DCM it is good practice for coupled walls. The diagonal bars of A<sub>si</sub> carry both shear and moment; anchor them into the walls beyond the EN 1992-1-1 anchorage length, increased as 5.5.3.5 requires.</p>`);
     }
+    if (R.sett) {
+      const T = R.sett, crit = T.rows.slice().sort((a, c) => c.U - a.U).slice(0, 12), bad = T.rows.filter(r => r.U > 1 + 1e-9), mm = v => fmt(v * 1000, 1);
+      const pts = T.rows.filter(r => r.kind === 'point'), xs = T.rows.map(r => r.x), ys = T.rows.map(r => r.y), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+      const W = 380, pad = 26, sc = Math.min((W - 2 * pad) / Math.max(x1 - x0, 1), 300 / Math.max(y1 - y0, 1)), Hh = (y1 - y0) * sc + 2 * pad + 18, smax = Math.max(...T.rows.map(r => r.s), 1e-6);
+      const X = x => pad + (x - x0) * sc, Y = y => Hh - 18 - pad - (y - y0) * sc;
+      const plan = `<figure class="bc-chart"><svg viewBox="0 0 ${W} ${Hh.toFixed(0)}" role="img" aria-label="Settlement in plan">
+        <line x1="${X(x0)}" x2="${X(x1)}" y1="${Hh - 10}" y2="${Hh - 10}" stroke="var(--axis)"/><text x="${(X(x0) + X(x1)) / 2}" y="${Hh - 13}" text-anchor="middle" class="ax">${fmt(x1 - x0, 2)} m</text>
+        ${(pts.length ? pts : T.rows).map(r => `<g class="pt"><circle cx="${X(r.x).toFixed(1)}" cy="${Y(r.y).toFixed(1)}" r="${(pts.length ? 4 + 9 * Math.sqrt(r.s / smax) : 2.5).toFixed(1)}" fill="${r.U > 1 + 1e-9 ? 'var(--critical)' : 'var(--s1)'}" stroke="var(--surface)" stroke-width="1.5"><title>${esc(r.label)} (${fmt(r.x, 2)}, ${fmt(r.y, 2)}) · s = ${mm(r.s)} mm${r.k ? ' · k = ' + fmt(r.k / 1000, 0) + ' MN/m' : ''}${r.beta != null ? ' · β = 1/' + fmt(1 / Math.max(r.beta, 1e-9), 0) + ' to ' + esc(r.nb) : ''}</title></circle></g>`).join('')}</svg>
+        <figcaption class="legend"><span><i style="background:var(--s1)"></i>settlement (size ∝ s)</span><span><i style="background:var(--critical)"></i>over a limit</span></figcaption></figure>`;
+      html += card('sett', 'Differential settlement of the foundations (soil springs)', 'EN 1997-1 2.4.8 · 2.4.9(1) · Annex H', `s = −U<sub>3</sub> of the spring supports for ${esc(T.combo)} · relative rotation β = Δs/L to the neighbouring supports ≤ 1/${T.bl} · s ≤ ${mm(T.sl)} mm`,
+        `${dp(['betaLim', 'setLim'], `${num('betaLim', 'Relative rotation limit 1 /', '-', '50', 'Annex H: 1/500 for many structures, 1/150 likely ULS')}${num('setLim', 'Settlement limit s<sub>lim</sub>', 'm', '0.005', 'Annex H: up to 0.050 for isolated foundations')}`)}
+        <div class="bc-split">${plan}
+        ${tbl([['Support', r => esc(r.label)], ['x, y m', r => `<span style="white-space:nowrap">${fmt(r.x, 1)}, ${fmt(r.y, 1)}</span>`], ['k MN/m', r => (r.k ? fmt(r.k / 1000, 0) : '<small class="muted">area</small>'), 'num'], ['s mm', r => mm(r.s), 'num'], ['vs', r => esc(r.nb)], ['L m', r => (r.L != null ? fmt(r.L, 2) : '–'), 'num'], ['β', r => (r.beta > 0 ? '1/' + fmt(1 / r.beta, 0) : '–'), 'num'], ['U', r => api.ubar(r.U)]], crit)}</div>
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `Settlement or relative rotation over the limit at ${bad.length} support(s) (${bad.slice(0, 5).map(r => esc(r.label) + (r.Ub >= r.Us ? ' β 1/' + fmt(1 / r.beta, 0) : ' s ' + mm(r.s) + ' mm')).join(', ')}) → larger or deeper footings at the soft supports, a stiffer raft / ground beams, or ground improvement; check the superstructure for the imposed differential settlement.` : `Settlement within ${mm(T.sl)} mm and relative rotation within 1/${T.bl} at every support.`}</div>
+        <p class="muted bc-pad">The settlement is only as good as the ETABS spring stiffness k: take it from the geotechnical settlement prediction for the quasi-permanent load (long-term, consolidation included), and re-run with upper and lower k to bound the differential settlement (EN 1997-1 2.4.8, 6.6.2). ${T.area ? 'Area springs: every mesh joint of the raft counts as a support.' : ''}</p>`);
+    }
     if (R.cols) {
       const C = R.cols, crit = C.rows.slice().sort((a, c) => c.U - a.U || Math.max(c.Vx, c.Vy) - Math.max(a.Vx, a.Vy)).slice(0, 12), bad = C.rows.filter(r => r.U > 1 + 1e-9);
       html += card('cols', 'Columns: capacity-design shear and axial load (DCM / DCH)', 'EN 1998-1 5.4.2.3 · 5.5.2.2 · 5.4.3.2.1(3) · 5.5.3.2.1(3)', `V<sub>Ed</sub> = γ<sub>Rd</sub>·2·M<sub>Rc</sub>·min(1, ΣM<sub>Rb</sub>/ΣM<sub>Rc</sub>)/l<sub>cl</sub>, γ<sub>Rd</sub> = ${fmt(C.gRd, 1)} · ν<sub>d</sub> = N<sub>Ed</sub>/(A<sub>c</sub>f<sub>cd</sub>) ≤ ${fmt(C.nuLim, 2)} · N<sub>Ed</sub> of ${esc(C.combo)}`,
@@ -1283,7 +1327,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
       if (d.bc === 'demo') {
-        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); b.data.axialE = demoAxial(1, 'G+0.3Q+EX'); b.data.colDesign = demoColumns(); b.data.beamDesign = demoBeams(); b.data.slabDefl = demoSlabDefl(); b.data.staged = demoStaged(); b.data.spandrels = demoSpandrels(); b.data.joints = demoJoints(); b.data.piers = demoPiers(b.data); b.data.steel = demoSteel(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
+        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); b.data.axialE = demoAxial(1, 'G+0.3Q+EX'); b.data.colDesign = demoColumns(); b.data.beamDesign = demoBeams(); b.data.slabDefl = demoSlabDefl(); b.data.staged = demoStaged(); b.data.spandrels = demoSpandrels(); b.data.settlement = demoSettlement(); b.data.joints = demoJoints(); b.data.piers = demoPiers(b.data); b.data.steel = demoSteel(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
         b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
         Object.assign(b.roles, DEMO_ROLES); Object.assign(b.set, { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, Bx: 24, By: 18, fos: 1.0 });
         let n = 0;   // demo ETABS-linked members (beams, columns, footings) for the P-Δ member design
@@ -1324,6 +1368,9 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
               if (!qp) { b.data.beamDesign = null; return; }
               return EC.etabs.live.get('/beams?c=' + encodeURIComponent(qp)).then(bj => { b.data.beamDesign = bj; }, () => { b.data.beamDesign = null; }); })
             .then(() => { const ms = EC.etabs.live.L.model ? EC.etabs.live.L.model.combos : [], qp = b.set.qpCombo && ms.includes(b.set.qpCombo) ? b.set.qpCombo : ms.find(c => /qp|quasi|perm/i.test(c));
+              if (!qp) { b.data.settlement = null; return; }
+              return EC.etabs.live.get('/settlement?c=' + encodeURIComponent(qp)).then(sj => { b.data.settlement = sj && (sj.supports || []).length ? sj : null; }, () => { b.data.settlement = null; }); })
+            .then(() => { const ms = EC.etabs.live.L.model ? EC.etabs.live.L.model.combos : [], qp = b.set.qpCombo && ms.includes(b.set.qpCombo) ? b.set.qpCombo : ms.find(c => /qp|quasi|perm/i.test(c));
               if (!qp) { b.data.slabDefl = null; return; }
               return EC.etabs.live.get('/slabdefl?c=' + encodeURIComponent(qp)).then(sj => { b.data.slabDefl = sj; }, () => { b.data.slabDefl = null; }); })
             .then(() => { const se = cs.filter(c => b.roles[c] === 'seis'); if (!se.length) { b.data.spandrels = []; return; }
@@ -1358,5 +1405,5 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
     };
   }
 
-  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); d.axialE = demoAxial(1, 'G+0.3Q+EX'); d.colDesign = demoColumns(); d.beamDesign = demoBeams(); d.slabDefl = demoSlabDefl(); d.staged = demoStaged(); d.spandrels = demoSpandrels(); d.joints = demoJoints(); d.piers = demoPiers(d); d.steel = demoSteel(); return d; }, _demoRoles: DEMO_ROLES };
+  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); d.axialE = demoAxial(1, 'G+0.3Q+EX'); d.colDesign = demoColumns(); d.beamDesign = demoBeams(); d.slabDefl = demoSlabDefl(); d.staged = demoStaged(); d.spandrels = demoSpandrels(); d.settlement = demoSettlement(); d.joints = demoJoints(); d.piers = demoPiers(d); d.steel = demoSteel(); return d; }, _demoRoles: DEMO_ROLES };
 })();

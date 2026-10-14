@@ -38,6 +38,8 @@ Endpoints (JSON):
                                    of its top at the last stage (EN 1992-1-1 3.1.4, EN 1990 execution stages)
     GET /spandrels?c=<combo>&c=... spandrels (coupling beams): length, depth, thickness, f_ck per storey and the envelope
                                    of |V2| and |M3| at both ends over the combinations (EN 1998-1 5.5.3.5)
+    GET /settlement?c=<QP combo>   spring-supported joints (point springs and the mesh joints of areas with area springs):
+                                   plan x, y, spring stiffness and the settlement -U3 for the combination (EN 1997-1 2.4.8, Annex H)
     GET /columns                   concrete columns of the ETABS concrete design: required longitudinal steel and shear steel
     GET /steel                     steel members of the ETABS steel frame design: governing ratio, type, location, combination
     GET /joints                    beam-column joints of the ETABS concrete frame design: beam/column capacity ratio and
@@ -71,7 +73,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.23'
+VERSION = '1.24'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -336,6 +338,18 @@ class Etabs:
         m.SetPresentUnits(KN_M_C)
         try:
             return spandrels_from_model(m, combos, cset)
+        finally:
+            m.SetPresentUnits(old)
+
+    def settlement(self, combo):
+        m = self.attach()
+        if not combo:
+            raise BridgeError('Select the quasi-permanent load combination (G + psi2 Q)')
+        cset = set(self.model_info()['combos'])
+        old = m.GetPresentUnits()
+        m.SetPresentUnits(KN_M_C)
+        try:
+            return settlement_from_model(m, combo, combo in cset)
         finally:
             m.SetPresentUnits(old)
 
@@ -1120,6 +1134,61 @@ def mock_spandrels():
     return {'spandrels': out}
 
 
+def settlement_from_model(m, combo, is_combo):
+    """joints on springs and their settlement s = -U3 (m) for `combo`: point springs (PointObj.GetSpring, vertical k3 > 0)
+    and the mesh joints of area objects with area springs (AreaObj.GetSpring) - a mat on soil springs"""
+    setup = m.Results.Setup
+    setup.DeselectAllCasesAndCombosForOutput()
+    ok(setup.SetComboSelectedForOutput(combo, True) if is_combo else setup.SetCaseSelectedForOutput(combo, True), 'select ' + combo)
+    r = ok(m.Results.JointDispl('All', 2, 0, [], [], [], [], [], [], [], [], [], []), 'Results.JointDispl')
+    n, obj, elm, _case, _st, _sn, _U1, _U2, U3 = r[:9]
+    u3o, u3e = {}, {}
+    for i in range(n or 0):
+        u3o[obj[i]] = min(u3o.get(obj[i], 0.0), U3[i])   # envelope: most downward
+        u3e[elm[i]] = min(u3e.get(elm[i], 0.0), U3[i])
+    out = []
+    for p in ok(m.PointObj.GetNameList(0, []), 'PointObj.GetNameList')[1] or []:
+        try:
+            k = list(ok(m.PointObj.GetSpring(p, []), 'PointObj.GetSpring')[0] or [])
+        except Exception:
+            continue
+        if len(k) < 3 or k[2] <= 0 or p not in u3o:
+            continue
+        label, story = ok(m.PointObj.GetLabelFromName(p, '', ''), 'PointObj.GetLabelFromName')[:2]
+        x, y, _z = ok(m.PointObj.GetCoordCartesian(p, 0, 0, 0), 'PointObj.GetCoordCartesian')[:3]
+        out.append({'name': p, 'label': label, 'kind': 'point', 'x': x, 'y': y, 'k': k[2], 's': -u3o[p]})
+    seen = set()
+    for ar in ok(m.AreaObj.GetNameList(0, []), 'AreaObj.GetNameList')[1] or []:
+        try:
+            ns = ok(m.AreaObj.GetSpring(ar, 0, [], [], [], [], [], [], [], [], [], [], [], []), 'AreaObj.GetSpring')[0]
+            if not ns:
+                continue
+            for ae in ok(m.AreaObj.GetElm(ar, 0, []), 'AreaObj.GetElm')[1] or []:
+                for pe in ok(m.AreaElm.GetPoints(ae, 0, []), 'AreaElm.GetPoints')[1] or []:
+                    if pe in seen or pe not in u3e:
+                        continue
+                    seen.add(pe)
+                    x, y, _z = ok(m.PointElm.GetCoordCartesian(pe, 0, 0, 0), 'PointElm.GetCoordCartesian')[:3]
+                    out.append({'name': pe, 'label': ar, 'kind': 'area', 'x': x, 'y': y, 'k': None, 's': -u3e[pe]})
+        except Exception:
+            continue
+    return {'combo': combo, 'supports': out}
+
+
+def mock_settlement(combo):
+    """demo: the 20 columns on pad footings modelled as vertical springs, k = 90 / 120 / 150 MN/m (corner / edge / interior),
+    a softer zone under C8 (12, 6): 100 MN/m; s = N of the quasi-permanent combination at the base / k"""
+    out, k = [], 0
+    for y in (0, 6, 12, 18):
+        for x in (0, 6, 12, 18, 24):
+            ex, ey = x in (0, 24), y in (0, 18)
+            trib = (3 if ex else 6) * (3 if ey else 6)
+            kk = 100000 if (x, y) == (12, 6) else 90000 if ex and ey else 120000 if ex or ey else 150000
+            out.append({'name': str(k + 1), 'label': 'C%d' % (k + 1), 'kind': 'point', 'x': x, 'y': y, 'k': kk, 's': round(trib * 9.2 * 10 / kk, 6)})
+            k += 1
+    return {'combo': combo, 'supports': out}
+
+
 def mock_piers(forces):
     """demo core walls W1-W4 (7 m along X, 6 m along Y, 250 mm C40 storeys 1-5, 200 mm C30 above): each wall takes 35 %
     of the storey shear and overturning moment in its direction; N = core slab share + own weight (as the demo /axial)"""
@@ -1756,6 +1825,11 @@ class Mock:
     def staged(self, case):
         return mock_staged(case)
 
+    def settlement(self, combo):
+        if not combo:
+            raise BridgeError('Select the quasi-permanent load combination (G + psi2 Q)')
+        return mock_settlement(combo)
+
     def spandrels(self, combos):
         if not combos:
             raise BridgeError('Select at least one seismic load combination')
@@ -2015,6 +2089,8 @@ def make_handler(src, origins):
                     return self.send(200, src.beams(q.get('c', [''])[0]))
                 if u.path == '/spandrels':
                     return self.send(200, src.spandrels(q.get('c', [])))
+                if u.path == '/settlement':
+                    return self.send(200, src.settlement(q.get('c', [''])[0]))
                 if u.path == '/staged':
                     return self.send(200, src.staged(q.get('c', [''])[0]))
                 if u.path == '/slabdefl':

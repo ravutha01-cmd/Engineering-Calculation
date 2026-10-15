@@ -10,7 +10,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ROLES = { seis: 'Seismic', wind: 'Wind SLS', uls: 'ULS', off: 'Not used' };
   const ROLE_ORDER = ['seis', 'wind', 'uls', 'off'];
-  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, rhoL: 0.006, punchCov: 0.035, flatSlab: false, dcl: 'M', hb: 0.6, colCov: 0.05, beamCov: 0.05, colW: 0.5, cotTh: 1.0, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false, epsV: 1.5, nuLim: 0.4, omega: 1.0, slabCr: 2.0, slabEta: 0.6, slabL1: 250, slabL2: 500, slabLT: false, stagedCase: '', setLim: 0.05, betaLim: 500 };
+  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, rhoL: 0.006, punchCov: 0.035, flatSlab: false, dcl: 'M', hb: 0.6, colCov: 0.05, beamCov: 0.05, colW: 0.5, cotTh: 1.0, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false, epsV: 1.5, nuLim: 0.4, omega: 1.0, slabCr: 2.0, slabEta: 0.6, slabL1: 250, slabL2: 500, slabLT: false, stagedCase: '', setLim: 0.05, betaLim: 500, crC: 0.03, crPhi: 16, wmax: 0.3 };
   let busy = '', err = '';
 
   const B = () => { const p = api.proj(); p.building = p.building || {}; const b = p.building; b.set = Object.assign({}, DEF, b.set || {}); b.roles = b.roles || {}; return b; };
@@ -153,7 +153,7 @@
   /* demo beams (same as the --mock bridge /beams): B300x600 C30, 6 m spans on the grid, every storey */
   function demoBeams() {
     const out = []; let k = 0;
-    const add = (i, edge, endI, endJ) => { out.push({ name: String(2000 + k), label: 'B' + (k % 31 + 1), story: 'Story' + (i + 1), sec: 'B300x600 C30', b: 0.3, h: 0.6, fck: 30, L: 6, topI: endI ? 0.0009 : 0.0012, botI: 0.0008, topJ: endJ ? 0.0009 : 0.0012, botJ: 0.0008, Av: edge ? 0.0005 : 0.0008, VgI: edge ? 41.4 : 82.8, VgJ: edge ? 41.4 : 82.8 }); k++; };
+    const add = (i, edge, endI, endJ) => { out.push({ name: String(2000 + k), label: 'B' + (k % 31 + 1), story: 'Story' + (i + 1), sec: 'B300x600 C30', b: 0.3, h: 0.6, fck: 30, L: 6, topI: endI ? 0.0009 : 0.0012, botI: 0.0008, topJ: endJ ? 0.0009 : 0.0012, botJ: 0.0008, Av: edge ? 0.0005 : 0.0008, VgI: edge ? 41.4 : 82.8, VgJ: edge ? 41.4 : 82.8, botM: 0.0008, MqI: edge ? 41.4 : 82.8, MqJ: edge ? 41.4 : 82.8, Mqm: edge ? 20.7 : 41.4 }); k++; };
     for (let i = 0; i < 10; i++) {
       [0, 6, 12, 18].forEach(y => [0, 6, 12, 18].forEach(x => add(i, y === 0 || y === 18, x === 0, x === 18)));
       [0, 6, 12, 18, 24].forEach(x => [0, 6, 12].forEach(y => add(i, x === 0 || x === 24, y === 0, y === 12)));
@@ -694,6 +694,31 @@
       });
       if (rows.length) out.sett = { rows, combo: SE.combo, sl, bl, area: rows.some(r => r.kind === 'area') };
     }
+    // 29. crack width of the beams - EN 1992-1-1 7.3.4: w_k = s_r,max·(ε_sm − ε_cm) at both supports (hogging, top steel) and
+    //     at mid-span (sagging, bottom steel) under the quasi-permanent moments; cracked section with E_c,eff = E_cm/(1 + φ)
+    //     (7.4.3(5)); ε_sm − ε_cm = [σ_s − k_t·f_ct,eff/ρ_p,eff·(1 + α_e·ρ_p,eff)]/E_s ≥ 0.6·σ_s/E_s, k_t = 0.4 (7.9);
+    //     s_r,max = 3.4·c + 0.425·k1·k2·φ/ρ_p,eff, k1 = 0.8, k2 = 0.5 (7.11); h_c,ef = min(2.5(h − d), (h − x)/3, h/2);
+    //     w_k ≤ w_max (Table 7.1N: 0.3 mm XC2–XC4, 0.4 mm X0/XC1 appearance)
+    out.crack = null;
+    if (BM && (BM.beams || []).some(bm => bm.MqI != null)) {
+      const phi = +s.phi || 0, cov = +s.beamCov || 0.05, c = +s.crC || 0.03, fi = (+s.crPhi || 16) / 1000, wmax = (+s.wmax || 0.3) / 1000, Es = 200e6;
+      const zOf6 = {}; st.forEach(x => { zOf6[x.name] = x.elev; });
+      const wk = (M, As, bm) => {
+        if (!(M > 0) || !(As > 0)) return null;
+        const fck = +bm.fck || 30, Ecm = 22e6 * Math.pow((fck + 8) / 10, 0.3), n = Es / (Ecm / (1 + phi)), dd = bm.h - cov, rho = As / (bm.b * dd);
+        const x = dd * (-n * rho + Math.sqrt(Math.pow(n * rho, 2) + 2 * n * rho)), ss = M / (As * (dd - x / 3));
+        const fct = 0.3 * Math.pow(fck, 2 / 3) * 1000, hce = Math.min(2.5 * (bm.h - dd), (bm.h - x) / 3, bm.h / 2), rp = As / (bm.b * hce), ae = Es / Ecm;
+        const eps = Math.max((ss - 0.4 * fct / rp * (1 + ae * rp)) / Es, 0.6 * ss / Es), sr = 3.4 * c + 0.425 * 0.8 * 0.5 * fi / rp;
+        return { w: sr * eps, ss, sr, x };
+      };
+      const rows = [];
+      BM.beams.filter(bm => zOf6[bm.story] !== undefined && bm.h > 0 && bm.b > 0).forEach(bm => {
+        [['support i', +bm.MqI, +bm.topI], ['mid-span', +bm.Mqm, +(bm.botM != null ? bm.botM : Math.max(+bm.botI || 0, +bm.botJ || 0))], ['support j', +bm.MqJ, +bm.topJ]].forEach(([at, M, As]) => {
+          const r = wk(M, As, bm); if (r) rows.push({ label: bm.label, story: bm.story, z: zOf6[bm.story], sec: bm.sec, at, M, As, ss: r.ss, sr: r.sr, w: r.w, U: r.w / wmax });
+        });
+      });
+      if (rows.length) out.crack = { rows, wmax, combo: BM.combo, c, fi };
+    }
     return out;
   }
 
@@ -1022,6 +1047,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       ${R.staged ? sumCard('staged', 'Staged construction Δ/L', Umax(R.staged.rows), (() => { const w = R.staged.rows.filter(r => r.rN != null).reduce((a, r) => (!a || Math.abs(r.rN - 1) > Math.abs(a.rN - 1) ? r : a), null); return w ? `N staged / one-step ${fmt(w.rN, 2)} at ${esc(w.name)} ${esc(w.story)}` : esc(R.staged.case); })()) : ''}
       ${R.coup ? sumCard('coup', 'Coupling beams V<sub>Ed</sub>/V<sub>Rd,max</sub>', Umax(R.coup.rows), (() => { const n = R.coup.rows.filter(r => r.diag).length, w = R.coup.rows.reduce((a, r) => (!a || r.Asi > a.Asi ? r : a), null); return n ? `${n} need diagonal bars · A<sub>si</sub> max ${fmt(w.Asi * 1e6, 0)} mm² (${esc(w.name)} ${esc(w.story)})` : 'ordinary beam rules everywhere (5.5.3.5(2))'; })()) : ''}
       ${R.sett ? sumCard('sett', `Settlement β·${R.sett.bl} · s/s<sub>lim</sub>`, Umax(R.sett.rows), (() => { const w = R.sett.rows.reduce((a, r) => (!a || r.s > a.s ? r : a), null), b2 = R.sett.rows.filter(r => r.beta != null).reduce((a, r) => (!a || r.beta > a.beta ? r : a), null); return `s<sub>max</sub> ${fmt(w.s * 1000, 1)} mm (${esc(w.label)})${b2 && b2.beta > 0 ? ` · β 1/${fmt(1 / b2.beta, 0)} (${esc(b2.label)}–${esc(b2.nb)})` : ''}`; })()) : ''}
+      ${R.crack ? sumCard('crack', `Beam crack width w<sub>k</sub>/${fmt(R.crack.wmax * 1000, 1)} mm`, Umax(R.crack.rows), (() => { const w = R.crack.rows.reduce((a, r) => (!a || r.w > a.w ? r : a), null); return `w<sub>k,max</sub> ${fmt(w.w * 1000, 2)} mm (${esc(w.label)} ${esc(w.story)}, ${w.at}) · σ<sub>s</sub> ${fmt(w.ss / 1000, 0)} MPa`; })()) : ''}
       ${R.cols ? sumCard('cols', `Columns DC${R.cols.H ? 'H' : 'M'} ν<sub>d</sub> / ${fmt(R.cols.nuLim, 2)}`, Umax(R.cols.rows), (() => { const w = R.cols.rows.reduce((a, r) => (!a || Math.max(r.Vx, r.Vy) > Math.max(a.Vx, a.Vy) ? r : a), null); return `V<sub>Ed,CD</sub> max ${fmt(Math.max(w.Vx, w.Vy), 0)} kN (${esc(w.col)} ${esc(w.story)})`; })()) : ''}
       ${R.punch && s.flatSlab ? sumCard('punch', 'Punching v<sub>Ed</sub>/v<sub>Rd,c</sub>', Math.max(...R.punch.rows.map(r => r.U1)), `${R.punch.rows.filter(r => r.U1 > 1 + 1e-9).length} connection(s) need punching reinforcement · v<sub>Rd,max</sub> ${R.punch.rows.some(r => r.U0 > 1 + 1e-9) ? 'exceeded' : 'OK'}`) : ''}
       ${R.steel ? sumCard('steel', 'Steel frame design ratio', Umax(R.steel.rows), `${R.steel.rows.length} members · ${R.steel.rows.filter(r => r.U > 1 + 1e-9).length} over 1.0 · ${R.steel.rows.filter(r => r.err).length} with design errors`) : ''}
@@ -1190,6 +1216,16 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
         ${tbl([['Support', r => esc(r.label)], ['x, y m', r => `<span style="white-space:nowrap">${fmt(r.x, 1)}, ${fmt(r.y, 1)}</span>`], ['k MN/m', r => (r.k ? fmt(r.k / 1000, 0) : '<small class="muted">area</small>'), 'num'], ['s mm', r => mm(r.s), 'num'], ['vs', r => esc(r.nb)], ['L m', r => (r.L != null ? fmt(r.L, 2) : '–'), 'num'], ['β', r => (r.beta > 0 ? '1/' + fmt(1 / r.beta, 0) : '–'), 'num'], ['U', r => api.ubar(r.U)]], crit)}</div>
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `Settlement or relative rotation over the limit at ${bad.length} support(s) (${bad.slice(0, 5).map(r => esc(r.label) + (r.Ub >= r.Us ? ' β 1/' + fmt(1 / r.beta, 0) : ' s ' + mm(r.s) + ' mm')).join(', ')}) → larger or deeper footings at the soft supports, a stiffer raft / ground beams, or ground improvement; check the superstructure for the imposed differential settlement.` : `Settlement within ${mm(T.sl)} mm and relative rotation within 1/${T.bl} at every support.`}</div>
         <p class="muted bc-pad">The settlement is only as good as the ETABS spring stiffness k: take it from the geotechnical settlement prediction for the quasi-permanent load (long-term, consolidation included), and re-run with upper and lower k to bound the differential settlement (EN 1997-1 2.4.8, 6.6.2). ${T.area ? 'Area springs: every mesh joint of the raft counts as a support.' : ''}</p>`);
+    }
+    if (R.crack) {
+      const W = R.crack, crit = W.rows.slice().sort((a, c) => c.U - a.U).slice(0, 12), bad = W.rows.filter(r => r.U > 1 + 1e-9);
+      const perSt = at => R.st.map(x => { const rs = W.rows.filter(r => r.story === x.name && (at === 'mid' ? r.at === 'mid-span' : r.at !== 'mid-span')); return rs.length ? { story: x.name, z: x.elev, v: Math.max(...rs.map(r => r.w * 1000)) } : null; }).filter(Boolean);
+      html += card('crack', 'Crack width of the beams (quasi-permanent)', 'EN 1992-1-1 7.3.4 · Table 7.1N', `w<sub>k</sub> = s<sub>r,max</sub>·(ε<sub>sm</sub> − ε<sub>cm</sub>), k<sub>t</sub> = 0.4, E<sub>c,eff</sub> = E<sub>cm</sub>/(1 + φ) · supports with the top steel, mid-span with the bottom steel · M of ${esc(W.combo)} · w<sub>k</sub> ≤ ${fmt(W.wmax * 1000, 1)} mm`,
+        `${dp(['wmax', 'crC', 'crPhi', 'phi', 'beamCov'], `${num('wmax', 'w<sub>max</sub>', 'mm', '0.05', 'Table 7.1N: 0.3 (XC2–XC4, XD, XS), 0.4 (X0, XC1)')}${num('crC', 'Cover c to the bars', 'm', '0.005', 's<sub>r,max</sub> = 3.4c + …')}${num('crPhi', 'Bar diameter φ', 'mm', '1', 'tension bars')}${num('phi', 'φ(∞,t<sub>0</sub>) creep coefficient', '-', '0.1', 'E<sub>c,eff</sub>')}${num('beamCov', 'd′ = h − d', 'm', '0.005', 'bar centroid')}`)}
+        <div class="bc-split">${profile([{ n: 'w_k supports (mm)', c: '--s1', pts: perSt('sup') }, { n: 'w_k mid-span (mm)', c: '--s2', pts: perSt('mid') }], { title: 'Largest crack width per storey', xlabel: 'w_k mm', limit: W.wmax * 1000, unit: 'mm', fmt: v => fmt(v, 2) })}
+        ${tbl([['Beam', r => esc(r.label)], ['Storey', r => esc(r.story)], ['At', r => r.at], ['M<sub>qp</sub> kN·m', r => fmt(r.M, 0), 'num'], ['A<sub>s</sub> mm²', r => fmt(r.As * 1e6, 0), 'num'], ['σ<sub>s</sub> MPa', r => fmt(r.ss / 1000, 0), 'num'], ['s<sub>r,max</sub> mm', r => fmt(r.sr * 1000, 0), 'num'], ['w<sub>k</sub> mm', r => fmt(r.w * 1000, 2), 'num'], ['U', r => api.ubar(r.U)]], crit)}</div>
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `w<sub>k</sub> above ${fmt(W.wmax * 1000, 1)} mm at ${bad.length} place(s) (${bad.slice(0, 5).map(r => esc(r.label) + ' ' + esc(r.story) + ' ' + r.at).join(', ')}) → more or smaller bars (lower σ<sub>s</sub>, shorter s<sub>r,max</sub>), or a deeper section.` : `Crack width within ${fmt(W.wmax * 1000, 1)} mm at the supports and mid-span of every beam.`}</div>
+        <p class="muted bc-pad">A<sub>s</sub> = steel required by the ETABS concrete design (top at the ends, largest bottom along the span) - the bars provided are at least this, so w<sub>k</sub> is on the safe side; check the minimum steel A<sub>s,min</sub> = k<sub>c</sub>·k·f<sub>ct,eff</sub>·A<sub>ct</sub>/σ<sub>s</sub> (7.3.2) with the final bars. Mid-span uses the largest positive M3 of the combination.</p>`);
     }
     if (R.cols) {
       const C = R.cols, crit = C.rows.slice().sort((a, c) => c.U - a.U || Math.max(c.Vx, c.Vy) - Math.max(a.Vx, a.Vy)).slice(0, 12), bad = C.rows.filter(r => r.U > 1 + 1e-9);

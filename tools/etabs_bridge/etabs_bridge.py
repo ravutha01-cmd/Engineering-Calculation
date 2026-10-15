@@ -73,7 +73,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.24'
+VERSION = '1.25'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -1289,15 +1289,19 @@ def beams_from_model(m, combo, is_combo):
             c1, c2 = [ok(m.PointObj.GetCoordCartesian(p, 0, 0, 0), 'PointObj.GetCoordCartesian')[:3] for p in (p1, p2)]
             L = math.dist(c1, c2)
             f = ok(m.Results.FrameForce(fr, 0, 0, [], [], [], [], [], [], [], [], [], [], [], [], []), 'Results.FrameForce')
-            sta, V2 = list(f[2] or []), list(f[9] or [])
+            sta, V2, M3 = list(f[2] or []), list(f[9] or []), list(f[13] or [])
         except Exception:
             continue
         rows.sort()
         i_end, j_end = rows[0], rows[-1]
         vi = max([abs(v) for s_, v in zip(sta, V2) if s_ <= min(sta) + 1e-6] or [0])
         vj = max([abs(v) for s_, v in zip(sta, V2) if s_ >= max(sta) - 1e-6] or [0])
+        mi = max([-m_ for s_, m_ in zip(sta, M3) if s_ <= min(sta) + 1e-6] or [0])   # hogging (ETABS M3 < 0 at the supports)
+        mj = max([-m_ for s_, m_ in zip(sta, M3) if s_ >= max(sta) - 1e-6] or [0])
+        mm_ = max(M3 or [0])
         out.append({'name': fr, 'label': label, 'story': story, 'sec': sec, 'b': b, 'h': h, 'fck': fck, 'L': L,
-                    'topI': i_end[1], 'botI': i_end[2], 'topJ': j_end[1], 'botJ': j_end[2], 'Av': max(x[3] for x in rows), 'VgI': vi, 'VgJ': vj})
+                    'topI': i_end[1], 'botI': i_end[2], 'topJ': j_end[1], 'botJ': j_end[2], 'Av': max(x[3] for x in rows), 'VgI': vi, 'VgJ': vj,
+                    'botM': max(x[2] for x in rows), 'MqI': max(mi, 0.0), 'MqJ': max(mj, 0.0), 'Mqm': max(mm_, 0.0)})
     if not out:
         raise BridgeError('No concrete beam design results - run Design > Concrete Frame Design > Start Design/Check in ETABS')
     return {'combo': combo, 'beams': out}
@@ -1404,7 +1408,8 @@ def mock_slabdefl(combo):
 
 def mock_beams(combo):
     """demo beams B300x600 C30, 6 m spans on the grid (X lines y = 0, 6, 12, 18; Y lines x = 0 ... 24), every storey;
-    top steel 1200 / 900 mm2 (interior / edge ends), bottom 800 mm2, links 800 / 500 mm2/m (interior / edge beams); V_g = 9.2 kN/m2 x 3 m x 6 m / 2"""
+    top steel 1200 / 900 mm2 (interior / edge ends), bottom 800 mm2, links 800 / 500 mm2/m (interior / edge beams); V_g = 9.2 kN/m2 x 3 m x 6 m / 2;
+    quasi-permanent moments w L^2/12 at the supports and w L^2/24 at mid-span (w = 2 V_g / L)"""
     out, k = [], 0
     for i in range(10):
         for y in (0, 6, 12, 18):
@@ -1412,14 +1417,16 @@ def mock_beams(combo):
                 edge = y in (0, 18)
                 out.append({'name': str(2000 + k), 'label': 'B%d' % (k % 31 + 1), 'story': 'Story%d' % (i + 1), 'sec': 'B300x600 C30', 'b': 0.3, 'h': 0.6,
                             'fck': 30, 'L': 6.0, 'topI': 0.0009 if x == 0 else 0.0012, 'botI': 0.0008, 'topJ': 0.0009 if x == 18 else 0.0012, 'botJ': 0.0008,
-                            'Av': 0.0005 if edge else 0.0008, 'VgI': 41.4 if edge else 82.8, 'VgJ': 41.4 if edge else 82.8})
+                            'Av': 0.0005 if edge else 0.0008, 'VgI': 41.4 if edge else 82.8, 'VgJ': 41.4 if edge else 82.8,
+                            'botM': 0.0008, 'MqI': 41.4 if edge else 82.8, 'MqJ': 41.4 if edge else 82.8, 'Mqm': 20.7 if edge else 41.4})
                 k += 1
         for x in (0, 6, 12, 18, 24):
             for y in (0, 6, 12):
                 edge = x in (0, 24)
                 out.append({'name': str(2000 + k), 'label': 'B%d' % (k % 31 + 1), 'story': 'Story%d' % (i + 1), 'sec': 'B300x600 C30', 'b': 0.3, 'h': 0.6,
                             'fck': 30, 'L': 6.0, 'topI': 0.0009 if y == 0 else 0.0012, 'botI': 0.0008, 'topJ': 0.0009 if y == 12 else 0.0012, 'botJ': 0.0008,
-                            'Av': 0.0005 if edge else 0.0008, 'VgI': 41.4 if edge else 82.8, 'VgJ': 41.4 if edge else 82.8})
+                            'Av': 0.0005 if edge else 0.0008, 'VgI': 41.4 if edge else 82.8, 'VgJ': 41.4 if edge else 82.8,
+                            'botM': 0.0008, 'MqI': 41.4 if edge else 82.8, 'MqJ': 41.4 if edge else 82.8, 'Mqm': 20.7 if edge else 41.4})
                 k += 1
     return {'combo': combo, 'beams': out}
 

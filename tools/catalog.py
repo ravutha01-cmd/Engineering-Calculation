@@ -65,6 +65,7 @@ C = {
  'StoneColumns_EC7-2024_Standalone': ('geo', 'Stone columns', 'SC'),
  'PileAxial_EC7_Standalone': ('geo', 'Pile axial resistance', 'PA'),
  'PileDriven_EC7-2024_Standalone': ('geo', 'Driven precast pile (SPT)', 'PD'),
+ 'PileFoundation_EC-2G': ('geo', 'Pile foundation design (EC 2G)', 'PF'),
  'PileLateral_EC7-2024_Standalone': ('geo', 'Pile under lateral load', 'PL'),
  'PileGroupSettlement_EC7-2024_Standalone': ('geo', 'Pile group settlement', 'PG'),
  'PileDowndrag_EC7-2024_Standalone': ('geo', 'Pile downdrag', 'ND'),

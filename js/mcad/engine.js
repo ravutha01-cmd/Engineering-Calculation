@@ -885,8 +885,21 @@
               else { src = ov; }
               rec.ov = true;
             }
-            const v = S.ev(src, null);
-            S.define(t, v, null);
+            let rgv = []; // x[i] := f(i) / x[i,j] := f(i,j) over range variables: evaluate once per element
+            if (t[0] === 'o' && t[1] === 'idx') for (const ix of t.slice(3)) { if (ix[0] !== 'v') continue; const q = S.env.get(ix[1]); if (q instanceof Range) rgv.push([ix[1], q]); }
+            let v;
+            if (rgv.length) {
+              const loop = d => {
+                if (d === rgv.length) { v = S.ev(src, null); S.define(t, v, null); return; }
+                for (const k of rgv[d][1].toArray()) { S.env.def(rgv[d][0], k); loop(d + 1); }
+              };
+              loop(0);
+              rgv.slice().reverse().forEach(g => S.env.def(g[0], g[1]));
+              v = S.env.get(t[2][1]);
+            } else {
+              v = S.ev(src, null);
+              S.define(t, v, null);
+            }
             rec.val = v; rec.name = name;
             if (rhs[0] === 'ev') rec.unit = rhs[2];
           } else if (e[0] === 'ev') {

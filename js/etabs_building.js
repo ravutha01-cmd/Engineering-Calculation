@@ -10,7 +10,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ROLES = { seis: 'Seismic', wind: 'Wind SLS', uls: 'ULS', off: 'Not used' };
   const ROLE_ORDER = ['seis', 'wind', 'uls', 'off'];
-  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, rhoL: 0.006, punchCov: 0.035, flatSlab: false, dcl: 'M', hb: 0.6, colCov: 0.05, beamCov: 0.05, colW: 0.5, cotTh: 1.0, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false, epsV: 1.5, nuLim: 0.4, omega: 1.0, slabCr: 2.0, slabEta: 0.6, slabL1: 250, slabL2: 500, slabLT: false, stagedCase: '', setLim: 0.05, betaLim: 500, crC: 0.03, crPhi: 16, wmax: 0.3 };
+  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, rhoL: 0.006, punchCov: 0.035, flatSlab: false, dcl: 'M', hb: 0.6, colCov: 0.05, beamCov: 0.05, colW: 0.5, cotTh: 1.0, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false, epsV: 1.5, nuLim: 0.4, omega: 1.0, slabCr: 2.0, slabEta: 0.6, slabL1: 250, slabL2: 500, slabLT: false, stagedCase: '', setLim: 0.05, betaLim: 500, crC: 0.03, crPhi: 16, wmax: 0.3, colSway: false, colK: 0.3, phiEf: 1.0 };
   let busy = '', err = '';
 
   const B = () => { const p = api.proj(); p.building = p.building || {}; const b = p.building; b.set = Object.assign({}, DEF, b.set || {}); b.roles = b.roles || {}; return b; };
@@ -113,6 +113,17 @@
       n++; out.push({ name: String(n), label: 'C' + n, kind: 'point', x, y, k, s: Math.round(trib * 9.2 * 10 / k * 1e6) / 1e6 });
     }));
     return { combo: 'SLS-QP G+0.3Q', supports: out };
+  }
+
+  /* demo column end moments (same as the --mock bridge /colends): ULS gravity N, double curvature M3 = +0.04N / −0.03N,
+     M2 = +0.03N / −0.02N (bottom / top) */
+  function demoColEnds() {
+    const out = [];
+    demoAxial(1.42, 'ULS1 1.35G+1.5Q').stacks.filter(k => k.kind === 'column').forEach(k => k.levels.forEach(l => {
+      const N = l.N, h = Math.round(Math.sqrt(l.A) * 1000) / 1000, r1 = v => Math.round(v * 10) / 10;
+      out.push({ label: k.name, story: l.story, sec: `C${h * 1000}x${h * 1000} C${l.f}`, h3: h, h2: h, fck: l.f, N, M2b: r1(0.03 * N), M2t: r1(-0.02 * N), M3b: r1(0.04 * N), M3t: r1(-0.03 * N) });
+    }));
+    return { combo: 'ULS1 1.35G+1.5Q', columns: out };
   }
 
   /* demo joints (same as the --mock bridge /joints): beam/column capacity ratios of the ETABS concrete design */
@@ -719,6 +730,37 @@
       });
       if (rows.length) out.crack = { rows, wmax, combo: BM.combo, c, fi };
     }
+    // 30. slender columns - EN 1992-1-1 5.8.3: λ = l_0/i per axis (rectangular section, i = h/√12), l_0 from 5.8.3.2 (braced
+    //     eq. 5.15 / sway eq. 5.16 with k_1 = k_2 = k), λ_lim = 20·A·B·C/√n (5.13N), A = 1/(1 + 0.2·φ_ef), B = √(1 + 2ω) with the
+    //     ETABS steel, C = 1.7 − r_m (braced; 0.7 sway), n = N_Ed/(A_c·f_cd). Where λ > λ_lim: nominal curvature (5.8.8)
+    //     1/r = K_r·K_φ·ε_yd/(0.45d), e_2 = (1/r)·l_0²/10, M_Ed = max(M_0e + N·e_i + N·e_2, M_02 + N·e_i, N·e_0), M_0e = (0.6 + 0.4·r_m)·M_02 ≥ 0.4·M_02
+    out.slend = null;
+    const CE = d.colEnds;
+    if (CE && (CE.columns || []).length) {
+      const sway = !!s.colSway, k = +s.colK || 0.1, pe = +s.phiEf || 0, fyd = (+s.fyk || 500) / 1.15, d2 = +s.colCov || 0.05, hb = +s.hb || 0, Es = 200e6;
+      const l0f = sway ? Math.max(Math.sqrt(1 + 10 * k * k / (2 * k)), Math.pow(1 + k / (1 + k), 2)) : 0.5 * (1 + k / (0.45 + k));
+      const A = 1 / (1 + 0.2 * pe), rows = [];
+      CE.columns.forEach(c => {
+        const x = st.find(q => q.name === c.story); if (!x || !(c.h3 > 0) || !(c.h2 > 0)) return;
+        const fck = +c.fck || 30, fcd = fck / 1.5, Ac = c.h3 * c.h2, N = Math.max(0, +c.N), n = N / (Ac * fcd * 1000);
+        const cd = (d.colDesign || []).find(q => q.label === c.label && q.story === c.story), w = cd && cd.As > 0 ? cd.As * fyd / (Ac * fcd) : null, B = w != null ? Math.sqrt(1 + 2 * w) : 1.1;
+        const l = Math.max(0.5, x.h - hb), l0 = l0f * l, ei = l0 / 400;
+        const ax = (h, Mb, Mt) => {
+          const M02 = Math.max(Math.abs(Mb), Math.abs(Mt)), M01s = Math.abs(Mb) >= Math.abs(Mt) ? Mt : Mb, Ms = Math.abs(Mb) >= Math.abs(Mt) ? Mb : Mt;
+          const rm = sway ? 1 : (M02 > 1e-9 ? M01s / Ms : 1), C = sway ? 0.7 : 1.7 - rm, lam = l0 / (h / Math.sqrt(12)), lim = n > 0 ? 20 * A * B * C / Math.sqrt(n) : Infinity;
+          let M2 = 0;
+          if (lam > lim) {
+            const om = w != null ? w : 0, nu = 1 + om, Kr = Math.min(1, Math.max(0, (nu - n) / (nu - 0.4))), beta = 0.35 + fck / 200 - lam / 150, Kp = Math.max(1, 1 + beta * pe);
+            M2 = N * Kr * Kp * (fyd / Es * 1000) / (0.45 * (h - d2)) * l0 * l0 / 10;
+          }
+          const M0e = Math.max((0.6 + 0.4 * rm) * M02, 0.4 * M02), e0 = Math.max(h / 30, 0.02);
+          return { lam, lim, rm, M02, M2, MEd: Math.max(M0e + N * ei + M2, M02 + N * ei, N * e0), U: lam / lim };
+        };
+        const a3 = ax(c.h3, +c.M3b || 0, +c.M3t || 0), a2 = ax(c.h2, +c.M2b || 0, +c.M2t || 0);
+        rows.push({ col: c.label, story: c.story, z: x.elev, sec: c.sec || '', h3: c.h3, h2: c.h2, N, n, B, l0, a3, a2, U: Math.max(a3.U, a2.U) });
+      });
+      if (rows.length) out.slend = { rows, combo: CE.combo, sway, k, l0f, A, pe };
+    }
     return out;
   }
 
@@ -1048,6 +1090,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       ${R.coup ? sumCard('coup', 'Coupling beams V<sub>Ed</sub>/V<sub>Rd,max</sub>', Umax(R.coup.rows), (() => { const n = R.coup.rows.filter(r => r.diag).length, w = R.coup.rows.reduce((a, r) => (!a || r.Asi > a.Asi ? r : a), null); return n ? `${n} need diagonal bars · A<sub>si</sub> max ${fmt(w.Asi * 1e6, 0)} mm² (${esc(w.name)} ${esc(w.story)})` : 'ordinary beam rules everywhere (5.5.3.5(2))'; })()) : ''}
       ${R.sett ? sumCard('sett', `Settlement β·${R.sett.bl} · s/s<sub>lim</sub>`, Umax(R.sett.rows), (() => { const w = R.sett.rows.reduce((a, r) => (!a || r.s > a.s ? r : a), null), b2 = R.sett.rows.filter(r => r.beta != null).reduce((a, r) => (!a || r.beta > a.beta ? r : a), null); return `s<sub>max</sub> ${fmt(w.s * 1000, 1)} mm (${esc(w.label)})${b2 && b2.beta > 0 ? ` · β 1/${fmt(1 / b2.beta, 0)} (${esc(b2.label)}–${esc(b2.nb)})` : ''}`; })()) : ''}
       ${R.crack ? sumCard('crack', `Beam crack width w<sub>k</sub>/${fmt(R.crack.wmax * 1000, 1)} mm`, Umax(R.crack.rows), (() => { const w = R.crack.rows.reduce((a, r) => (!a || r.w > a.w ? r : a), null); return `w<sub>k,max</sub> ${fmt(w.w * 1000, 2)} mm (${esc(w.label)} ${esc(w.story)}, ${w.at}) · σ<sub>s</sub> ${fmt(w.ss / 1000, 0)} MPa`; })()) : ''}
+      ${R.slend ? sumCard('slend', 'Column slenderness λ/λ<sub>lim</sub>', Umax(R.slend.rows), (() => { const n = R.slend.rows.filter(r => r.U > 1 + 1e-9).length; return n ? `${n} column(s) slender: second-order moment by nominal curvature` : `${R.slend.sway ? 'sway' : 'braced'}, l<sub>0</sub> = ${fmt(R.slend.l0f, 2)}·l · second-order effects may be ignored`; })()) : ''}
       ${R.cols ? sumCard('cols', `Columns DC${R.cols.H ? 'H' : 'M'} ν<sub>d</sub> / ${fmt(R.cols.nuLim, 2)}`, Umax(R.cols.rows), (() => { const w = R.cols.rows.reduce((a, r) => (!a || Math.max(r.Vx, r.Vy) > Math.max(a.Vx, a.Vy) ? r : a), null); return `V<sub>Ed,CD</sub> max ${fmt(Math.max(w.Vx, w.Vy), 0)} kN (${esc(w.col)} ${esc(w.story)})`; })()) : ''}
       ${R.punch && s.flatSlab ? sumCard('punch', 'Punching v<sub>Ed</sub>/v<sub>Rd,c</sub>', Math.max(...R.punch.rows.map(r => r.U1)), `${R.punch.rows.filter(r => r.U1 > 1 + 1e-9).length} connection(s) need punching reinforcement · v<sub>Rd,max</sub> ${R.punch.rows.some(r => r.U0 > 1 + 1e-9) ? 'exceeded' : 'OK'}`) : ''}
       ${R.steel ? sumCard('steel', 'Steel frame design ratio', Umax(R.steel.rows), `${R.steel.rows.length} members · ${R.steel.rows.filter(r => r.U > 1 + 1e-9).length} over 1.0 · ${R.steel.rows.filter(r => r.err).length} with design errors`) : ''}
@@ -1227,6 +1270,16 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
         <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `w<sub>k</sub> above ${fmt(W.wmax * 1000, 1)} mm at ${bad.length} place(s) (${bad.slice(0, 5).map(r => esc(r.label) + ' ' + esc(r.story) + ' ' + r.at).join(', ')}) → more or smaller bars (lower σ<sub>s</sub>, shorter s<sub>r,max</sub>), or a deeper section.` : `Crack width within ${fmt(W.wmax * 1000, 1)} mm at the supports and mid-span of every beam.`}</div>
         <p class="muted bc-pad">A<sub>s</sub> = steel required by the ETABS concrete design (top at the ends, largest bottom along the span) - the bars provided are at least this, so w<sub>k</sub> is on the safe side; check the minimum steel A<sub>s,min</sub> = k<sub>c</sub>·k·f<sub>ct,eff</sub>·A<sub>ct</sub>/σ<sub>s</sub> (7.3.2) with the final bars. Mid-span uses the largest positive M3 of the combination.</p>`);
     }
+    if (R.slend) {
+      const Q = R.slend, crit = Q.rows.slice().sort((a, c) => c.U - a.U).slice(0, 12), bad = Q.rows.filter(r => r.U > 1 + 1e-9);
+      const swayChk = `<label class="bc-in"><span>Sway (unbraced) storeys</span><input type="checkbox" data-bcset="colSway" ${s.colSway ? 'checked' : ''} style="width:20px;height:20px"><small>untick when walls / cores brace the frame (5.8.3.2, 5.8.2(5))</small></label>`;
+      html += card('slend', 'Slender columns (second-order effects)', 'EN 1992-1-1 5.8.3.1 · 5.8.3.2 · 5.8.8', `λ = l<sub>0</sub>/i ≤ λ<sub>lim</sub> = 20·A·B·C/√n, A = ${fmt(Q.A, 2)}, B = √(1 + 2ω), C = ${Q.sway ? '0.7' : '1.7 − r<sub>m</sub>'} · l<sub>0</sub> = ${fmt(Q.l0f, 2)}·l (${Q.sway ? 'sway' : 'braced'}, k = ${fmt(Q.k, 2)}) · N, M of ${esc(Q.combo)}`,
+        `<div class="bc-inputs">${swayChk}</div>${dp(['colK', 'phiEf', 'hb', 'colCov'], `${num('colK', 'Rotational flexibility k<sub>1</sub> = k<sub>2</sub>', '-', '0.05', '5.8.3.2(3): 0.1 min (rigid), 0.3 typical frame')}${num('phiEf', 'φ<sub>ef</sub> effective creep ratio', '-', '0.1', '5.8.4: A = 1/(1 + 0.2φ<sub>ef</sub>)')}${num('hb', 'Beam depth (l = h − this)', 'm', '0.05', 'clear column height')}${num('colCov', 'd<sub>2</sub> = h − d', 'm', '0.005', 'for 1/r')}`)}
+        <div class="bc-split">${profile([{ n: 'λ/λ_lim max', c: '--s1', pts: R.st.map(x => { const rs = Q.rows.filter(r => r.story === x.name); return rs.length ? { story: x.name, z: x.elev, v: Math.max(...rs.map(r => r.U)) } : null; }).filter(Boolean) }], { title: 'Column slenderness per storey', xlabel: 'λ / λ_lim', limit: 1, fmt: v => fmt(v, 2) })}
+        ${tbl([['Column', r => esc(r.col)], ['Storey', r => esc(r.story)], ['Section', r => `<span style="white-space:nowrap">${fmt(r.h3 * 1000, 0)}×${fmt(r.h2 * 1000, 0)}</span>`], ['N<sub>Ed</sub> kN <small>n</small>', r => `${fmt(r.N, 0)} <small class="muted">${fmt(r.n, 2)}</small>`, 'num'], ['l<sub>0</sub> m', r => fmt(r.l0, 2), 'num'], ['λ <small>3 / 2</small>', r => `<span style="white-space:nowrap">${fmt(r.a3.lam, 1)} / ${fmt(r.a2.lam, 1)}</span>`, 'num'], ['λ<sub>lim</sub> <small>3 / 2</small>', r => `<span style="white-space:nowrap">${fmt(r.a3.lim, 1)} / ${fmt(r.a2.lim, 1)}</span>`, 'num'], ['r<sub>m</sub>', r => `<span style="white-space:nowrap">${fmt(r.a3.rm, 2)} / ${fmt(r.a2.rm, 2)}</span>`, 'num'], ['M<sub>Ed</sub> kN·m <small>3 / 2</small>', r => `${fmt(r.a3.MEd, 0)} / ${fmt(r.a2.MEd, 0)}${r.a3.M2 + r.a2.M2 > 0 ? ' <small class="muted">incl. M<sub>2</sub></small>' : ''}`, 'num'], ['U', r => api.ubar(r.U)]], crit)}</div>
+        <div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.length} column(s) with λ &gt; λ<sub>lim</sub> (${bad.slice(0, 5).map(r => esc(r.col) + ' ' + esc(r.story)).join(', ')}) → design them for M<sub>Ed</sub> of the table (nominal curvature, 5.8.8) - check that the ETABS concrete design uses the same l<sub>0</sub> (braced / sway, effective length factors) - or enlarge the section.` : 'λ ≤ λ<sub>lim</sub> in every column: second-order effects may be ignored (5.8.3.1(1)); design for M<sub>Ed</sub> ≥ N·e<sub>0</sub> and the imperfection N·e<sub>i</sub> (e<sub>i</sub> = l<sub>0</sub>/400).'}</div>
+        <p class="muted bc-pad">r<sub>m</sub> = M<sub>01</sub>/M<sub>02</sub> from the ETABS end moments (same sign = single curvature, 5.8.3.1(1)); ω = A<sub>s</sub>f<sub>yd</sub>/(A<sub>c</sub>f<sub>cd</sub>) from the ETABS required steel (B = 1.1 when missing). Index 3 = bending about the local 3 axis (depth t<sub>3</sub>), 2 = about local 2 (width t<sub>2</sub>). Rectangular concrete columns only.</p>`);
+    }
     if (R.cols) {
       const C = R.cols, crit = C.rows.slice().sort((a, c) => c.U - a.U || Math.max(c.Vx, c.Vy) - Math.max(a.Vx, a.Vy)).slice(0, 12), bad = C.rows.filter(r => r.U > 1 + 1e-9);
       html += card('cols', 'Columns: capacity-design shear and axial load (DCM / DCH)', 'EN 1998-1 5.4.2.3 · 5.5.2.2 · 5.4.3.2.1(3) · 5.5.3.2.1(3)', `V<sub>Ed</sub> = γ<sub>Rd</sub>·2·M<sub>Rc</sub>·min(1, ΣM<sub>Rb</sub>/ΣM<sub>Rc</sub>)/l<sub>cl</sub>, γ<sub>Rd</sub> = ${fmt(C.gRd, 1)} · ν<sub>d</sub> = N<sub>Ed</sub>/(A<sub>c</sub>f<sub>cd</sub>) ≤ ${fmt(C.nuLim, 2)} · N<sub>Ed</sub> of ${esc(C.combo)}`,
@@ -1363,7 +1416,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
       if (d.bc === 'demo') {
-        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); b.data.axialE = demoAxial(1, 'G+0.3Q+EX'); b.data.colDesign = demoColumns(); b.data.beamDesign = demoBeams(); b.data.slabDefl = demoSlabDefl(); b.data.staged = demoStaged(); b.data.spandrels = demoSpandrels(); b.data.settlement = demoSettlement(); b.data.joints = demoJoints(); b.data.piers = demoPiers(b.data); b.data.steel = demoSteel(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
+        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); b.data.axialE = demoAxial(1, 'G+0.3Q+EX'); b.data.colDesign = demoColumns(); b.data.beamDesign = demoBeams(); b.data.slabDefl = demoSlabDefl(); b.data.staged = demoStaged(); b.data.spandrels = demoSpandrels(); b.data.settlement = demoSettlement(); b.data.colEnds = demoColEnds(); b.data.joints = demoJoints(); b.data.piers = demoPiers(b.data); b.data.steel = demoSteel(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
         b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
         Object.assign(b.roles, DEMO_ROLES); Object.assign(b.set, { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, Bx: 24, By: 18, fos: 1.0 });
         let n = 0;   // demo ETABS-linked members (beams, columns, footings) for the P-Δ member design
@@ -1417,8 +1470,9 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
               if (!se) { b.data.axialE = null; return; }
               return EC.etabs.live.get('/axial?c=' + encodeURIComponent(se)).then(aj => { b.data.axialE = aj; }, () => { b.data.axialE = null; }); })
             .then(() => { const ul = Object.keys(b.roles).filter(c => b.roles[c] === 'uls' && (b.data.base || []).some(r => r.combo === c)).sort((a, c) => Math.abs((b.data.base.find(r => r.combo === c) || {}).FZ || 0) - Math.abs((b.data.base.find(r => r.combo === a) || {}).FZ || 0))[0];
-              if (!ul) { b.data.axialU = null; return; }
-              return EC.etabs.live.get('/axial?c=' + encodeURIComponent(ul)).then(aj => { b.data.axialU = aj; }, () => { b.data.axialU = null; }); })
+              if (!ul) { b.data.axialU = null; b.data.colEnds = null; return; }
+              return EC.etabs.live.get('/axial?c=' + encodeURIComponent(ul)).then(aj => { b.data.axialU = aj; }, () => { b.data.axialU = null; })
+                .then(() => EC.etabs.live.get('/colends?c=' + encodeURIComponent(ul)).then(cj => { b.data.colEnds = cj && (cj.columns || []).length ? cj : null; }, () => { b.data.colEnds = null; })); })
             .then(() => EC.etabs.live.get('/piers?' + cs.filter(c => b.roles[c] === 'uls' || b.roles[c] === 'seis').map(c => 'c=' + encodeURIComponent(c)).join('&')).then(pj => { b.data.piers = pj.piers || []; }, () => { b.data.piers = []; }))
             .then(() => EC.etabs.live.get('/steel').then(sj => { b.data.steel = sj.members || []; b.data.steelErr = ''; }, e => { b.data.steel = []; b.data.steelErr = e.message; }))
             .then(() => EC.etabs.live.get('/joints').then(jj => { b.data.joints = jj.joints || []; b.data.jointsErr = ''; }, e => { b.data.joints = []; b.data.jointsErr = e.message; }))
@@ -1441,5 +1495,5 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
     };
   }
 
-  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); d.axialE = demoAxial(1, 'G+0.3Q+EX'); d.colDesign = demoColumns(); d.beamDesign = demoBeams(); d.slabDefl = demoSlabDefl(); d.staged = demoStaged(); d.spandrels = demoSpandrels(); d.settlement = demoSettlement(); d.joints = demoJoints(); d.piers = demoPiers(d); d.steel = demoSteel(); return d; }, _demoRoles: DEMO_ROLES };
+  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); d.axialE = demoAxial(1, 'G+0.3Q+EX'); d.colDesign = demoColumns(); d.beamDesign = demoBeams(); d.slabDefl = demoSlabDefl(); d.staged = demoStaged(); d.spandrels = demoSpandrels(); d.settlement = demoSettlement(); d.colEnds = demoColEnds(); d.joints = demoJoints(); d.piers = demoPiers(d); d.steel = demoSteel(); return d; }, _demoRoles: DEMO_ROLES };
 })();

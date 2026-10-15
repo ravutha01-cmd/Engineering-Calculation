@@ -40,6 +40,8 @@ Endpoints (JSON):
                                    of |V2| and |M3| at both ends over the combinations (EN 1998-1 5.5.3.5)
     GET /settlement?c=<QP combo>   spring-supported joints (point springs and the mesh joints of areas with area springs):
                                    plan x, y, spring stiffness and the settlement -U3 for the combination (EN 1997-1 2.4.8, Annex H)
+    GET /colends?c=<ULS combo>     columns: per label and storey the axial force N (compression +) and the internal moments M2, M3
+                                   at the bottom and top (same step, signed: same sign = single curvature) for slenderness (EN 1992-1-1 5.8)
     GET /columns                   concrete columns of the ETABS concrete design: required longitudinal steel and shear steel
     GET /steel                     steel members of the ETABS steel frame design: governing ratio, type, location, combination
     GET /joints                    beam-column joints of the ETABS concrete frame design: beam/column capacity ratio and
@@ -73,7 +75,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.25'
+VERSION = '1.26'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -350,6 +352,18 @@ class Etabs:
         m.SetPresentUnits(KN_M_C)
         try:
             return settlement_from_model(m, combo, combo in cset)
+        finally:
+            m.SetPresentUnits(old)
+
+    def colends(self, combo):
+        m = self.attach()
+        if not combo:
+            raise BridgeError('Select the ULS load combination')
+        cset = set(self.model_info()['combos'])
+        old = m.GetPresentUnits()
+        m.SetPresentUnits(KN_M_C)
+        try:
+            return colends_from_model(m, combo, combo in cset)
         finally:
             m.SetPresentUnits(old)
 
@@ -1189,6 +1203,66 @@ def mock_settlement(combo):
     return {'combo': combo, 'supports': out}
 
 
+def colends_from_model(m, combo, is_combo):
+    """concrete / any columns: N and the signed internal end moments M2, M3 (bottom = smallest station, top = largest) of
+    `combo`; for multi-step results (envelopes) the step with the largest end moment of each axis is kept"""
+    setup = m.Results.Setup
+    setup.DeselectAllCasesAndCombosForOutput()
+    ok(setup.SetComboSelectedForOutput(combo, True) if is_combo else setup.SetCaseSelectedForOutput(combo, True), 'select ' + combo)
+    out, secs = [], {}
+    for n in ok(m.FrameObj.GetNameList(0, []), 'FrameObj.GetNameList')[1] or []:
+        try:
+            if int(ok(m.FrameObj.GetDesignOrientation(n, 0), 'GetDesignOrientation')[0]) != 1:
+                continue
+            label, story = ok(m.FrameObj.GetLabelFromName(n, '', ''), 'FrameObj.GetLabelFromName')[:2]
+            sec = ok(m.FrameObj.GetSection(n, '', ''), 'FrameObj.GetSection')[0]
+            if sec not in secs:   # rectangular concrete sections only: depth t3 (M3), width t2 (M2), f_ck
+                try:
+                    rr = ok(m.PropFrame.GetRectangle(sec, '', '', 0, 0, 0, '', ''), 'PropFrame.GetRectangle')
+                    secs[sec] = (rr[2], rr[3], ok(m.PropMaterial.GetOConcrete_1(rr[1], 0, False, 0, 0, 0, 0, 0, 0, 0, 0), 'GetOConcrete_1')[0] / 1000)
+                except Exception:
+                    secs[sec] = None
+            if not secs[sec]:
+                continue
+            h3, h2, fck = secs[sec]
+            f = ok(m.Results.FrameForce(n, 0, 0, [], [], [], [], [], [], [], [], [], [], [], [], []), 'Results.FrameForce')
+            sta, stype, snum, P, M2, M3 = list(f[2] or []), list(f[6] or []), list(f[7] or []), list(f[8] or []), list(f[12] or []), list(f[13] or [])
+        except Exception:
+            continue
+        if not sta:
+            continue
+        s0, s1 = min(sta), max(sta)
+        steps = {}
+        for i, x in enumerate(sta):
+            k = (str(stype[i]) if i < len(stype) else '', snum[i] if i < len(snum) else 0)
+            e = steps.setdefault(k, {})
+            if x <= s0 + 1e-6:
+                e['b'] = i
+            if x >= s1 - 1e-6:
+                e['t'] = i
+        pairs = [(e['b'], e['t']) for e in steps.values() if 'b' in e and 't' in e]
+        if not pairs:
+            continue
+        b2, t2 = max(pairs, key=lambda q: max(abs(M2[q[0]]), abs(M2[q[1]])))
+        b3, t3 = max(pairs, key=lambda q: max(abs(M3[q[0]]), abs(M3[q[1]])))
+        out.append({'label': label, 'story': story, 'sec': sec, 'h3': h3, 'h2': h2, 'fck': fck, 'N': max(0.0, -min(P)), 'M2b': M2[b2], 'M2t': M2[t2], 'M3b': M3[b3], 'M3t': M3[t3]})
+    return {'combo': combo, 'columns': out}
+
+
+def mock_colends(combo):
+    """demo: the 20 columns per storey, N = ULS gravity (1.42 x quasi-permanent, as the demo /axial) and the frame-action end
+    moments of a braced frame in double curvature: M3 = +0.04 N bottom / -0.03 N top, M2 = +0.03 N / -0.02 N"""
+    out = []
+    for k in mock_axial('ULS1 1.35G+1.5Q', True)['stacks']:
+        if k['kind'] != 'column':
+            continue
+        for l in k['levels']:
+            N = l['N']
+            h = round(l['A'] ** 0.5, 3)
+            out.append({'label': k['name'], 'story': l['story'], 'sec': 'C%dx%d C%d' % (h * 1000, h * 1000, l['f']), 'h3': h, 'h2': h, 'fck': l['f'], 'N': N, 'M2b': round(0.03 * N, 1), 'M2t': round(-0.02 * N, 1), 'M3b': round(0.04 * N, 1), 'M3t': round(-0.03 * N, 1)})
+    return {'combo': combo, 'columns': out}
+
+
 def mock_piers(forces):
     """demo core walls W1-W4 (7 m along X, 6 m along Y, 250 mm C40 storeys 1-5, 200 mm C30 above): each wall takes 35 %
     of the storey shear and overturning moment in its direction; N = core slab share + own weight (as the demo /axial)"""
@@ -1832,6 +1906,11 @@ class Mock:
     def staged(self, case):
         return mock_staged(case)
 
+    def colends(self, combo):
+        if not combo:
+            raise BridgeError('Select the ULS load combination')
+        return mock_colends(combo)
+
     def settlement(self, combo):
         if not combo:
             raise BridgeError('Select the quasi-permanent load combination (G + psi2 Q)')
@@ -2098,6 +2177,8 @@ def make_handler(src, origins):
                     return self.send(200, src.spandrels(q.get('c', [])))
                 if u.path == '/settlement':
                     return self.send(200, src.settlement(q.get('c', [''])[0]))
+                if u.path == '/colends':
+                    return self.send(200, src.colends(q.get('c', [''])[0]))
                 if u.path == '/staged':
                     return self.send(200, src.staged(q.get('c', [''])[0]))
                 if u.path == '/slabdefl':

@@ -75,7 +75,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.26'
+VERSION = '1.27'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -352,6 +352,17 @@ class Etabs:
         m.SetPresentUnits(KN_M_C)
         try:
             return settlement_from_model(m, combo, combo in cset)
+        finally:
+            m.SetPresentUnits(old)
+
+    def modeshape(self, case, modes):
+        m = self.attach()
+        if not modes:
+            raise BridgeError('Give the mode numbers (modes=1,2)')
+        old = m.GetPresentUnits()
+        m.SetPresentUnits(KN_M_C)
+        try:
+            return modeshape_from_model(m, case or 'Modal', modes)
         finally:
             m.SetPresentUnits(old)
 
@@ -1249,6 +1260,63 @@ def colends_from_model(m, combo, is_combo):
     return {'combo': combo, 'columns': out}
 
 
+def modeshape_from_model(m, case, modes):
+    """mode shapes of the modal `case` for the mode numbers `modes`: Results.ModeShape over all point objects (group ALL),
+    U1 / U2 averaged per storey (rigid diaphragm: the floor translation; the storey of each point from PointObj.GetLabelFromName)"""
+    try:
+        _b, n, names, elev, hgt = ok(m.Story.GetStories_2(0, 0, [], [], [], [], [], [], [], []), 'Story.GetStories_2')[:5]
+    except Exception:
+        n, names, elev, hgt = ok(m.Story.GetStories(0, [], [], [], [], [], [], []), 'Story.GetStories')[:4]
+    zof = {names[i]: elev[i] for i in range(n) if hgt[i] > 0}
+    setup = m.Results.Setup
+    setup.DeselectAllCasesAndCombosForOutput()
+    ok(setup.SetCaseSelectedForOutput(case, True), 'select ' + case)
+    r = ok(m.Results.ModeShape('ALL', 2, 0, [], [], [], [], [], [], [], [], [], [], []), 'Results.ModeShape')
+    obj, num, U1, U2 = list(r[1] or []), list(r[5] or []), list(r[6] or []), list(r[7] or [])
+    want, storyOf, acc = set(int(k) for k in modes), {}, {}
+    for i, p in enumerate(obj):
+        k = int(round(num[i])) if i < len(num) else 0
+        if k not in want:
+            continue
+        if p not in storyOf:
+            try:
+                storyOf[p] = ok(m.PointObj.GetLabelFromName(p, '', ''), 'PointObj.GetLabelFromName')[1]
+            except Exception:
+                storyOf[p] = None
+        st = storyOf[p]
+        if st not in zof:
+            continue
+        a = acc.setdefault((k, st), [0.0, 0.0, 0])
+        a[0] += U1[i]
+        a[1] += U2[i]
+        a[2] += 1
+    out = []
+    for k in sorted(want):
+        rows = [{'story': st, 'z': zof[st], 'ux': a[0] / a[2], 'uy': a[1] / a[2]} for (kk, st), a in acc.items() if kk == k and a[2]]
+        if rows:
+            out.append({'mode': k, 'stories': sorted(rows, key=lambda x: x['z'])})
+    return {'case': case, 'modes': out}
+
+
+def mock_modeshape(case, modes):
+    """demo: mode 1 (Y) and mode 2 (X) of the 10-storey demo, a mixed shear / flexure shape (z/H)^1.25 (Y) and (z/H)^1.15 (X)
+    with a 0.18 cross-component, mode 3 torsional (small translation); amplitudes in m, mass-normalised scale"""
+    st, z = [], 0.0
+    for i in range(10):   # the demo storeys of /building
+        z += 3.4 if i == 0 else 3.2
+        st.append({'name': 'Story%d' % (i + 1), 'elev': round(z, 2)})
+    H = st[-1]['elev']
+    shp = {1: (0.18, 1.0, 1.25), 2: (1.0, 0.18, 1.15), 3: (0.05, 0.05, 1.2)}
+    out = []
+    for k in modes:
+        k = int(k)
+        if k not in shp:
+            continue
+        ax, ay, e = shp[k]
+        out.append({'mode': k, 'stories': [{'story': s['name'], 'z': s['elev'], 'ux': round(0.0021 * ax * (s['elev'] / H) ** e, 6), 'uy': round(0.0021 * ay * (s['elev'] / H) ** e, 6)} for s in st]})
+    return {'case': case, 'modes': out}
+
+
 def mock_colends(combo):
     """demo: the 20 columns per storey, N = ULS gravity (1.42 x quasi-permanent, as the demo /axial) and the frame-action end
     moments of a braced frame in double curvature: M3 = +0.04 N bottom / -0.03 N top, M2 = +0.03 N / -0.02 N"""
@@ -1911,6 +1979,11 @@ class Mock:
             raise BridgeError('Select the ULS load combination')
         return mock_colends(combo)
 
+    def modeshape(self, case, modes):
+        if not modes:
+            raise BridgeError('Give the mode numbers (modes=1,2)')
+        return mock_modeshape(case or 'Modal', modes)
+
     def settlement(self, combo):
         if not combo:
             raise BridgeError('Select the quasi-permanent load combination (G + psi2 Q)')
@@ -2177,6 +2250,9 @@ def make_handler(src, origins):
                     return self.send(200, src.spandrels(q.get('c', [])))
                 if u.path == '/settlement':
                     return self.send(200, src.settlement(q.get('c', [''])[0]))
+                if u.path == '/modeshape':
+                    ms = [x for x in ','.join(q.get('modes', [''])).split(',') if x.strip().isdigit()]
+                    return self.send(200, src.modeshape(q.get('case', [''])[0], ms))
                 if u.path == '/colends':
                     return self.send(200, src.colends(q.get('c', [''])[0]))
                 if u.path == '/staged':

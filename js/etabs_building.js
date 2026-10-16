@@ -10,7 +10,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ROLES = { seis: 'Seismic', wind: 'Wind SLS', uls: 'ULS', off: 'Not used' };
   const ROLE_ORDER = ['seis', 'wind', 'uls', 'off'];
-  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, rhoL: 0.006, punchCov: 0.035, flatSlab: false, dcl: 'M', hb: 0.6, colCov: 0.05, beamCov: 0.05, colW: 0.5, cotTh: 1.0, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false, epsV: 1.5, nuLim: 0.4, omega: 1.0, slabCr: 2.0, slabEta: 0.6, slabL1: 250, slabL2: 500, slabLT: false, stagedCase: '', setLim: 0.05, betaLim: 500, crC: 0.03, crPhi: 16, wmax: 0.3, colSway: false, colK: 0.3, phiEf: 1.0 };
+  const DEF = { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, windLimH: 500, Bx: 20, By: 20, fos: 1.0, ampImp: true, kPurpose: 'seis', ct: 0.075, Rtd: 0, Wf: 0, phi: 2.0, ecs: 0.0003, shortLim: 500, qpCombo: '', gdB: 1.3, gdD: 1.1, slabT: 0, slabFck: 0, fyk: 500, rhoL: 0.006, punchCov: 0.035, flatSlab: false, dcl: 'M', hb: 0.6, colCov: 0.05, beamCov: 0.05, colW: 0.5, cotTh: 1.0, gapX: 0, gapY: 0, adjX: 0, adjY: 0, adjH: 0, sameLev: false, epsV: 1.5, nuLim: 0.4, omega: 1.0, slabCr: 2.0, slabEta: 0.6, slabL1: 250, slabL2: 500, slabLT: false, stagedCase: '', setLim: 0.05, betaLim: 500, crC: 0.03, crPhi: 16, wmax: 0.3, colSway: false, colK: 0.3, phiEf: 1.0, accLim: 0, accRoof: false, accZeta: 1.0 };
   let busy = '', err = '';
 
   const B = () => { const p = api.proj(); p.building = p.building || {}; const b = p.building; b.set = Object.assign({}, DEF, b.set || {}); b.roles = b.roles || {}; return b; };
@@ -113,6 +113,12 @@
       n++; out.push({ name: String(n), label: 'C' + n, kind: 'point', x, y, k, s: Math.round(trib * 9.2 * 10 / k * 1e6) / 1e6 });
     }));
     return { combo: 'SLS-QP G+0.3Q', supports: out };
+  }
+
+  /* demo mode shapes (same as the --mock bridge /modeshape): mode 1 (Y) (z/H)^1.25, mode 2 (X) (z/H)^1.15, 0.18 cross-component */
+  function demoModeShape() {
+    const st = demoBuilding().stories, H = st[st.length - 1].elev, r6 = v => Math.round(v * 1e6) / 1e6, shp = { 1: [0.18, 1.0, 1.25], 2: [1.0, 0.18, 1.15] };
+    return { case: 'Modal', modes: [1, 2].map(k => ({ mode: k, stories: st.map(x => ({ story: x.name, z: x.elev, ux: r6(0.0021 * shp[k][0] * Math.pow(x.elev / H, shp[k][2])), uy: r6(0.0021 * shp[k][1] * Math.pow(x.elev / H, shp[k][2])) })) })) };
   }
 
   /* demo column end moments (same as the --mock bridge /colends): ULS gravity N, double curvature M3 = +0.04N / −0.03N,
@@ -761,6 +767,19 @@
       });
       if (rows.length) out.slend = { rows, combo: CE.combo, sway, k, l0f, A, pe };
     }
+    // 31. wind floor accelerations by storey - EN 1991-1-4 B.4(3) (B.10) / C.4: σ_a,x(z) ∝ Φ_1,x(z), so the peak acceleration of each
+    //     floor is a(z) = a_peak,top·Φ_1(z)/Φ_1(h); Φ_1 from the ETABS mode shape of the first mode in the wind direction (floor
+    //     translation averaged over the storey points), else (z/h)^ζ (F.3, Table F.1); a_peak,top and a_lim from Wind_TallBuilding
+    out.facc = [];
+    out.wc.forEach(w => {
+      const ms = ((d.modeShape || {}).modes || []).find(m => m.mode === w.mode), k = w.dir === 'X' ? 'ux' : 'uy';
+      const at = ms ? ms.stories.slice().sort((a, c) => a.z - c.z) : null, top = at && at.length ? +at[at.length - 1][k] : 0;
+      const zeta = +s.accZeta || 1, rows = st.map(x => {
+        const r = at && Math.abs(top) > 1e-12 ? at.find(q => q.story === x.name) : null;
+        return { story: x.name, z: x.elev, phi: r ? r[k] / top : at && Math.abs(top) > 1e-12 ? null : Math.pow(Math.max(x.elev, 0) / H, zeta) };
+      }).filter(r => r.phi != null);
+      if (rows.length) out.facc.push({ dir: w.dir, mode: w.mode, src: at && Math.abs(top) > 1e-12 ? 'ETABS' : 'zeta', zeta, rows });
+    });
     return out;
   }
 
@@ -1010,6 +1029,20 @@
     const other = (e.res.rows || []).filter(x => x !== row && Number.isFinite(x.U) && x.U > 1 + 1e-9).map(x => ({ item: x.item, U: x.U }));
     return { U: row ? row.U : null, st: row ? row.st : '', a: key('a_peak'), Umax: e.res.Umax, other };
   }
+  // per-storey peak accelerations: a(z) = a_top·Φ(z), a_lim = a_top/U of the worksheet (or the folded override); the roof is
+  // occupied only when ticked, otherwise the highest occupied floor is the storey below it
+  function faccRows(R, s) {
+    return R.facc.map(f => {
+      // a_lim of the worksheet (its input, default 0.15 m/s²) and a_top = U·a_lim (the displayed a_peak text is rounded)
+      const e = wcEl(f.dir), r = wcResult(e), li = e && e.inputs ? e.inputs.a_lim : null, lv = Array.isArray(li) ? li.find(x => typeof x === 'number') : +li;
+      const wLim = lv > 0 ? lv : 0.15, txt = r && r.a ? String(r.a) : '', v = parseFloat(txt.replace(',', '.'));
+      const aTop = r && r.U > 0 ? r.U * wLim : Number.isFinite(v) ? (/mm/.test(txt) ? v / 1000 : v) : null;
+      const aLim = +s.accLim > 0 ? +s.accLim : aTop != null ? wLim : null, n = f.rows.length;
+      const rows = f.rows.map((x, i) => { const occ = s.accRoof || i < n - 1, a = aTop != null ? aTop * Math.abs(x.phi) : null; return Object.assign({}, x, { occ, a, U: a != null && aLim ? a / aLim : null }); });
+      const occ = rows.filter(x => x.occ && x.U != null), g = occ.length ? occ.reduce((a, c) => (c.U > a.U ? c : a)) : null;
+      return Object.assign({}, f, { r, aTop, aLim, rows, gov: g, U: g ? g.U : null });
+    });
+  }
   function wcWrite(b, R) {
     const p = api.proj();
     return EC.mcui.loadSheet(WTID).then(doc => {
@@ -1097,6 +1130,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       ${R.fdn ? sumCard('fdn', 'Foundation forces γ<sub>Rd</sub>Ω = ' + fmt(R.fdn.k, 2), Umax(R.fdn.list), (() => { const w = R.fdn.list.reduce((a, p) => (!a || p.NmaxAll > a.NmaxAll ? p : a), null); return `N<sub>Fd,max</sub> = ${fmt(w.NmaxAll, 0)} kN (${esc(w.label)}) · ${R.fdn.list.filter(p => p.T > 0).length} support(s) in tension`; })()) : ''}
       ${R.sup.list.length ? sumCard('sup', 'Support uplift F<sub>t,d</sub>/R<sub>t,d</sub>', Umax(R.sup.list), (() => { const w = R.sup.list.reduce((a, p) => (!a || p.min.FZ < a.min.FZ ? p : a), null); return `FZ<sub>min</sub> = ${fmt(w.min.FZ, 0)} kN at ${esc(w.label)}`; })()) : ''}
       ${(() => { const rs = R.wc.map(w => wcResult(wcEl(w.dir))).filter(x => x && x.U != null); return R.wc.length ? sumCard('wcomf', 'Wind comfort a<sub>peak</sub>/a<sub>lim</sub>', rs.length ? Math.max(...rs.map(x => x.U)) : null, rs.length ? `top acceleration ${R.wc.map(w => { const x = wcResult(wcEl(w.dir)); return w.dir + ' ' + (x && x.a ? x.a : '–'); }).join(' · ')}` : '') : ''; })()}
+      ${R.facc.length ? (() => { const F = faccRows(R, s), dn = F.filter(f => f.U != null); return sumCard('facc', 'Floor accelerations a(z)/a<sub>lim</sub>', dn.length ? Math.max(...dn.map(f => f.U)) : null, dn.length ? dn.map(f => `${f.dir} ${esc(f.gov.story)} ${fmt(f.gov.a, 3)} m/s²`).join(' · ') : 'needs the wind calculations'); })() : ''}
       ${R.acc.cases.some(c => c.U != null) ? sumCard('acc', 'Accidental eccentricity 0.05 / e', Umax(R.acc.cases), R.acc.cases.map(c => `${esc(c.case)} ${c.ecc != null ? fmt(c.ecc, 3) : '–'}`).join(' · ')) : ''}
       ${R.plan.length ? sumCard('plan', 'Torsional radius e<sub>0</sub>/0.3r · l<sub>s</sub>/r', Umax(R.plan), `r<sub>x</sub>/l<sub>s</sub> = ${fmt(R.planModes.rho.X, 2)} · r<sub>y</sub>/l<sub>s</sub> = ${fmt(R.planModes.rho.Y, 2)} (≥ 1)`) : ''}
       ${R.mass.length ? sumCard('mass', 'Mass irregularity m<sub>i</sub>/m<sub>adj</sub>', Umax(R.mass), (() => { const w = R.mass.reduce((a, r) => (r.ratio != null && (!a || r.ratio > a.ratio) ? r : a), null); return w ? `max ${fmt(w.ratio, 2)} at ${esc(w.story)} (1.5)` : ''; })()) : ''}
@@ -1339,6 +1373,20 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
         ${rows.some(w => w.r && w.r.other && w.r.other.length) ? `<div class="bc-verdict bad">The worksheet also flags: ${rows.filter(w => w.r && w.r.other && w.r.other.length).map(w => w.dir + ': ' + w.r.other.map(x => `${esc(x.item)} = ${fmt(x.U, 2)}`).join(', ')).join(' · ')}${rows.some(w => w.r && w.r.other && w.r.other.some(x => /shear|moment/i.test(x.item))) ? ' - the wind base shear / moment in ETABS is lower than the dynamic wind of EN 1991-1-4 (c<sub>s</sub>c<sub>d</sub>, q<sub>p</sub>): check the ETABS wind load patterns.' : ''}</div>` : ''}
         <p class="muted bc-pad">From ETABS: height, storeys, plan (B<sub>x</sub>, B<sub>y</sub> above), ρ<sub>bld</sub> = Σm / (B<sub>x</sub>·B<sub>y</sub>·h) from the storey masses, n<sub>1</sub> = 1/T of the first mode in the wind direction, the largest base shear / moment of the Wind SLS cases as V<sub>as</sub> / M<sub>as</sub>. The worksheet computes q<sub>p</sub>, c<sub>s</sub>c<sub>d</sub>, the along-wind acceleration for T<sub>comf</sub> (common practice 1-10 years) and the vortex-shedding screening; limits for a 10-year return: residential 0.15, hotel 0.18, office 0.25 m/s² (ISO 10137 / CTBUH guidance, as in the worksheet). Across-wind and torsional accelerations: worksheet Wind_AcrossTorsion.</p>`);
     }
+    if (R.facc.length) {
+      const F = faccRows(R, s), dn = F.filter(f => f.U != null), bad = dn.filter(f => f.U > 1 + 1e-9), has = F.some(f => f.aTop != null);
+      const roofChk = `<label class="bc-in"><span>Roof storey occupied</span><input type="checkbox" data-bcset="accRoof" ${s.accRoof ? 'checked' : ''} style="width:20px;height:20px"><small>untick for a plant / roof level: the storey below governs</small></label>`;
+      const zs = R.st.map(x => x.name), cell = (f, x) => { const q = f && f.rows.find(r => r.story === x); return q || null; };
+      const rows = zs.slice().reverse().map(n => ({ n, z: (R.st.find(x => x.name === n) || {}).elev, X: cell(F.find(f => f.dir === 'X'), n), Y: cell(F.find(f => f.dir === 'Y'), n) }));
+      const col = dd => F.some(f => f.dir === dd) ? [[`Φ<sub>1,${dd}</sub>`, r => (r[dd] ? fmt(r[dd].phi, 3) : '–'), 'num'], [`a<sub>${dd}</sub> m/s²`, r => (r[dd] && r[dd].a != null ? fmt(r[dd].a, 3) + (r[dd].occ ? '' : ' <small class="muted">roof</small>') : '–'), 'num'], ['U', r => (r[dd] && r[dd].U != null && r[dd].occ ? api.ubar(r[dd].U) : '')]] : [];
+      html += card('facc', 'Wind-induced floor accelerations by storey', 'EN 1991-1-4 Annex B.4(3) (B.10) · C.4 · F.3 · ISO 10137', 'σ<sub>a,x</sub>(z) ∝ Φ<sub>1,x</sub>(z) → a(z) = a<sub>peak</sub>(h)·Φ<sub>1</sub>(z)/Φ<sub>1</sub>(h) ≤ a<sub>lim</sub> at each occupied floor · Φ<sub>1</sub> from the ETABS mode shape',
+        `<div class="bc-inputs">${roofChk}</div>${dp(['accLim', 'accZeta'], `${num('accLim', 'a<sub>lim</sub> override (0 = worksheet)', 'm/s²', '0.01', '10-year: residential 0.15, hotel 0.18, office 0.25')}${num('accZeta', 'ζ mode-shape exponent (no ETABS shape)', '-', '0.1', 'F.3 Table F.1: 0.6 frame · 1.0 core + columns · 1.5 core')}`)}
+        <div class="bc-split">${profile(F.map(f => ({ n: (has ? 'a/a_lim ' : 'Φ1 ') + f.dir, c: f.dir === 'Y' ? '--s2' : '--s1', pts: f.rows.map(x => ({ story: x.story, z: x.z, v: has ? (x.U != null ? x.U : 0) : x.phi })) })), has ? { title: 'Peak floor acceleration / limit', xlabel: 'a(z) / a_lim', limit: 1, fmt: v => fmt(v, 2) } : { title: 'First-mode shape (normalised to the roof)', xlabel: 'Φ1(z)', fmt: v => fmt(v, 2) })}
+        ${tbl([['Storey', r => esc(r.n)], ['z m', r => fmt(r.z, 1), 'num']].concat(col('X'), col('Y')), rows)}</div>
+        ${has ? '' : `<div class="etabs-btns" style="padding:12px 16px"><button class="btn primary" data-bc="wcomf">${ic('calc')}Create the wind calculations from ETABS</button><small class="muted">The top acceleration a<sub>peak</sub> and the limit a<sub>lim</sub> come from the Wind_TallBuilding worksheet per direction (card “Wind comfort”).</small></div>`}
+        ${dn.length ? `<div class="bc-verdict ${bad.length ? 'bad' : 'ok'}">${bad.length ? `${bad.map(f => `${f.dir}: a = ${fmt(f.gov.a, 3)} m/s² at ${esc(f.gov.story)} &gt; a<sub>lim</sub> = ${fmt(f.aLim, 3)} m/s² (U = ${fmt(f.U, 2)})`).join(' · ')} → the occupied floors near the top perceive the motion: stiffen (raise n<sub>1</sub>), add mass or damping (TMD), use the upper floors for less sensitive occupancy, or confirm by a wind-tunnel study.` : `Highest occupied floor within the comfort limit: ${dn.map(f => `${f.dir} ${esc(f.gov.story)} a = ${fmt(f.gov.a, 3)} ≤ ${fmt(f.aLim, 3)} m/s²`).join(' · ')}.`}</div>` : ''}
+        <p class="muted bc-pad">Φ<sub>1</sub>(z): ${F.map(f => `${f.dir} ${f.src === 'ETABS' ? `ETABS mode ${f.mode}, floor translation U${f.dir === 'X' ? 1 : 2} averaged over the storey points` : `(z/h)<sup>ζ</sup>, ζ = ${fmt(f.zeta, 1)} (no ETABS mode shape)`}`).join(' · ')}. a<sub>peak</sub>(h) is the worksheet's along-wind top acceleration for T<sub>comf</sub>; a<sub>peak</sub>(h) = U·a<sub>lim</sub> of its comfort check (a<sub>lim</sub> = the worksheet input, unless overridden here). The along-wind response of one mode scales with the mode shape at every height (B.10); across-wind (vortex shedding, Annex E) and torsional accelerations: worksheet Wind_AcrossTorsion - they also scale with Φ<sub>1</sub>(z) of their mode. A plant or roof storey that is not occupied is shown but not checked.</p>`);
+    }
     if (R.acc.rows.length || R.acc.cases.length) {
       const A = R.acc, bad = A.cases.filter(c => c.U != null && c.U > 1 + 1e-9), unk = A.cases.filter(c => c.ecc == null), dirs = [...new Set(A.rows.map(r => r.dir))];
       const tot = d => A.rows.filter(r => r.dir === d).reduce((a, r) => a + r.M, 0);
@@ -1416,7 +1464,7 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
       const d = t.dataset, b = B();
       if (d.bc === 'connect') return EC.etabs.live.connect(rer);
       if (d.bc === 'demo') {
-        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); b.data.axialE = demoAxial(1, 'G+0.3Q+EX'); b.data.colDesign = demoColumns(); b.data.beamDesign = demoBeams(); b.data.slabDefl = demoSlabDefl(); b.data.staged = demoStaged(); b.data.spandrels = demoSpandrels(); b.data.settlement = demoSettlement(); b.data.colEnds = demoColEnds(); b.data.joints = demoJoints(); b.data.piers = demoPiers(b.data); b.data.steel = demoSteel(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
+        b.data = demoBuilding(); b.data.mods = demoMods(); b.data.strength = demoStrength(); b.data.supports = demoSupports(b.data); b.data.axial = demoAxial(); b.data.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); b.data.axialE = demoAxial(1, 'G+0.3Q+EX'); b.data.colDesign = demoColumns(); b.data.beamDesign = demoBeams(); b.data.slabDefl = demoSlabDefl(); b.data.staged = demoStaged(); b.data.spandrels = demoSpandrels(); b.data.settlement = demoSettlement(); b.data.colEnds = demoColEnds(); b.data.modeShape = demoModeShape(); b.data.joints = demoJoints(); b.data.piers = demoPiers(b.data); b.data.steel = demoSteel(); b.data.slabs = [{ prop: 'S200 C30', t: 0.2, mat: 'Concrete', f: 30 }];
         b.file = 'Demo building (sample ETABS results)'; b.at = Date.now(); b.demo = true;
         Object.assign(b.roles, DEMO_ROLES); Object.assign(b.set, { qd: 3.0, nu: 0.5, alpha: 0.005, windLim: 500, Bx: 24, By: 18, fos: 1.0 });
         let n = 0;   // demo ETABS-linked members (beams, columns, footings) for the P-Δ member design
@@ -1465,6 +1513,9 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
             .then(() => { const se = cs.filter(c => b.roles[c] === 'seis'); if (!se.length) { b.data.spandrels = []; return; }
               return EC.etabs.live.get('/spandrels?' + se.map(c => 'c=' + encodeURIComponent(c)).join('&')).then(pj => { b.data.spandrels = pj.spandrels || []; }, () => { b.data.spandrels = []; }); })
             .then(() => EC.etabs.live.get('/staged' + (b.set.stagedCase ? '?c=' + encodeURIComponent(b.set.stagedCase) : '')).then(gj => { b.data.staged = gj && (gj.stacks || []).length ? gj : null; }, () => { b.data.staged = null; }))
+            .then(() => { const md = (b.data.modal || []).slice().sort((a, c) => a.mode - c.mode), dm = r => (r.Rz > r.Ux && r.Rz > r.Uy ? 'R' : r.Ux >= r.Uy ? 'X' : 'Y');
+              const ks = ['X', 'Y'].map(dd => md.find(r => dm(r) === dd)).filter(Boolean); if (!ks.length) { b.data.modeShape = null; return; }
+              return EC.etabs.live.get('/modeshape?case=' + encodeURIComponent(md[0].case || 'Modal') + '&modes=' + ks.map(r => r.mode).join(',')).then(mj => { b.data.modeShape = mj && (mj.modes || []).length ? mj : null; }, () => { b.data.modeShape = null; }); })
             .then(() => EC.etabs.live.get('/columns').then(cj => { b.data.colDesign = cj.columns || []; }, () => { b.data.colDesign = []; }))
             .then(() => { const se = Object.keys(b.roles).filter(c => b.roles[c] === 'seis' && (b.data.base || []).some(r => r.combo === c && Math.abs(r.FZ) > 1)).sort((a, c) => Math.abs((b.data.base.find(r => r.combo === c) || {}).FZ || 0) - Math.abs((b.data.base.find(r => r.combo === a) || {}).FZ || 0))[0];
               if (!se) { b.data.axialE = null; return; }
@@ -1495,5 +1546,5 @@ ${num('windLim', 'Wind storey drift limit h /', '-', '50', 'SLS, e.g. h/500')}
     };
   }
 
-  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); d.axialE = demoAxial(1, 'G+0.3Q+EX'); d.colDesign = demoColumns(); d.beamDesign = demoBeams(); d.slabDefl = demoSlabDefl(); d.staged = demoStaged(); d.spandrels = demoSpandrels(); d.settlement = demoSettlement(); d.colEnds = demoColEnds(); d.joints = demoJoints(); d.piers = demoPiers(d); d.steel = demoSteel(); return d; }, _demoRoles: DEMO_ROLES };
+  EC.building = { install(a) { api = a; }, view, mount, reamp, _modCheck: (p, k) => modCheck(p, k), _compute: compute, _memberFactors: (b, R) => memberFactors(b, R), _vrd: vrd, _demo: () => { const d = Object.assign(demoBuilding(), { strength: demoStrength() }); d.supports = demoSupports(d); d.axial = demoAxial(); d.axialU = demoAxial(1.42, 'ULS1 1.35G+1.5Q'); d.axialE = demoAxial(1, 'G+0.3Q+EX'); d.colDesign = demoColumns(); d.beamDesign = demoBeams(); d.slabDefl = demoSlabDefl(); d.staged = demoStaged(); d.spandrels = demoSpandrels(); d.settlement = demoSettlement(); d.colEnds = demoColEnds(); d.modeShape = demoModeShape(); d.joints = demoJoints(); d.piers = demoPiers(d); d.steel = demoSteel(); return d; }, _demoRoles: DEMO_ROLES };
 })();

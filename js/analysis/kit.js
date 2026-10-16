@@ -7,9 +7,10 @@
  *   EC.analysis.kit({
  *     k, name, short, sub, icon, sheet, desc,
  *     loads: ['N_Ed', 'M_Ed;x', ...],             worksheet inputs typed per combination (input units)
- *     plan(v) -> { shapes, dims, handles }          v.mm(name) length in mm, v.num(name) value in input units
+ *     plan(v) -> { shapes, dims, handles }          v.mm(name) length in mm, v.num(name) value in input units,
+                                                   v.vec(name) / v.vecmm(name) a one-column table input
  *       shapes : [{ t: 'outline'|'col'|'wall'|'pile'|'zone'|'link', x, y, w, h | d, label }]   (mm, x right, y up, x/y = centre)
-                { t: 'bar', x, y, d } rebar dot · { t: 'line', pts: [[x,y],...], cls: 'p-guide'|'p-limit'|'p-rebar'|'p-outline2' }
+                { t: 'pile', x, y, d, sq, hidden } pile (sq = square, hidden = dashed, below the cut) · { t: 'bar', x, y, d } rebar dot · { t: 'line', pts: [[x,y],...], cls: 'p-guide'|'p-limit'|'p-rebar'|'p-outline2' }
                 (a section is drawn the same way: x across, y up the section)
  *       dims   : [{ x1, y1, x2, y2, off, text }]   dimension line between two points, offset in px (+ = below/right)
  *       handles: [{ x, y, set(dx, dy) -> { input: mm or value } }]   drag handle; the result is written to the inputs
@@ -37,7 +38,15 @@
     const mm = n => num(n) * (LU[unit(n)] || 1);
     const ast = (n, x) => { const i = by[n]; return i && i.u ? ['o', '*', +(+x).toPrecision(10), i.u] : +(+x).toPrecision(10); };
     const fromMM = (n, x) => x / (LU[unit(n)] || 1);
-    return { num, mm, unit, ast, fromMM, has: n => !!by[n], def: n => by[n] };
+    /* table input (one column): numbers in input units; vecmm: lengths in mm */
+    const vec = n => {
+      const i = by[n]; if (!i || i.kind !== 'mat') return [];
+      let M = i.v; const o = (inputs || {})[n];
+      if (o) M = Array.isArray(o) && o[0] === 'o' ? o[2] : o;
+      return (M && M[3] ? M[3] : []).map(x => (typeof x === 'number' ? x : NaN));
+    };
+    const vecmm = n => vec(n).map(x => x * (LU[unit(n)] || 1));
+    return { num, mm, unit, ast, fromMM, vec, vecmm, has: n => !!by[n], def: n => by[n] };
   }
   /* worksheet overrides for combination ci */
   function comboInputs(spec, doc, model, ci) {
@@ -115,10 +124,11 @@
       const cls = { outline: 'p-outline', col: 'at-col', wall: 'at-wall', pile: 'at-pile', zone: 'p-limit' };
       P.shapes.forEach(sh => {
         const w = (sh.w != null ? sh.w : sh.d) * s, h = (sh.h != null ? sh.h : sh.d) * s, x0 = X(sh.x) - w / 2, y0 = Y(sh.y) - h / 2;
-        if (sh.t === 'line') { o += `<path class="${sh.cls || 'p-guide'}" d="${sh.pts.map((p, k) => (k ? 'L' : 'M') + f1(X(p[0])) + ' ' + f1(Y(p[1]))).join('')}"/>`; return; }
+        if (sh.t === 'line') { const q = sh.pts[sh.pts.length - 1]; o += `<g><path class="${sh.cls || 'p-guide'}" d="${sh.pts.map((p, k) => (k ? 'L' : 'M') + f1(X(p[0])) + ' ' + f1(Y(p[1]))).join('')}"/>${sh.label ? `<text class="pt at-halo" x="${f1(X(q[0]) + 4)}" y="${f1(Y(q[1]) - 4)}">${esc(sh.label)}</text>` : ''}${sh.title ? `<title>${esc(sh.title)}</title>` : ''}</g>`; return; }
         if (sh.t === 'bar') { o += `<circle class="p-bar" cx="${f1(X(sh.x))}" cy="${f1(Y(sh.y))}" r="${f1(Math.max(2.5, sh.d / 2 * s))}">${sh.title ? `<title>${esc(sh.title)}</title>` : ''}</circle>`; return; }
         if (sh.t === 'link') { o += `<rect class="p-link" fill="none" x="${f1(x0)}" y="${f1(y0)}" width="${f1(w)}" height="${f1(h)}" rx="${f1(Math.max(2, (sh.r || 0) * s))}"/>`; return; }
-        const shape = sh.t === 'pile' ? `<circle class="at-pile" cx="${f1(X(sh.x))}" cy="${f1(Y(sh.y))}" r="${f1(w / 2)}"/>` : sh.t === 'outline' ? `<path class="p-outline" d="M${f1(x0)} ${f1(y0)}h${f1(w)}v${f1(h)}h${f1(-w)}Z"/>` : `<rect class="${cls[sh.t] || 'at-col'}" x="${f1(x0)}" y="${f1(y0)}" width="${f1(Math.max(2, w))}" height="${f1(Math.max(2, h))}" ${sh.t === 'zone' ? 'fill="none"' : ''}/>`;
+        const pc = sh.hidden ? 'at-hidden' : 'at-pile';   // hidden = below the cut: dashed outline drawn on top
+        const shape = sh.t === 'pile' && sh.sq ? `<rect class="${pc}" x="${f1(x0)}" y="${f1(y0)}" width="${f1(w)}" height="${f1(h)}"/>` : sh.t === 'pile' ? `<circle class="${pc}" cx="${f1(X(sh.x))}" cy="${f1(Y(sh.y))}" r="${f1(w / 2)}"/>` : sh.t === 'outline' ? `<path class="p-outline" d="M${f1(x0)} ${f1(y0)}h${f1(w)}v${f1(h)}h${f1(-w)}Z"/>` : `<rect class="${cls[sh.t] || 'at-col'}" x="${f1(x0)}" y="${f1(y0)}" width="${f1(Math.max(2, w))}" height="${f1(Math.max(2, h))}" ${sh.t === 'zone' ? 'fill="none"' : ''}/>`;
         o += `<g>${shape}${sh.t === 'col' ? `<path class="at-seg" d="M${f1(x0)} ${f1(y0)}l${f1(w)} ${f1(h)}M${f1(x0 + w)} ${f1(y0)}l${f1(-w)} ${f1(h)}"/>` : ''}${sh.label ? `<text class="at-lbl at-halo" x="${f1(X(sh.x))}" y="${f1(sh.t === 'outline' ? y0 - 8 : y0 + h + 13)}" text-anchor="middle">${esc(sh.label)}</text>` : ''}${sh.title ? `<title>${esc(sh.title)}</title>` : ''}</g>`;
       });
       (P.dims || []).forEach(d => { o += dim(d); });

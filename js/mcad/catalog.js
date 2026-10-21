@@ -23,7 +23,7 @@ EC.sheetCatalog = [
 "title": "ANCHORAGE AND LAP LENGTHS OF REINFORCEMENT TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 24,
-"kb": 27
+"kb": 33
 },
 {
 "id": "BCJoint_EC2-2023_Standalone",
@@ -58,8 +58,8 @@ EC.sheetCatalog = [
 "prefix": "B",
 "title": "RC BEAM SECTION DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 41,
-"kb": 77
+"nin": 44,
+"kb": 94
 },
 {
 "id": "Beam_EC2-2023_Standalone",
@@ -70,8 +70,8 @@ EC.sheetCatalog = [
 "prefix": "B",
 "title": "RC BEAM SECTION DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
-"nin": 41,
-"kb": 73
+"nin": 44,
+"kb": 89
 },
 {
 "id": "BracketConnection_EC3-EC2-4_Standalone",
@@ -86,6 +86,18 @@ EC.sheetCatalog = [
 "kb": 93
 },
 {
+"id": "ColumnBuckling_EC2-2023_Standalone",
+"file": "ColumnBuckling_EC2-2023_Standalone.mcdx",
+"folder": "EC2_Concrete\\ColumnBuckling_Design",
+"cat": "columns",
+"name": "Rc Column",
+"prefix": "CB",
+"title": "RC COLUMN - BUCKLING RESISTANCE (SECOND-ORDER EFFECTS) TO EN 1992-1-1:2023",
+"code": "EN 1992-1-1:2023",
+"nin": 36,
+"kb": 89
+},
+{
 "id": "Column_EC2-2023_Standalone",
 "file": "Column_EC2-2023_Standalone.mcdx",
 "folder": "EC2_Concrete\\Column_Design",
@@ -95,7 +107,7 @@ EC.sheetCatalog = [
 "title": "RC COLUMN DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 39,
-"kb": 97
+"kb": 102
 },
 {
 "id": "CombinedFooting_EC2-2023_Standalone",
@@ -167,7 +179,7 @@ EC.sheetCatalog = [
 "title": "CRACK CONTROL BY CALCULATION TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 23,
-"kb": 31
+"kb": 34
 },
 {
 "id": "CreepShrinkage_EC2-2023_Standalone",
@@ -179,7 +191,7 @@ EC.sheetCatalog = [
 "title": "CREEP AND SHRINKAGE OF CONCRETE TO EN 1992-1-1:2023 ANNEX B",
 "code": "EN 1992-1-1:2023",
 "nin": 13,
-"kb": 23
+"kb": 27
 },
 {
 "id": "DappedEnd_EC2-2023_Standalone",
@@ -191,7 +203,7 @@ EC.sheetCatalog = [
 "title": "DAPPED-END (HALF-JOINT) BEAM TO EN 1992-1-1:2023 - STRUT-AND-TIE",
 "code": "EN 1992-1-1:2023",
 "nin": 41,
-"kb": 58
+"kb": 64
 },
 {
 "id": "DeepBeam_EC2-2023_Standalone",
@@ -347,7 +359,7 @@ EC.sheetCatalog = [
 "title": "RC FRAME CORNER (KNEE JOINT) TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 24,
-"kb": 33
+"kb": 42
 },
 {
 "id": "GravityWall_EC7-2024_Standalone",
@@ -467,7 +479,7 @@ EC.sheetCatalog = [
 "title": "SINGLE PILE - AXIAL RESISTANCE - EN 1997-3:2025 (EUROPEAN METHODS)",
 "code": "EN 1997-3:2025",
 "nin": 55,
-"kb": 84
+"kb": 90
 },
 {
 "id": "PileCap_FEM_EC2-2023_ETABS",
@@ -482,6 +494,18 @@ EC.sheetCatalog = [
 "kb": 120
 },
 {
+"id": "PileCap_InputActions_EC2-2023_Standalone",
+"file": "PileCap_InputActions_EC2-2023_Standalone.mcdx",
+"folder": "EC2_Concrete\\PileCap_Design",
+"cat": "foundations",
+"name": "Pile Cap Section Design By Input Actions",
+"prefix": "PC",
+"title": "PILE CAP SECTION DESIGN BY INPUT ACTIONS TO EN 1992-1-1:2023",
+"code": "EN 1992-1-1:2023",
+"nin": 43,
+"kb": 63
+},
+{
 "id": "PileCap_Multi_EC2-2023_Standalone",
 "file": "PileCap_Multi_EC2-2023_Standalone.mcdx",
 "folder": "EC2_Concrete\\PileCap_Design\\MultiColumn",
@@ -490,8 +514,8 @@ EC.sheetCatalog = [
 "prefix": "PC",
 "title": "PILE CAP UNDER SEVERAL COLUMNS / WALLS TO EN 1992-1-1:2023 - LOADS BY NODES",
 "code": "EN 1992-1-1:2023",
-"nin": 69,
-"kb": 201
+"nin": 70,
+"kb": 224
 },
 {
 "id": "PileDowndrag_EC7-2024_Standalone",
@@ -598,8 +622,8 @@ EC.sheetCatalog = [
 "prefix": "PC",
 "title": "PILE CAP DESIGN TO EN 1992-1-1:2023 - HAND INPUT",
 "code": "EN 1992-1-1:2023",
-"nin": 84,
-"kb": 202
+"nin": 74,
+"kb": 191
 },
 {
 "id": "Punching_EC2-2023_Standalone",
@@ -611,7 +635,7 @@ EC.sheetCatalog = [
 "title": "PUNCHING SHEAR OF FLAT SLABS TO EN 1992-1-1:2023 (8.4)",
 "code": "EN 1992-1-1:2023",
 "nin": 35,
-"kb": 37
+"kb": 42
 },
 {
 "id": "Raft_EC7-2024_Standalone",
@@ -731,7 +755,7 @@ EC.sheetCatalog = [
 "title": "RC SHEAR WALL DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 29,
-"kb": 64
+"kb": 75
 },
 {
 "id": "SheetPile_EC7_Standalone",
@@ -744,6 +768,18 @@ EC.sheetCatalog = [
 "code": "EUROCODE 7",
 "nin": 39,
 "kb": 58
+},
+{
+"id": "ShellVibration_CCIP-016_Standalone",
+"file": "ShellVibration_CCIP-016_Standalone.mcdx",
+"folder": "EC2_Concrete\\ShellVibration_Design",
+"cat": "sls",
+"name": "Rc Floor Shell",
+"prefix": "SV",
+"title": "RC FLOOR SHELL - FOOTFALL VIBRATION FROM ETABS MODES",
+"code": "Eurocodes",
+"nin": 15,
+"kb": 26
 },
 {
 "id": "Shortening_TallBuilding_EC1-2023_Standalone",
@@ -792,6 +828,18 @@ EC.sheetCatalog = [
 "code": "EN 1992-1-1:2023",
 "nin": 65,
 "kb": 108
+},
+{
+"id": "Slab_Input_EC2-2023_Standalone",
+"file": "Slab_Input_EC2-2023_Standalone.mcdx",
+"folder": "EC2_Concrete\\Slab_Input_Design",
+"cat": "slabs",
+"name": "Rc Slab Design From Input Actions",
+"prefix": "S",
+"title": "RC SLAB DESIGN FROM INPUT ACTIONS TO EN 1992-1-1:2023",
+"code": "EN 1992-1-1:2023",
+"nin": 45,
+"kb": 99
 },
 {
 "id": "Slab_OneWay_EC2-2023_Standalone",
@@ -852,6 +900,18 @@ EC.sheetCatalog = [
 "code": "EN 1992-1-1:2023",
 "nin": 42,
 "kb": 56
+},
+{
+"id": "StairVibration_EC2-2023_Standalone",
+"file": "StairVibration_EC2-2023_Standalone.mcdx",
+"folder": "EC2_Concrete\\StairVibration_Design",
+"cat": "slabs",
+"name": "Rc Staircase",
+"prefix": "SV",
+"title": "RC STAIRCASE - FOOTFALL VIBRATION AND SERVICEABILITY",
+"code": "Eurocodes",
+"nin": 54,
+"kb": 58
 },
 {
 "id": "Staircase_EC2-2023_Standalone",
@@ -971,7 +1031,7 @@ EC.sheetCatalog = [
 "title": "RC BEAM UNDER TORSION, SHEAR AND BENDING TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 25,
-"kb": 30
+"kb": 35
 },
 {
 "id": "TwoPileCap_EC2-2023_Standalone",
@@ -1079,7 +1139,7 @@ EC.sheetCatalog = [
 "title": "WIND ACTIONS ON RECTANGULAR BUILDINGS TO EN 1991-1-4:2024",
 "code": "EN 1991-1-4:2024",
 "nin": 18,
-"kb": 32
+"kb": 37
 },
 {
 "id": "Wind_Canopy_Signboard_EC1-2023_Standalone",
@@ -1091,7 +1151,7 @@ EC.sheetCatalog = [
 "title": "WIND ACTIONS ON CANOPY ROOFS AND SIGNBOARDS TO EN 1991-1-4:2024",
 "code": "EN 1991-1-4:2024",
 "nin": 34,
-"kb": 44
+"kb": 50
 },
 {
 "id": "Wind_Drift_EC1-2023_Standalone",

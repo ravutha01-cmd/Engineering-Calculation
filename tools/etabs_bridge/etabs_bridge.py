@@ -22,6 +22,10 @@ Endpoints (JSON):
                                    max / average displacement ratios, base reactions, buckling factors, modes, storey masses,
                                    centres of mass / rigidity and mass moments of inertia,
                                    accidental eccentricity of the response-spectrum cases
+    GET /shells?c=<combo>&c=...[&sel=0]
+                                   shell forces of the area objects selected in ETABS (walls, slabs) as the table
+                                   'Element Forces - Area Shells' (F11 ... V23 per element joint, kN/m, kN-m/m);
+                                   sel=0: every area object of the model
     GET /results?c=<combo>&c=...&k=beams&k=columns&k=braces&k=piers&k=reactions[&sel=1]
                                    results as ETABS-style tables (header row, units row, rows);
                                    sel=1: only the members selected in ETABS
@@ -75,7 +79,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = '1.27'
+VERSION = '1.28'
 DEFAULT_ORIGINS = ['https://ravutha01-cmd.github.io', 'null']   # null = the app opened from a local file
 KN_M_C = 6                                                    # eUnits.kN_m_C
 ORIENT = {1: 'columns', 2: 'beams', 3: 'braces'}             # eFrameDesignOrientation
@@ -84,6 +88,10 @@ SEL_POINT, SEL_FRAME, SEL_AREA = 1, 2, 5                      # SelectObj.GetSel
 KINDS = ['beams', 'columns', 'braces', 'piers', 'reactions']
 FRAME_HEAD = ['Story', None, 'Unique Name', 'Output Case', 'Case Type', 'Step Type', 'Station', 'P', 'V2', 'V3', 'T', 'M2', 'M3']
 FRAME_UNITS = ['', '', '', '', '', '', 'm', 'kN', 'kN', 'kN', 'kN-m', 'kN-m', 'kN-m']
+SHELL_HEAD = ['Story', 'Shell Object', 'Unique Name', 'Design Type', 'Shell Element', 'Joint', 'Output Case', 'Case Type', 'Step Type',
+              'F11', 'F22', 'F12', 'FMax', 'FMin', 'FVM', 'M11', 'M22', 'M12', 'MMax', 'MMin', 'V13', 'V23', 'VMax']
+SHELL_UNITS = [''] * 9 + ['kN/m'] * 6 + ['kN-m/m'] * 5 + ['kN/m'] * 3
+AREA_DESIGN = {1: 'Wall', 2: 'Floor', 3: 'Ramp', 4: 'Null', 5: 'Other'}  # eAreaDesignOrientation
 TABLES = {
     'beams': ('Element Forces - Beams', 'Beam'), 'columns': ('Element Forces - Columns', 'Column'),
     'braces': ('Element Forces - Braces', 'Brace'),
@@ -244,6 +252,45 @@ class Etabs:
                 items.append({'kind': 'reactions', 'story': story, 'label': label})
         items += [{'kind': 'piers', 'story': st, 'label': p} for st, p in sorted(sel['piers'])]
         return {'items': items}
+
+    def shells(self, combos, only_sel=True):
+        """shell forces of the selected area objects (or all) as the ETABS table 'Element Forces - Area Shells'"""
+        m = self.attach()
+        if only_sel:
+            n, types, names = ok(m.SelectObj.GetSelected(0, [], []), 'SelectObj.GetSelected')[:3]
+            areas = sorted({names[i] for i in range(n or 0) if int(types[i]) == SEL_AREA})
+            if not areas:
+                raise BridgeError('No shell is selected in ETABS - select the wall or slab area objects first.')
+        else:
+            areas = list(ok(m.AreaObj.GetNameList(0, []), 'AreaObj.GetNameList')[1] or [])
+        if not combos:
+            raise BridgeError('Select at least one load combination')
+        cset = set(self.model_info()['combos'])
+        old_units = m.GetPresentUnits()
+        m.SetPresentUnits(KN_M_C)
+        rows = []
+        try:
+            setup = m.Results.Setup
+            setup.DeselectAllCasesAndCombosForOutput()
+            for c in combos:
+                if c in cset:
+                    ok(setup.SetComboSelectedForOutput(c, True), 'SetComboSelectedForOutput')
+                else:
+                    ok(setup.SetCaseSelectedForOutput(c, True), 'SetCaseSelectedForOutput')
+            for a in areas:
+                label, story = ok(m.AreaObj.GetLabelFromName(a, '', ''), 'AreaObj.GetLabelFromName')[:2]
+                design = AREA_DESIGN.get(int(ok(m.AreaObj.GetDesignOrientation(a, 0), 'AreaObj.GetDesignOrientation')[0]), 'Other')
+                r = ok(m.Results.AreaForceShell(a, 0, 0, *[[] for _ in range(23)]), 'Results.AreaForceShell')
+                (n, _obj, elm, pt, case, step, _sn, F11, F22, F12, FMax, FMin, _fa, FVM,
+                 M11, M22, M12, MMax, MMin, _ma, V13, V23, VMax, _va) = r[:24]
+                for i in range(n or 0):
+                    rows.append([story, label, a, design, elm[i], pt[i], case[i], 'Combination' if case[i] in cset else 'LoadCase', step[i] or None,
+                                 F11[i], F22[i], F12[i], FMax[i], FMin[i], FVM[i], M11[i], M22[i], M12[i], MMax[i], MMin[i], V13[i], V23[i], VMax[i]])
+        finally:
+            m.SetPresentUnits(old_units)
+        if not rows:
+            raise BridgeError('ETABS returned no shell forces - run the analysis (F5) and check the load combinations.')
+        return {'file': m.GetModelFilename(True), 'name': 'Element Forces - Area Shells', 'rows': [SHELL_HEAD, SHELL_UNITS] + rows}
 
     def names(self, coll, what):
         out = ok(coll.GetNameList(0, []), what)
@@ -2154,6 +2201,28 @@ class Mock:
                 [{'kind': 'columns', 'story': c[0], 'label': c[1]} for c in self.COLS if c[2] in self.SEL['frames']] +
                 [{'kind': 'reactions', 'story': j[0], 'label': j[1]} for j in self.JOINTS if j[2] in self.SEL['points']]}
 
+    SHELLS = [('Story2', 'W1', '41', 'Wall', 1.0), ('Story2', 'W2', '42', 'Wall', 0.8), ('Story2', 'F1', '51', 'Floor', 0.6)]
+
+    def shells(self, combos, only_sel=True):
+        """demo shell forces: walls in compression with in-plane shear, a floor in bending; 4 element joints per object"""
+        combos = [c for c in combos if c in self.F]
+        if not combos:
+            raise BridgeError('Select at least one load combination')
+        rows = []
+        for st, lab, u, design, k in self.SHELLS:
+            for c in combos:
+                f = self.F[c] * k
+                for j in range(4):
+                    w = design == 'Wall'
+                    F11, F22, F12 = (-120 - 40 * j) * f if w else 15 * f, (-650 + 60 * j) * f if w else 10 * f, (45 + 10 * j) * f
+                    M11, M22, M12 = (8 + 3 * j) * f if w else (38 - 6 * j) * f, (14 - 4 * j) * f if w else (26 + 5 * j) * f, (4 + j) * f
+                    V13, V23 = (12 + 2 * j) * f if w else (55 - 8 * j) * f, (18 - 3 * j) * f if w else (40 + 6 * j) * f
+                    pr = lambda a, b, t: ((a + b) / 2 + (((a - b) / 2) ** 2 + t * t) ** .5, (a + b) / 2 - (((a - b) / 2) ** 2 + t * t) ** .5)
+                    fx, fn = pr(F11, F22, F12); mx, mn = pr(M11, M22, M12)
+                    rows.append([st, lab, u, design, f'{u}-1', str(100 + 10 * int(u) + j), c, 'Combination', None,
+                                 F11, F22, F12, fx, fn, (fx * fx - fx * fn + fn * fn) ** .5, M11, M22, M12, mx, mn, V13, V23, (V13 ** 2 + V23 ** 2) ** .5])
+        return {'file': self.status()['file'], 'name': 'Element Forces - Area Shells', 'rows': [SHELL_HEAD, SHELL_UNITS] + rows}
+
     def results(self, combos, kinds, only_sel=False):
         # notional cases "N <pattern> X|Y": about 3 % of the gravity forces
         F = dict(self.F, **{c: 0.03 for c in combos if c.startswith('N ')})
@@ -2273,6 +2342,8 @@ def make_handler(src, origins):
                     return self.send(200, src.strength())
                 if u.path == '/building':
                     return self.send(200, src.building(q.get('c', [])))
+                if u.path == '/shells':
+                    return self.send(200, src.shells(q.get('c', []), q.get('sel', ['1'])[0] != '0'))
                 if u.path == '/results':
                     kinds = [k for k in q.get('k', KINDS) if k in KINDS]
                     return self.send(200, src.results(q.get('c', []), kinds, q.get('sel', ['0'])[0] == '1'))

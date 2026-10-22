@@ -331,6 +331,11 @@ svg .ppt.bad { fill: var(--critical); }
 
 /* table inputs */
 .tblin { margin: 8px 0 10px; }
+.xlbox { margin: 6px 0 12px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent-soft); }
+.xlbox .xl-h { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--accent); }
+.xlbox p { margin: 6px 0; font-size: 13px; }
+.xlbox .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.xlbox > small { display: block; line-height: 1.4; }
 .tblin .fl { font-size: 13px; color: var(--ink-2); margin-bottom: 4px; }
 .tblin table { border-collapse: collapse; width: 100%; }
 .tblin th { font-size: 11px; color: var(--muted); font-weight: 600; text-align: right; padding: 2px 3px; white-space: nowrap; }

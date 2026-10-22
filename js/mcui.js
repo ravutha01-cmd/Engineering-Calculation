@@ -71,7 +71,8 @@
       worker.postMessage({ req, id, inputs });
     });
   }
-  const hash = e => JSON.stringify(e.inputs || {});
+  const hash = e => JSON.stringify(e.inputs || {}) + (e.xl ? '#xl' + e.xl.at : '');
+  const insOf = e => (e.xl ? Object.assign({}, e.inputs, { __xl: e.xl.t }) : e.inputs || {});
   const inflight = new Map();
   function ensure(e) {
     const mod = api.MOD[e.type]; const h = hash(e);
@@ -79,7 +80,7 @@
     if (f && f.h === h) return Promise.resolve(f.r);
     const key = e.id + '|' + h;
     if (inflight.has(key)) return inflight.get(key);
-    const p = Promise.all([compute(mod.mc, e.inputs || {}), loadSheet(mod.mc)]).then(([r, doc]) => {
+    const p = Promise.all([compute(mod.mc, insOf(e)), loadSheet(mod.mc)]).then(([r, doc]) => {
       inflight.delete(key);
       full.set(e.id, { h, r });
       const before = JSON.stringify(e.res || null);
@@ -207,7 +208,7 @@
           while (i.st && k < g.f.length && g.f[k].kind === 'mat' && g.f[k].st === i.st) cols.push(g.f[k++]);
           html += table(cols); continue;
         }
-        html += field(i); k++;
+        html += field(i) + (i.kind === 'combo' && (i.opts || []).some(o => /ETABS/i.test(o)) ? xlBox(e, doc) : ''); k++;
       }
       const t = g.t.split(' › ');
       return `<div class="grp"><h4>${esc(t[t.length - 1] || 'Input')}</h4>${html}</div>`;
@@ -216,6 +217,87 @@
     if (!main && !nd) return '<div class="empty">This worksheet has no editable inputs.</div>';
     return main + (nd ? EC.defParBlock(render(dg), nd, ne) : '');
   }
+
+  /* ---------- ETABS tables: the ETABS export embedded in a worksheet (Excel component) read live from ETABS or pasted ---------- */
+  const XLK = { shells: { need: ['Shell Object', 'F11', 'M11', 'V13'], what: 'shells', units: { F: 'kN/m', M: 'kN-m/m', V: 'kN/m' } } };
+  const xlKind = rows => rows && rows[0] && Object.keys(XLK).find(k => XLK[k].need.every(h => rows[0].includes(h)));
+  const xlKey = doc => Object.keys((doc && doc.xl) || {}).find(k => xlKind(doc.xl[k]));
+  const srcInput = doc => (doc.inputs || []).find(i => i.kind === 'combo' && (i.opts || []).some(o => /ETABS/i.test(o)));
+  function xlBox(e, doc) {
+    const k = xlKey(doc); if (!k) return '';
+    const rows = e.xl ? e.xl.t[k] : doc.xl[k], c = rows[0].indexOf('Shell Object'), o = rows[0].indexOf('Output Case');
+    const objs = [...new Set(rows.slice(2).map(r => r[c]).filter(v => v != null && v !== ''))];
+    const cases = [...new Set(rows.slice(2).map(r => r[o]).filter(Boolean))];
+    const st = e.xl ? `<b>${esc(e.xl.src)}</b> · read ${esc(new Date(e.xl.at).toLocaleString())}` : '<b>Table saved in the Mathcad worksheet</b>';
+    return `<div class="xlbox"><div class="xl-h">${api.ic('table')}ETABS shell forces</div>
+      <p>${st}<br><small>${rows.length - 2} rows · ${objs.length} shell object${objs.length === 1 ? '' : 's'} (${esc(objs.slice(0, 8).join(', '))}${objs.length > 8 ? ', …' : ''}) · ${cases.length} output case${cases.length === 1 ? '' : 's'}</small></p>
+      <div class="chips"><button class="btn sm primary" data-xlread>${api.ic('download')}Read selected shells from ETABS</button><button class="btn sm" data-xlpaste>Paste ETABS table</button>${e.xl ? '<button class="btn sm" data-xlreset>Use worksheet table</button>' : ''}</div>
+      <small class="muted">Select the walls / slabs in the ETABS window, then read: the combinations of the case inputs below (all combinations when the ULS case is "ALL"). Needs the ETABS link (Design with ETABS link).</small></div>`;
+  }
+  function xlUse(e, doc, rows, src) {
+    const k = xlKey(doc);
+    e.xl = { t: { [k]: rows.slice(0, 20000) }, src, at: Date.now() };
+    const s = srcInput(doc);
+    if (s) { const ix = s.opts.findIndex(o => /ETABS/i.test(o)); e.inputs = e.inputs || {}; if (ix === s.v) delete e.inputs[s.n]; else e.inputs[s.n] = ix; }
+    // case inputs that name no case of the table: ULS -> "ALL", SLS characteristic / quasi-permanent -> the case named like it
+    const o = rows[0].indexOf('Output Case'), cases = [...new Set(rows.slice(2).map(r => r[o]).filter(Boolean).map(String))], set = [];
+    (doc.inputs || []).filter(i => i.kind === 'str' && /output case/i.test(i.l || '')).forEach(i => {
+      const cur = ((e.inputs || {})[i.n] || ['s', i.v])[1];
+      if (String(cur).toUpperCase() === 'ALL' || cases.includes(cur)) return;
+      const v = /\bULS\b/i.test(i.l) ? 'ALL' : /quasi/i.test(i.l) ? cases.find(c => /QP|quasi/i.test(c)) : /charact/i.test(i.l) ? cases.find(c => /CHAR|CH\b/i.test(c)) : null;
+      if (v) { e.inputs[i.n] = ['s', v]; set.push(i.n + ' = ' + v); }
+    });
+    [['Story', /story filter/i], ['Shell Object', /object filter/i]].forEach(([h, rx]) => {
+      const c = rows[0].indexOf(h), i = (doc.inputs || []).find(x => x.kind === 'str' && rx.test(x.l || '')); if (c < 0 || !i) return;
+      const cur = String(((e.inputs || {})[i.n] || ['s', i.v])[1]);
+      if (cur.toUpperCase() !== 'ALL' && !rows.slice(2).some(r => String(r[c]) === cur)) { e.inputs[i.n] = ['s', 'ALL']; set.push(i.n + ' = ALL'); }
+    });
+    if (set.length) api.toast('Case inputs set to the ETABS cases: ' + set.join(', '));
+    e.u = Date.now(); api.save(); api.render();
+  }
+  async function xlRead(e) {
+    const doc = docs[api.MOD[e.type].mc], live = EC.etabs && EC.etabs.live;
+    if (!live) throw new Error('The ETABS link is not loaded');
+    const st = await live.get('/status'), model = await live.get('/model');
+    const known = new Set(model.combos.concat(model.cases));
+    const sv = n => { const i = inputDef(e, n); if (!i || i.kind !== 'str') return null; const o = (e.inputs || {})[n]; return o ? o[1] : i.v; };
+    const named = (doc.inputs || []).filter(i => i.kind === 'str' && /^Case/.test(i.n)).map(i => sv(i.n));
+    let cs = named.filter(c => c && known.has(c));
+    if (!cs.length || named.some(c => String(c).toUpperCase() === 'ALL')) cs = [...new Set(cs.concat(model.combos))];
+    const j = await live.get('/shells?' + cs.map(c => 'c=' + encodeURIComponent(c)).join('&') + '&sel=1')
+      .catch(err => { throw /unknown endpoint/i.test(err.message) ? new Error('Update etabs_bridge.py on the ETABS computer (version 1.28 or later reads shell forces) and restart the ETABS link.') : err; });
+    xlUse(e, doc, j.rows, 'ETABS · ' + String(j.file || st.file || '').split(/[\\/]/).pop());
+  }
+  /* pasted ETABS table (copied from Show Tables or Excel): header row with F11 ..., units row optional */
+  function xlParse(text) {
+    const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim());
+    const sep = lines.some(l => l.includes('\t')) ? '\t' : lines.some(l => l.includes(';')) ? ';' : ',';
+    const cells = lines.map(l => l.split(sep).map(v => { v = v.trim().replace(/^"|"$/g, ''); return v === '' ? null : /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(v) ? +v : v; }));
+    const h = cells.findIndex(r => XLK.shells.need.every(n => r.includes(n)));
+    if (h < 0) throw new Error('No ETABS header row found - copy the table "Element Forces - Area Shells" with its column headers (Story, Shell Object, ..., F11, ..., V23).');
+    const head = cells[h], next = cells[h + 1] || [];
+    const hasUnits = next.some(v => typeof v === 'string' && /kN/.test(v));
+    const units = hasUnits ? next : head.map(n => (/^F/.test(n) ? XLK.shells.units.F : /^M/.test(n) ? XLK.shells.units.M : /^V/.test(n) ? XLK.shells.units.V : null));
+    const data = cells.slice(h + (hasUnits ? 2 : 1)).filter(r => r.some(v => typeof v === 'number'));
+    if (!data.length) throw new Error('The pasted table has no data rows');
+    return [head, units].concat(data);
+  }
+  document.addEventListener('click', ev => {
+    const t = ev.target.closest('[data-xlread],[data-xlpaste],[data-xlreset]'); if (!t) return;
+    const e = curEl(); if (!e) return;
+    const doc = docs[api.MOD[e.type].mc];
+    if (t.dataset.xlreset !== undefined) { delete e.xl; e.u = Date.now(); api.save(); api.render(); return; }
+    if (t.dataset.xlpaste !== undefined) {
+      const bg = api.modal('Paste ETABS table', `<p>In ETABS: Display › Show Tables › Analysis Results › Element Output › Area Output › <b>Element Forces - Area Shells</b>, select the rows, copy (Ctrl+C) and paste here with the column headers.</p><textarea id="xlText" class="ctl" rows="10" style="width:100%;font-family:monospace;font-size:12px" placeholder="Story\tShell Object\tUnique Name\t…\tF11\tF22\t…"></textarea>`, () => {
+        try { xlUse(e, doc, xlParse(bg.querySelector('#xlText').value), 'Pasted ETABS table'); api.toast('ETABS table loaded'); }
+        catch (err) { api.toast(err.message); return false; }
+      }, 'Use table');
+      setTimeout(() => { const x = bg.querySelector('#xlText'); if (x) x.focus(); }, 30);
+      return;
+    }
+    t.disabled = true; t.textContent = 'Reading ETABS…';
+    xlRead(e).then(() => api.toast('Shell forces read from ETABS'), err => { api.toast(err.message); api.render(); });
+  });
 
   /* ---------- calculation report (worksheet regions in report form) ---------- */
   const SUPS = { '2': '²', '3': '³', '4': '⁴', '-1': '⁻¹', '-2': '⁻²', '0.5': '⁰·⁵' };

@@ -858,7 +858,7 @@
    * @returns {{sheet: Sheet, out: Array}} out = flat list of {reg, val, err} in evaluation order
    */
   function run(doc, inputs) {
-    const S = new Sheet(); S.depth = 0; CUR = S; S.xl = doc.xl || null;
+    const S = new Sheet(); S.depth = 0; CUR = S; S.xl = inputs && inputs.__xl ? Object.assign({}, doc.xl, inputs.__xl) : doc.xl || null;   // __xl: element's own tables (ETABS link)
     const out = [];
     const walk = regs => {
       for (const r of sortRegions(regs)) {

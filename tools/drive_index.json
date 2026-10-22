@@ -1,6 +1,6 @@
 {
  "driveFolder": "1xXrQ0eAinLHwbvUL_Wh30-6BzprqpM27",
- "lastSync": "2026-10-22T13:26:44Z",
+ "lastSync": "2026-10-22T14:31:13Z",
  "files": {
   "Anchor_EC7-2024_Standalone.mcdx": {
    "id": "1bSdOHiJdQkDWwiLk75ZVWzHhxGz3UVC3",
@@ -326,6 +326,11 @@
    "id": "13RlaRUXHY0r-a8qwD2mLnknI4jCrQD29",
    "folder": "EC2_Concrete\\ShellVibration_Design",
    "modifiedTime": "2026-10-20T17:07:32.787Z"
+  },
+  "Shell_EC2-2023_Standalone.mcdx": {
+   "id": "1W8aQ-yRG6qQ8xKurPnKqLEj-oFiTzgS_",
+   "folder": "",
+   "modifiedTime": "2026-10-22T14:30:02.812Z"
   },
   "Shortening_TallBuilding_EC1-2023_Standalone.mcdx": {
    "id": "1qf_VF5auDb4UjALK0nW5PM3NfjWOnYXu",

@@ -782,6 +782,18 @@ EC.sheetCatalog = [
 "kb": 26
 },
 {
+"id": "Shell_EC2-2023_Standalone",
+"file": "Shell_EC2-2023_Standalone.mcdx",
+"folder": "",
+"cat": "slabs",
+"name": "RC shell / plate (ETABS shell forces)",
+"prefix": "SH",
+"title": "RC SHELL DESIGN FROM ETABS SHELL FORCES TO EN 1992-1-1:2023",
+"code": "EN 1992-1-1:2023",
+"nin": 63,
+"kb": 158
+},
+{
 "id": "Shortening_TallBuilding_EC1-2023_Standalone",
 "file": "Shortening_TallBuilding_EC1-2023_Standalone.mcdx",
 "folder": "EC1_Actions\\Shortening_TallBuilding_Design",

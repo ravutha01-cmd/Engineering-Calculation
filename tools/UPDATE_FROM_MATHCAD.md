@@ -32,6 +32,11 @@ the last sync (`lastSync`).
    first sheet, header row included) and record it under `excel` in `tools/drive_index.json`. The converter embeds
    the table; `READEXCEL` returns it and each `info("key", default)` region becomes an editable input.
    When the workbook changes on Drive, update the JSON and regenerate.
+   **Worksheets with an Excel component** (embedded workbook, e.g. `Shell_EC2-2023_Standalone.mcdx`, output
+   `Table := excel["A1:W20000"]`): nothing to export - the converter reads the workbook stored inside the `.mcdx`,
+   embeds the range (trailing empty rows / columns dropped) and the output reads it with `READEXCEL`.
+   **Files over 10 MB** cannot be downloaded by the Drive tool: ask for the worksheet to be saved smaller
+   (remove large pasted pictures).
 5. Test: `node tools/test_sheets.js` (all ok, except the ETABS / HandInput sheets that need
    Excel data). Load the app in a browser and open the new / changed element types.
 6. Commit to `master` and push. Republish the Claude artifact

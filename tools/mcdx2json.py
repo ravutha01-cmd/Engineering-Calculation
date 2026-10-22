@@ -29,7 +29,7 @@ AST (JSON arrays):
   ['vec', expr]          vectorize
   ['cb', [names], [values], sel, scale?]   combo box (scale: unit AST or list per row)
 """
-import zipfile, re, sys, os, json, io, html
+import zipfile, re, sys, os, json, io, html, struct
 import xml.etree.ElementTree as ET
 
 ML = '{http://schemas.mathsoft.com/math50}'
@@ -322,6 +322,99 @@ def plot(el, region):
             'w': float(gs.get('width')) if gs is not None else 300.0,
             'h': float(gs.get('height')) if gs is not None else 300.0}
 
+def ole_streams(b):
+    """streams of an OLE compound file {name: bytes} (the embedded workbook of an Excel component)"""
+    ss = 1 << struct.unpack_from('<H', b, 30)[0]; mss = 1 << struct.unpack_from('<H', b, 32)[0]
+    nfat, dir0, _, cutoff, mfat0, nmfat, difat0, ndifat = struct.unpack_from('<IIIIIIII', b, 44)
+    sec = lambda i: b[(i + 1) * ss:(i + 2) * ss]
+    difat = list(struct.unpack_from('<109I', b, 76)); d = difat0
+    for _ in range(ndifat):
+        s = sec(d); difat += struct.unpack('<%dI' % (ss // 4 - 1), s[:-4]); d = struct.unpack('<I', s[-4:])[0]
+    fat = []
+    for i in difat[:nfat]: fat += struct.unpack('<%dI' % (ss // 4), sec(i))
+    def chain(i, t):
+        while i < 0xFFFFFFFA: yield i; i = t[i]
+    rd = lambda i: b''.join(sec(j) for j in chain(i, fat))
+    dirs = rd(dir0); ents = []
+    for o in range(0, len(dirs), 128):
+        e = dirs[o:o + 128]; nl = struct.unpack_from('<H', e, 64)[0]
+        ents.append((e[:max(nl - 2, 0)].decode('utf-16-le'), e[66]) + struct.unpack_from('<IQ', e, 116))
+    mini = rd(ents[0][2]); mfat = []
+    if nmfat:
+        for j in chain(mfat0, fat): mfat += struct.unpack('<%dI' % (ss // 4), sec(j))
+    res = {}
+    for name, typ, start, size in ents[1:]:
+        if typ != 2: continue
+        data = b''.join(mini[i * mss:(i + 1) * mss] for i in chain(start, mfat)) if size < cutoff else rd(start)
+        res[name] = data[:size]
+    return res
+
+def xlsx_rows(data):
+    """cell values of the first sheet of an .xlsx (strings, numbers, None for empty cells)"""
+    x = zipfile.ZipFile(io.BytesIO(data))
+    N = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
+    sst = []
+    if 'xl/sharedStrings.xml' in x.namelist():
+        sst = [''.join(t.text or '' for t in si.iter(N + 't')) for si in ET.fromstring(x.read('xl/sharedStrings.xml')).iter(N + 'si')]
+    rel = ET.fromstring(x.read('xl/_rels/workbook.xml.rels'))
+    first = ET.fromstring(x.read('xl/workbook.xml')).find(N + 'sheets')[0]
+    rid = first.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+    tgt = [r.get('Target') for r in rel if r.get('Id') == rid][0]
+    sh = ET.fromstring(x.read(tgt.lstrip('/') if tgt.startswith('/xl/') else 'xl/' + tgt))
+    rows = {}
+    for c in sh.iter(N + 'c'):
+        m = re.match(r'([A-Z]+)(\d+)', c.get('r'))
+        col = 0
+        for ch in m.group(1): col = col * 26 + ord(ch) - 64
+        t = c.get('t'); v = c.find(N + 'v')
+        if t == 'inlineStr': val = ''.join(e.text or '' for e in c.iter(N + 't'))
+        elif v is None or v.text is None: continue
+        elif t == 's': val = sst[int(v.text)]
+        elif t in ('str', 'e'): val = v.text
+        elif t == 'b': val = int(v.text)
+        else:
+            val = float(v.text); val = int(val) if val.is_integer() else val
+        rows.setdefault(int(m.group(2)), {})[col] = val
+    return rows
+
+def excel_range(rows, rng):
+    """cells of range 'A1:W20000' as a list of rows; trailing empty rows / columns are dropped"""
+    def rc(a):
+        m = re.match(r'([A-Z]+)(\d+)', a.upper()); col = 0
+        for ch in m.group(1): col = col * 26 + ord(ch) - 64
+        return int(m.group(2)), col
+    (r0, c0), (r1, c1) = (rc(p) for p in (rng.split(':') + rng.split(':'))[:2])
+    r1 = min(r1, max([r for r in rows if r >= r0] or [r0]))
+    c1 = min(c1, max([c for r in rows.values() for c in r if c >= c0] or [c0]))
+    return [[rows.get(r, {}).get(c) for c in range(c0, c1 + 1)] for r in range(r0, r1 + 1)]
+
+def excel_component(kid, y, x, z, rels, errs):
+    """Excel component: the workbook embedded in the .mcdx becomes a table in doc['xl'] and each output
+    `V := excel["A1:W20000"]` reads its range with READEXCEL (the app keeps the component's data, not Excel)"""
+    sub = [c for c in kid if local(c.tag) == 'regions']
+    regs = [c for c in sub[0] if local(c.tag) == 'region'] if sub else []
+    ref = None
+    for r in regs:
+        for t in r:
+            if local(t.tag) == 'excelTable': ref = t.get('item-idref')
+    if ref not in rels:
+        errs.append('excelComponent: no embedded workbook'); return []
+    cells = xlsx_rows(ole_streams(z.read(rels[ref]))['Package'])
+    out = []
+    for r in regs:
+        m = [c for c in r if local(c.tag) == 'math']
+        if not m: continue
+        e = conv([c for c in m[0] if local(c.tag) not in ('formattingOverride', 'resultFormat')][0])
+        rhs = e[2] if isinstance(e, list) and e[0] == 'def' else None
+        if not (isinstance(rhs, list) and rhs[:3] == ['o', 'idx', ['v', 'excel']] and len(rhs) == 4 and rhs[3][0] == 's'):
+            errs.append('excelComponent: output %r not read' % (e,)); continue
+        key = 'Excel component %s' % rhs[3][1]
+        EXCEL_TABLES[key] = excel_range(cells, rhs[3][1])
+        out.append({'k': 'm', 'e': ['def', e[1], ['c', ['f', 'READEXCEL'], [['s', key]]]], 'y': y, 'x': x})
+    return out
+
+EXCEL_TABLES = {}
+
 def regions(container, z, rels, errs):
     out = []
     for r in container:
@@ -354,6 +447,8 @@ def regions(container, z, rels, errs):
                 sub = kid.find(WS + 'regions')
                 if sub is None: sub = [c for c in kid if local(c.tag) == 'regions'][0]
                 out.append({'k': 'a', 'r': regions(sub, z, rels, errs), 'col': kid.get('IsCollapsed') == 'true', 'y': y, 'x': x})
+            elif k == 'excelComponent':
+                out.extend(excel_component(kid, y, x, z, rels, errs))
             elif k == 'spec-table':
                 ms = []
                 for m in kid:
@@ -377,12 +472,15 @@ def convert(path):
     except KeyError:
         pass
     errs = []
+    EXCEL_TABLES.clear()
     regs = regions(root.find(WS + 'regions'), z, rels, errs)
     title = ''
     for r in regs:
         if r['k'] == 't':
             title = re.sub('<[^>]+>', '', r['h'])[:120]; break
-    return {'file': os.path.basename(path), 'title': title, 'regions': regs}, errs
+    doc = {'file': os.path.basename(path), 'title': title, 'regions': regs}
+    if EXCEL_TABLES: doc['xl'] = dict(EXCEL_TABLES)
+    return doc, errs
 
 
 
@@ -469,7 +567,7 @@ def embed_excel(doc):
         fp = os.path.join(EXCEL_DIR, os.path.basename(name.replace('\\', '/')) + '.json')
         if os.path.exists(fp):
             xl[name] = json.load(open(fp, encoding='utf-8'))['rows']
-    if xl: doc['xl'] = xl
+    if xl: doc['xl'] = dict(doc.get('xl') or {}, **xl)
 
 def info_input(rhs, doc):
     """info("key", default) [* unit]: a value read from the embedded Excel table -> editable input"""

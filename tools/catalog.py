@@ -38,6 +38,7 @@ C = {
  'PTSlab_EC2-2023_Standalone': ('slabs', 'Post-tensioned slab', 'PT'),
  'Staircase_EC2-2023_Standalone': ('slabs', 'Staircase flight', 'ST'),
  'SpiralStair_EC2-2023_Standalone': ('slabs', 'Helical / spiral stair', 'ST'),
+ 'Shell_EC2-2023_Standalone': ('slabs', 'RC shell / plate (ETABS shell forces)', 'SH'),
  'Corbel_EC2-2023_Standalone': ('details', 'Corbel / bracket', 'CB'),
  'DappedEnd_EC2-2023_Standalone': ('details', 'Dapped end (half joint)', 'DE'),
  'FrameCorner_EC2-2023_Standalone': ('details', 'Frame corner (knee joint)', 'FC'),

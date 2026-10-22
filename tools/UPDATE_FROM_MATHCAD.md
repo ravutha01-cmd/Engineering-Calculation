@@ -1,7 +1,9 @@
 # Keeping the web app in step with the Mathcad worksheets
 
+Drive account: `ravutha01@gmail.com` (previously `ravutha.me@gmail.com`; Drive file ids in `tools/drive_index.json` are from the old account and are matched by file name).
+
 Rule: **one Mathcad worksheet = one element type.** When a worksheet in the Google Drive folder
-`math.Claude` (folder id `1PGJ8CupzPT4WeUDw9IWqoeEbJ036-RgF`) is changed, its web calculation
+`math.Claude` (folder id `1xXrQ0eAinLHwbvUL_Wh30-6BzprqpM27`) is changed, its web calculation
 must be regenerated; when a new `.mcdx` file appears there, it becomes a new element type.
 Never retype or edit formulas by hand - always regenerate from the `.mcdx` file.
 
@@ -15,7 +17,7 @@ the last sync (`lastSync`).
    (also page through `nextPageToken`). Ignore `backup`, `_calc_test` and dated copies
    such as `*_2025-09-30.mcdx`.
 2. Keep only files inside `math.Claude`: follow `parentId` upwards with `get_file_metadata`
-   until you reach `1PGJ8CupzPT4WeUDw9IWqoeEbJ036-RgF` (skip files that never reach it).
+   until you reach `1xXrQ0eAinLHwbvUL_Wh30-6BzprqpM27` (skip files that never reach it).
    Record the folder path below `math.Claude` (e.g. `EC2_Concrete\Beam_Design`).
    If two copies of a file name exist, use the most recently modified one.
 3. Download each file with `download_file_content` (the result is saved to a tool-results file).

@@ -23,7 +23,7 @@ EC.sheetCatalog = [
 "title": "ANCHORAGE AND LAP LENGTHS OF REINFORCEMENT TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 24,
-"kb": 33
+"kb": 30
 },
 {
 "id": "BCJoint_EC2-2023_Standalone",
@@ -71,7 +71,7 @@ EC.sheetCatalog = [
 "title": "RC BEAM SECTION DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 44,
-"kb": 89
+"kb": 100
 },
 {
 "id": "BracketConnection_EC3-EC2-4_Standalone",
@@ -143,7 +143,7 @@ EC.sheetCatalog = [
 "title": "COMPOSITE ROAD BRIDGE WITH THE CONCRETE SLAB BELOW THE STEEL I GIRDERS (EN 1994-2)",
 "code": "EN 1994-2",
 "nin": 86,
-"kb": 128
+"kb": 129
 },
 {
 "id": "Corbel_EC2-2023_Standalone",
@@ -155,7 +155,7 @@ EC.sheetCatalog = [
 "title": "RC CORBEL / BRACKET DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 32,
-"kb": 40
+"kb": 43
 },
 {
 "id": "Cover_EC2-2023_Standalone",
@@ -191,7 +191,7 @@ EC.sheetCatalog = [
 "title": "CREEP AND SHRINKAGE OF CONCRETE TO EN 1992-1-1:2023 ANNEX B",
 "code": "EN 1992-1-1:2023",
 "nin": 13,
-"kb": 27
+"kb": 24
 },
 {
 "id": "DappedEnd_EC2-2023_Standalone",
@@ -203,7 +203,7 @@ EC.sheetCatalog = [
 "title": "DAPPED-END (HALF-JOINT) BEAM TO EN 1992-1-1:2023 - STRUT-AND-TIE",
 "code": "EN 1992-1-1:2023",
 "nin": 41,
-"kb": 64
+"kb": 66
 },
 {
 "id": "DeepBeam_EC2-2023_Standalone",
@@ -215,7 +215,7 @@ EC.sheetCatalog = [
 "title": "RC DEEP / TRANSFER BEAM - STRUT-AND-TIE DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 34,
-"kb": 50
+"kb": 51
 },
 {
 "id": "Deflection_EC2-2023_Standalone",
@@ -227,7 +227,7 @@ EC.sheetCatalog = [
 "title": "DEFLECTION BY CALCULATION - RC BEAM / ONE-WAY SLAB TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 21,
-"kb": 30
+"kb": 31
 },
 {
 "id": "EffectiveLength_EC2-2023_Standalone",
@@ -251,7 +251,7 @@ EC.sheetCatalog = [
 "title": "CAP ON EIGHT PILES TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 57,
-"kb": 83
+"kb": 84
 },
 {
 "id": "Embankment_EC7-2024_Standalone",
@@ -263,7 +263,7 @@ EC.sheetCatalog = [
 "title": "STAGED EMBANKMENT ON SOFT CLAY WITH VERTICAL DRAINS - EN 1997-3:2025 / EN 1997-1:2024",
 "code": "EN 1997-3:2025, EN 1997-1:2024",
 "nin": 32,
-"kb": 32
+"kb": 33
 },
 {
 "id": "Execution_Loads_EC1-2023_Standalone",
@@ -359,7 +359,7 @@ EC.sheetCatalog = [
 "title": "RC FRAME CORNER (KNEE JOINT) TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 24,
-"kb": 42
+"kb": 38
 },
 {
 "id": "GravityWall_EC7-2024_Standalone",
@@ -479,7 +479,7 @@ EC.sheetCatalog = [
 "title": "SINGLE PILE - AXIAL RESISTANCE - EN 1997-3:2025 (EUROPEAN METHODS)",
 "code": "EN 1997-3:2025",
 "nin": 55,
-"kb": 90
+"kb": 84
 },
 {
 "id": "PileCap_FEM_EC2-2023_ETABS",
@@ -515,7 +515,7 @@ EC.sheetCatalog = [
 "title": "PILE CAP UNDER SEVERAL COLUMNS / WALLS TO EN 1992-1-1:2023 - LOADS BY NODES",
 "code": "EN 1992-1-1:2023",
 "nin": 70,
-"kb": 224
+"kb": 210
 },
 {
 "id": "PileDowndrag_EC7-2024_Standalone",
@@ -623,7 +623,7 @@ EC.sheetCatalog = [
 "title": "PILE CAP DESIGN TO EN 1992-1-1:2023 - HAND INPUT",
 "code": "EN 1992-1-1:2023",
 "nin": 74,
-"kb": 191
+"kb": 176
 },
 {
 "id": "Punching_EC2-2023_Standalone",
@@ -635,7 +635,7 @@ EC.sheetCatalog = [
 "title": "PUNCHING SHEAR OF FLAT SLABS TO EN 1992-1-1:2023 (8.4)",
 "code": "EN 1992-1-1:2023",
 "nin": 35,
-"kb": 42
+"kb": 37
 },
 {
 "id": "Raft_EC7-2024_Standalone",
@@ -755,7 +755,7 @@ EC.sheetCatalog = [
 "title": "RC SHEAR WALL DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 29,
-"kb": 75
+"kb": 67
 },
 {
 "id": "SheetPile_EC7_Standalone",
@@ -815,7 +815,7 @@ EC.sheetCatalog = [
 "title": "CAP ON SIX PILES TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 56,
-"kb": 109
+"kb": 110
 },
 {
 "id": "Slab_Flat_EC2-2023_Standalone",
@@ -839,7 +839,7 @@ EC.sheetCatalog = [
 "title": "RC SLAB DESIGN FROM INPUT ACTIONS TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 45,
-"kb": 99
+"kb": 91
 },
 {
 "id": "Slab_OneWay_EC2-2023_Standalone",
@@ -875,7 +875,7 @@ EC.sheetCatalog = [
 "title": "SLENDER LOAD-BEARING RC WALL - OUT-OF-PLANE BUCKLING TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 24,
-"kb": 38
+"kb": 39
 },
 {
 "id": "Slope_EC7-2024_Standalone",
@@ -899,7 +899,7 @@ EC.sheetCatalog = [
 "title": "RC HELICAL & SPIRAL STAIRCASE DESIGN TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 42,
-"kb": 56
+"kb": 57
 },
 {
 "id": "StairVibration_EC2-2023_Standalone",
@@ -983,7 +983,7 @@ EC.sheetCatalog = [
 "title": "RC LIQUID-RETAINING WALL UNDER HYDROSTATIC PRESSURE - EN 1992-1-1:2023 / EN 1992-3",
 "code": "EN 1992-1-1:2023, EN 1992-3",
 "nin": 25,
-"kb": 40
+"kb": 35
 },
 {
 "id": "Thermal_Actions_EC1-2023_Standalone",
@@ -1031,7 +1031,7 @@ EC.sheetCatalog = [
 "title": "RC BEAM UNDER TORSION, SHEAR AND BENDING TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 25,
-"kb": 35
+"kb": 30
 },
 {
 "id": "TwoPileCap_EC2-2023_Standalone",

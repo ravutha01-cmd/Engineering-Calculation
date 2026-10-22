@@ -1,21 +1,21 @@
 {
  "driveFolder": "1PGJ8CupzPT4WeUDw9IWqoeEbJ036-RgF",
- "lastSync": "2026-10-21T02:28:21Z",
+ "lastSync": "2026-10-22T13:26:44Z",
  "files": {
   "Anchor_EC7-2024_Standalone.mcdx": {
    "id": "1bSdOHiJdQkDWwiLk75ZVWzHhxGz3UVC3",
    "folder": "EC7_Geotechnical\\Anchor_Design",
-   "modifiedTime": "2026-10-11T19:25:39.739Z"
+   "modifiedTime": "2026-10-22T06:34:31.894Z"
   },
   "Anchorage_EC2-2023_Standalone.mcdx": {
    "id": "1rUITHZjGrk4rd0cNch_uZeOsAWZf7g9x",
    "folder": "EC2_Concrete\\Anchorage_Design",
-   "modifiedTime": "2026-10-20T17:31:01.985Z"
+   "modifiedTime": "2026-10-22T06:34:04.857Z"
   },
   "BCJoint_EC2-2023_Standalone.mcdx": {
    "id": "1VANFvi-d-Y5s6_unEM1lQbaeJ4DX7YNU",
    "folder": "EC2_Concrete\\BeamColumnJoint_Design",
-   "modifiedTime": "2026-10-11T17:10:26.000Z"
+   "modifiedTime": "2026-10-22T06:34:05.069Z"
   },
   "Beam_2004_EC2-2023_Standalone.mcdx": {
    "id": "1z1sburNiTJZ7mpCC59qJSvbtapEowChE",
@@ -25,17 +25,17 @@
   "Beam_EC2-2023.mcdx": {
    "id": "1UH1CcFC9wQv5Ybc3taXtdxEPrfmpA82-",
    "folder": "EC2_Concrete\\Beam_Design",
-   "modifiedTime": "2026-10-21T00:11:53.402Z"
+   "modifiedTime": "2026-10-22T06:34:05.717Z"
   },
   "Beam_EC2-2023_Standalone.mcdx": {
    "id": "1dys3SqQUbPEiSw5bRRWwFAH5QUOTiNq7",
    "folder": "EC2_Concrete\\Beam_Design",
-   "modifiedTime": "2026-10-21T00:02:29.820Z"
+   "modifiedTime": "2026-10-22T13:21:59.404Z"
   },
   "BracketConnection_EC3-EC2-4_Standalone.mcdx": {
    "id": "1C3QnAyZt4hUdcbQt1xKXuP6vRfty3cqC",
    "folder": "EC3_Steel\\BracketConnection_Design",
-   "modifiedTime": "2026-10-11T19:12:15.612Z"
+   "modifiedTime": "2026-10-22T06:34:27.906Z"
   },
   "ColumnBuckling_EC2-2023_Standalone.mcdx": {
    "id": "1bVyoy-Yj-mfUSz2l2wWZOMHec-TK3XPu",
@@ -45,57 +45,57 @@
   "Column_EC2-2023_Standalone.mcdx": {
    "id": "1gfgo2czcVY2v-Dp30Xfx5RjKSM3eXUyw",
    "folder": "EC2_Concrete\\Column_Design",
-   "modifiedTime": "2026-10-20T17:18:33.266Z"
+   "modifiedTime": "2026-10-22T06:34:06.519Z"
   },
   "CombinedFooting_EC2-2023_Standalone.mcdx": {
    "id": "1B9EJJwvFq9AyUbTRfzz3dpryjXz1ucfR",
    "folder": "EC2_Concrete\\CombinedFooting_Design",
-   "modifiedTime": "2026-10-11T17:21:07.000Z"
+   "modifiedTime": "2026-10-22T06:34:06.854Z"
   },
   "CompositeBridge_EC4-2005_Standalone.mcdx": {
    "id": "1nFqEVrTYnGbr_dxRfGkK_Enjh6avHQ1C",
    "folder": "EC4_Composite\\Bridge_Design",
-   "modifiedTime": "2026-10-11T19:20:16.598Z"
+   "modifiedTime": "2026-10-22T06:34:30.143Z"
   },
   "CompositeBridge_SlabBelow_EC4-2005_Standalone.mcdx": {
    "id": "1x5zvXH_r55hmvvsYzaO92ZFvyZ6qcnv2",
    "folder": "EC4_Composite\\Bridge_Design",
-   "modifiedTime": "2026-10-11T19:23:01.928Z"
+   "modifiedTime": "2026-10-22T06:34:31.757Z"
   },
   "Corbel_EC2-2023_Standalone.mcdx": {
    "id": "1EO8F9gFMsE2V2Mdm7qGsI_xvrtHpWpl2",
    "folder": "Corbel_Design",
-   "modifiedTime": "2026-10-11T17:23:44.000Z"
+   "modifiedTime": "2026-10-22T06:34:07.040Z"
   },
   "Cover_EC2-2023_Standalone.mcdx": {
    "id": "1t41GQLFajPCWiagnj38Aw081s0gtSQQQ",
    "folder": "EC2_Concrete\\Cover_Design",
-   "modifiedTime": "2026-10-11T17:26:19.000Z"
+   "modifiedTime": "2026-10-22T06:34:07.190Z"
   },
   "CrackControl_EC2-2023_Standalone.mcdx": {
    "id": "10VBCpaT9TgVhBreVBrRmhzxtwq-f4XyZ",
    "folder": "EC2_Concrete\\CrackControl_Design",
-   "modifiedTime": "2026-10-20T17:24:37.236Z"
+   "modifiedTime": "2026-10-22T06:34:07.593Z"
   },
   "CreepShrinkage_EC2-2023_Standalone.mcdx": {
    "id": "14TepM1S3pBjVlNzU8j29lONKrX6psoPZ",
    "folder": "EC2_Concrete\\CreepShrinkage_Design",
-   "modifiedTime": "2026-10-20T17:34:59.058Z"
+   "modifiedTime": "2026-10-22T06:34:08.823Z"
   },
   "DappedEnd_EC2-2023_Standalone.mcdx": {
    "id": "1nC8rILIFdnXAjCihBMPsQ1P4XEZxWOxu",
    "folder": "EC2_Concrete\\DappedEnd_Design",
-   "modifiedTime": "2026-10-20T17:46:50.780Z"
+   "modifiedTime": "2026-10-22T11:59:59.550Z"
   },
   "DeepBeam_EC2-2023_Standalone.mcdx": {
    "id": "1BCTkXCwLUjffBzIz4o8nFxI98kJwO9wu",
    "folder": "EC2_Concrete\\DeepBeam_Design",
-   "modifiedTime": "2026-10-11T17:36:43.000Z"
+   "modifiedTime": "2026-10-22T06:34:09.031Z"
   },
   "Deflection_EC2-2023_Standalone.mcdx": {
    "id": "1kfa5D1nB53X-t4eN_KWpgtFqgJZHzuVl",
    "folder": "EC2_Concrete\\Deflection_Design",
-   "modifiedTime": "2026-10-11T17:39:20.000Z"
+   "modifiedTime": "2026-10-22T06:34:08.685Z"
   },
   "EffectiveLength_EC2-2023_Standalone.mcdx": {
    "id": "14ahl1S14_10ophYuIfmsFwIuWWzzVtV1",
@@ -105,12 +105,12 @@
   "EightPileCap_EC2-2023_Standalone.mcdx": {
    "id": "1KzU8UkeVmGw9Y8Ik_XeF_B-UibggHVMG",
    "folder": "EC2_Concrete\\PileCap_Design\\EightPile",
-   "modifiedTime": "2026-10-11T18:02:47.156Z"
+   "modifiedTime": "2026-10-22T06:34:11.316Z"
   },
   "Embankment_EC7-2024_Standalone.mcdx": {
    "id": "1x8JuBbTTBSEUq_YFLL3zKW3xTyTcjBbL",
    "folder": "EC7_Geotechnical\\Embankment_Design",
-   "modifiedTime": "2026-10-11T19:28:19.405Z"
+   "modifiedTime": "2026-10-22T06:34:32.470Z"
   },
   "Execution_Loads_EC1-2023_Standalone.mcdx": {
    "id": "1vqehtyAfAF5BL8ITnC_66zCEKabeBoBq",
@@ -120,22 +120,22 @@
   "Fatigue_EC2-2023_Standalone.mcdx": {
    "id": "1hRshhvZ32agpHdO4dzYmZHMnZWALHKZe",
    "folder": "EC2_Concrete\\Fatigue_Design",
-   "modifiedTime": "2026-10-11T17:44:30.000Z"
+   "modifiedTime": "2026-10-22T06:34:08.899Z"
   },
   "FinPlate_EC3-2024_Standalone.mcdx": {
    "id": "1yV4hvnIbqrxzjkRNZ9bZXFxocUxl9nMJ",
    "folder": "EC3_Steel\\FinPlate_Design",
-   "modifiedTime": "2026-10-11T19:17:34.835Z"
+   "modifiedTime": "2026-10-22T06:34:29.240Z"
   },
   "Fire_EC2-2023_Standalone.mcdx": {
    "id": "19VdYPp4rYo0yoOOX9Ihdu6N1kf93RtNN",
    "folder": "EC2_Concrete\\Fire_Design",
-   "modifiedTime": "2026-10-11T17:47:05.000Z"
+   "modifiedTime": "2026-10-22T06:34:09.323Z"
   },
   "FivePileCap_EC2-2023_Standalone.mcdx": {
    "id": "1vPvQsPmMrP-gDlF74FGnOPBWs834SHZf",
    "folder": "EC2_Concrete\\PileCap_Design\\FivePile",
-   "modifiedTime": "2026-10-11T18:08:13.537Z"
+   "modifiedTime": "2026-10-22T06:34:11.977Z"
   },
   "Footing_EC7_Standalone.mcdx": {
    "id": "1HQhj0KWCPVLM7xw-sY4RvN9hNY3cn7br",
@@ -145,17 +145,17 @@
   "FourPileCap_EC2-2023_Standalone.mcdx": {
    "id": "1hsP2Mntb5wdH70vmnpUwd2A2wchgOe-j",
    "folder": "EC2_Concrete\\PileCap_Design\\FourPile",
-   "modifiedTime": "2026-10-11T18:10:55.106Z"
+   "modifiedTime": "2026-10-22T06:34:12.870Z"
   },
   "FrameCorner_EC2-2023_Standalone.mcdx": {
    "id": "19ZL0LIdNUuX1m7hZTTRYzrgcs25ww9oE",
    "folder": "EC2_Concrete\\FrameCorner_Design",
-   "modifiedTime": "2026-10-21T00:09:36.719Z"
+   "modifiedTime": "2026-10-22T06:34:10.061Z"
   },
   "GravityWall_EC7-2024_Standalone.mcdx": {
    "id": "1P_HYba7eiX-INMrVW-1DDb8wz15MIX4d",
    "folder": "EC7_Geotechnical\\GravityWall_Design",
-   "modifiedTime": "2026-10-11T19:33:37.532Z"
+   "modifiedTime": "2026-10-22T06:34:33.536Z"
   },
   "Imposed_Loads_EC1-2023_Standalone.mcdx": {
    "id": "1x9e4avILaFa7l5sqZOUngh1Zr2JrW-j7",
@@ -165,7 +165,7 @@
   "Interface_EC2-2023_Standalone.mcdx": {
    "id": "11WJ5M2qmX7ne4SIjE5okrMK71clZtzUN",
    "folder": "EC2_Concrete\\Interface_Design",
-   "modifiedTime": "2026-10-11T17:52:15.000Z"
+   "modifiedTime": "2026-10-22T06:34:10.540Z"
   },
   "LTB_EC2-2023_Standalone.mcdx": {
    "id": "17eX9muwViLjG7fLw_9pRZSy9VRNCnln7",
@@ -175,12 +175,12 @@
   "Liquefaction_EC8-EC7_Standalone.mcdx": {
    "id": "1pWT2Lp3qApN0n4ZFeahYPU4qSMi-CRmO",
    "folder": "EC7_Geotechnical\\Liquefaction_Design",
-   "modifiedTime": "2026-10-11T19:38:48.258Z"
+   "modifiedTime": "2026-10-22T06:34:34.239Z"
   },
   "NinePileCap_EC2-2023_Standalone.mcdx": {
    "id": "1vPYl96zAntQRNdIBQ2RxaKMRedVA3e7Y",
    "folder": "EC2_Concrete\\PileCap_Design\\NinePile",
-   "modifiedTime": "2026-10-11T18:16:29.474Z"
+   "modifiedTime": "2026-10-22T06:34:16.576Z"
   },
   "Outrigger_TallBuilding_EC1-2023_Standalone.mcdx": {
    "id": "1GKgBlymjXvTrefOOaiiFsXZAHSekY_TT",
@@ -195,12 +195,12 @@
   "PadFooting_EC2-2023_Standalone.mcdx": {
    "id": "1gMxWOpKxVW78BWM5LylsCC0SGZGmhdnv",
    "folder": "EC2_Concrete\\PadFooting_Design",
-   "modifiedTime": "2026-10-11T18:00:07.000Z"
+   "modifiedTime": "2026-10-22T06:34:10.740Z"
   },
   "PileAxial_EC7_Standalone.mcdx": {
    "id": "10B6kj0D3cpouppfc1oCoxiwN11_-iVoH",
    "folder": "EC7_Geotechnical\\Pile_Design\\Axial",
-   "modifiedTime": "2026-10-16T01:22:44.633Z"
+   "modifiedTime": "2026-10-22T06:34:33.769Z"
   },
   "PileCap_FEM_EC2-2023_ETABS.mcdx": {
    "id": "1VIFXgsirpOoNKYFCzocpHWznAxtweG0l",
@@ -215,17 +215,17 @@
   "PileCap_Multi_EC2-2023_Standalone.mcdx": {
    "id": "1_j6r-HcwAv-DJ0dHXhKdj6QM5g5HO_3s",
    "folder": "EC2_Concrete\\PileCap_Design\\MultiColumn",
-   "modifiedTime": "2026-10-21T01:14:17.961Z"
+   "modifiedTime": "2026-10-22T06:34:14.812Z"
   },
   "PileDowndrag_EC7-2024_Standalone.mcdx": {
    "id": "1apyTTAKb2SmHtcA-HFL47VzTQzQW7wMB",
    "folder": "EC7_Geotechnical\\Pile_Design\\Downdrag",
-   "modifiedTime": "2026-10-11T19:44:03.866Z"
+   "modifiedTime": "2026-10-22T06:34:34.425Z"
   },
   "PileDriven_EC7-2024_Standalone.mcdx": {
    "id": "1DkeR9SHPtIE2c9p8j-c8W_n8-amH_rBn",
    "folder": "EC7_Geotechnical\\Pile_Design\\Driven",
-   "modifiedTime": "2026-10-11T16:16:18.000Z"
+   "modifiedTime": "2026-10-22T06:34:34.975Z"
   },
   "PileFoundation_EC-2G.mcdx": {
    "id": "1TAtEIaZlE92JqMfMeT0CX7ppZrosLURc",
@@ -235,22 +235,22 @@
   "PileGroupSettlement_EC7-2024_Standalone.mcdx": {
    "id": "15A90gFX0hIgsLDRD7XhOuCnvgiBGjVxG",
    "folder": "EC7_Geotechnical\\Pile_Design\\GroupSettlement",
-   "modifiedTime": "2026-10-11T19:49:22.968Z"
+   "modifiedTime": "2026-10-22T06:34:35.255Z"
   },
   "PileLateral_EC7-2024_Standalone.mcdx": {
    "id": "1V39nZGa7e8S_ogIuyF34yjLbqU-VqzYs",
    "folder": "EC7_Geotechnical\\Pile_Design\\Lateral",
-   "modifiedTime": "2026-10-11T19:51:58.689Z"
+   "modifiedTime": "2026-10-22T06:34:35.437Z"
   },
   "PileLoadTest_EC7-2024_Standalone.mcdx": {
    "id": "12OTuYQoE-0CNi6SV4v8KrHwi4sBdyXVJ",
    "folder": "EC7_Geotechnical\\Pile_Design\\LoadTest",
-   "modifiedTime": "2026-10-11T19:54:35.202Z"
+   "modifiedTime": "2026-10-22T06:34:36.128Z"
   },
   "PileSoilSprings_EC7-2024_Standalone.mcdx": {
    "id": "1qzPf1wOlCNC7LJGAcgBQCCd5Mi27q7hs",
    "folder": "EC7_Geotechnical\\Pile_Design\\SoilSprings",
-   "modifiedTime": "2026-10-11T19:57:10.496Z"
+   "modifiedTime": "2026-10-22T06:34:36.347Z"
   },
   "Pilecap_EC2-2023_ETABS.mcdx": {
    "id": "1LeQvA4jIMN8LEXzvEohIpT7yGHwboq2D",
@@ -260,22 +260,22 @@
   "Pilecap_EC2-2023_HandInput.mcdx": {
    "id": "1bCTwrJhLw5MpnL1G5sukvYzYhTflAE-3",
    "folder": "EC2_Concrete\\PileCap_Design",
-   "modifiedTime": "2026-10-20T17:06:40.772Z"
+   "modifiedTime": "2026-10-22T06:34:20.095Z"
   },
   "Punching_EC2-2023_Standalone.mcdx": {
    "id": "1g-k7iMsLjijWC8qfAaons3U5fEDjQyaL",
    "folder": "EC2_Concrete\\Punching_Design",
-   "modifiedTime": "2026-10-19T11:16:16.661Z"
+   "modifiedTime": "2026-10-22T06:34:22.172Z"
   },
   "Raft_EC7-2024_Standalone.mcdx": {
    "id": "17CXLacJGXJOEudpKgbTL65sCiZ6lpyqT",
    "folder": "EC7_Geotechnical\\Raft_Design",
-   "modifiedTime": "2026-10-11T19:59:46.977Z"
+   "modifiedTime": "2026-10-22T06:34:37.050Z"
   },
   "RestraintCracking_EC2-2023_Standalone.mcdx": {
    "id": "19l0rRqW8Ma0OzP5yBv6Tbv9JNtKz9u5T",
    "folder": "EC2_Concrete\\RestraintCracking_Design",
-   "modifiedTime": "2026-10-11T18:38:01.898Z"
+   "modifiedTime": "2026-10-22T06:34:22.462Z"
   },
   "RetainingWall_EC2-2023_Standalone.mcdx": {
    "id": "1ixYa-hrBZ1G1SBZ01cZ6CEmXEi8mUvQD",
@@ -285,17 +285,17 @@
   "RibbedSlab_EC2-2023_Standalone.mcdx": {
    "id": "1_Jl9OyVAWyLc2SEcC0x1I4fpRNs2CWqg",
    "folder": "EC2_Concrete\\RibbedSlab_Design",
-   "modifiedTime": "2026-10-11T18:40:37.379Z"
+   "modifiedTime": "2026-10-22T06:34:22.984Z"
   },
   "SPT_Correlation_EC7-2024_Standalone.mcdx": {
    "id": "1oZ31A4J_pK08o0Biw_iN8QPK11ERZEzh",
    "folder": "EC7_Geotechnical\\SPT_Correlation_Design",
-   "modifiedTime": "2026-10-11T20:05:10.547Z"
+   "modifiedTime": "2026-10-22T06:34:36.832Z"
   },
   "SeismicWall_EC8-EC7_Standalone.mcdx": {
    "id": "1CXBikuHJ4zuIut4oVE04ukluPO2Dvasw",
    "folder": "EC7_Geotechnical\\SeismicWall_Design",
-   "modifiedTime": "2026-10-11T20:07:46.829Z"
+   "modifiedTime": "2026-10-22T06:34:38.132Z"
   },
   "SelfWeight_EC1-2023_Standalone.mcdx": {
    "id": "1kABiQRu8Fxt3GnDV_vbnSK8MgDapuOuj",
@@ -310,12 +310,12 @@
   "SevenPileCap_EC2-2023_Standalone.mcdx": {
    "id": "1Th560gVkgJPBoRclSKHERaZ_OrkXzYiQ",
    "folder": "EC2_Concrete\\PileCap_Design\\SevenPile",
-   "modifiedTime": "2026-10-11T18:22:06.238Z"
+   "modifiedTime": "2026-10-22T06:34:16.859Z"
   },
   "ShearWall_EC2-2023_Standalone.mcdx": {
    "id": "1v9EkDWVIGZmDyRK8c6cXjsBqzQzaRnwP",
    "folder": "EC2_Concrete\\ShearWall_Design",
-   "modifiedTime": "2026-10-20T17:04:00.255Z"
+   "modifiedTime": "2026-10-22T06:34:22.332Z"
   },
   "SheetPile_EC7_Standalone.mcdx": {
    "id": "1uZ3q-pG8enfb0krcicxqvYHPXjR2o9xK",
@@ -335,12 +335,12 @@
   "SinglePileCap_EC2-2023_Standalone.mcdx": {
    "id": "11S8kY8Q3pdqDNO4pY46wixPTLRoD1MkP",
    "folder": "EC2_Concrete\\PileCap_Design\\SinglePile",
-   "modifiedTime": "2026-10-11T16:16:02.000Z"
+   "modifiedTime": "2026-10-22T06:34:16.637Z"
   },
   "SixPileCap_EC2-2023_Standalone.mcdx": {
    "id": "14XQgtXe5V5LOuY-uGxOA4VuQBZKFap_W",
    "folder": "EC2_Concrete\\PileCap_Design\\SixPile",
-   "modifiedTime": "2026-10-11T18:27:27.747Z"
+   "modifiedTime": "2026-10-22T06:34:18.100Z"
   },
   "Slab_Flat_EC2-2023_Standalone.mcdx": {
    "id": "1pImU6jAVNc2Uk-HKOZ96GWfX79tHS-0X",
@@ -350,7 +350,7 @@
   "Slab_Input_EC2-2023_Standalone.mcdx": {
    "id": "1N6oIprFEdJZTttXkzFWiio4_XLJPvGjE",
    "folder": "EC2_Concrete\\Slab_Input_Design",
-   "modifiedTime": "2026-10-19T05:31:02.312Z"
+   "modifiedTime": "2026-10-22T06:34:24.621Z"
   },
   "Slab_OneWay_EC2-2023_Standalone.mcdx": {
    "id": "11SIxYAqxLFSmWM1PXAIqQtX6T5P1XyJ6",
@@ -365,7 +365,7 @@
   "SlenderWall_EC2-2023_Standalone.mcdx": {
    "id": "1JEkZgocAoo7GgkT_3Llb9QlWSoA48C--",
    "folder": "EC2_Concrete\\SlenderWall_Design",
-   "modifiedTime": "2026-10-11T18:53:56.195Z"
+   "modifiedTime": "2026-10-22T06:34:25.747Z"
   },
   "Slope_EC7-2024_Standalone.mcdx": {
    "id": "18WJd_HlUbIBVII5oQF2AK1qvIOJu-djD",
@@ -375,7 +375,7 @@
   "SpiralStair_EC2-2023_Standalone.mcdx": {
    "id": "1suj2d3hjOCfMhuhWm_IIvr4U6SOw1AVN",
    "folder": "EC2_Concrete\\SpiralStair_Design",
-   "modifiedTime": "2026-10-11T18:56:33.045Z"
+   "modifiedTime": "2026-10-22T06:34:25.706Z"
   },
   "StairVibration_EC2-2023_Standalone.mcdx": {
    "id": "1Dy8XDouHkaisSvkkulUBxf50L0hLBFDY",
@@ -385,17 +385,17 @@
   "Staircase_EC2-2023_Standalone.mcdx": {
    "id": "1eIqIgvkxS530jp4uRHP0hmB6HmXvGKLo",
    "folder": "EC2_Concrete\\Staircase_Design",
-   "modifiedTime": "2026-10-11T18:59:09.347Z"
+   "modifiedTime": "2026-10-22T06:34:26.508Z"
   },
   "SteelColumn_EC3-2022_Standalone.mcdx": {
    "id": "1WTVXgqiIpCi3WGxoTCNvLM2LTw5uXNH2",
    "folder": "EC3_Steel\\Column_Design",
-   "modifiedTime": "2026-10-11T19:14:55.940Z"
+   "modifiedTime": "2026-10-22T06:34:29.113Z"
   },
   "StoneColumns_EC7-2024_Standalone.mcdx": {
    "id": "1xiUIV6tTScGsYniyOPsj4bP8CwmgzhCY",
    "folder": "EC7_Geotechnical\\GroundImprovement_Design",
-   "modifiedTime": "2026-10-11T19:36:09.900Z"
+   "modifiedTime": "2026-10-22T06:34:33.529Z"
   },
   "TallBuilding_EC1-2023_Standalone.mcdx": {
    "id": "1PjMbe_tgYndfMcXN3mB5FbWGZjlqmHTk",
@@ -410,7 +410,7 @@
   "TankWall_EC2-2023_Standalone.mcdx": {
    "id": "1X1SmolVv7CFeL2wvSa68SEYaxDsqtQ2Z",
    "folder": "EC2_Concrete\\TankWall_Design",
-   "modifiedTime": "2026-10-13T05:40:08.228Z"
+   "modifiedTime": "2026-10-22T06:34:26.355Z"
   },
   "Thermal_Actions_EC1-2023_Standalone.mcdx": {
    "id": "17uPfcUdQcITKaQiTAzlGwmC7WaV0eFvs",
@@ -425,22 +425,22 @@
   "ThreePileCap_EC2-2023_Standalone.mcdx": {
    "id": "1bWvYHeQjsaHfdnmVgabaSbXx2HkWcGep",
    "folder": "EC2_Concrete\\PileCap_Design\\ThreePile",
-   "modifiedTime": "2026-10-11T18:30:08.831Z"
+   "modifiedTime": "2026-10-22T06:34:18.251Z"
   },
   "Torsion_EC2-2023_Standalone.mcdx": {
    "id": "19wyKSjmoPNKszGP-7DkrPoop9PXQ2ZLN",
    "folder": "EC2_Concrete\\Torsion_Design",
-   "modifiedTime": "2026-10-20T11:11:02.047Z"
+   "modifiedTime": "2026-10-22T06:34:27.344Z"
   },
   "TwoPileCap_EC2-2023_Standalone.mcdx": {
    "id": "1uMCs9w6V9TLZOnePyauQ6jDB_NDz3waC",
    "folder": "EC2_Concrete\\PileCap_Design\\TwoPile",
-   "modifiedTime": "2026-10-11T18:32:49.512Z"
+   "modifiedTime": "2026-10-22T06:34:18.513Z"
   },
   "Uplift_EC7-2024_Standalone.mcdx": {
    "id": "1jKvSfWEypwOiQm7iBB8hjx-uJvOpNetR",
    "folder": "EC7_Geotechnical\\Uplift_Design",
-   "modifiedTime": "2026-10-11T20:18:10.623Z"
+   "modifiedTime": "2026-10-22T06:34:37.940Z"
   },
   "Vehicle_Impact_EC1-2023_Standalone.mcdx": {
    "id": "1rd5ckyNlLilfs3hBv5S4Dbp7LJaZLXF6",
@@ -460,7 +460,7 @@
   "WebOpening_EC2-2023_Standalone.mcdx": {
    "id": "1hQTFZ9-QxnKiT69N1M1VzuqoeZ1rg777",
    "folder": "EC2_Concrete\\WebOpening_Design",
-   "modifiedTime": "2026-10-11T19:09:35.217Z"
+   "modifiedTime": "2026-10-22T06:34:27.634Z"
   },
   "WindComb_TallBuilding_EC1-2023_Standalone.mcdx": {
    "id": "1OjGWLkZ8cnGtYssiRjW0FdM3Ya7rjqU2",

@@ -13,8 +13,8 @@ Ready means `node tools/test_analysis.js`, `node tools/test_sheets.js` and a bro
 | 1 | pilecap | Foundation · pile caps (any layout, columns + walls) | PileCap_Multi_EC2-2023_Standalone | plan, own editor | done |
 | 2 | padfooting | Foundation · pad footing | PadFooting_EC2-2023_Standalone | plan (kit) | done |
 | 3 | combfooting | Foundation · combined footing | CombinedFooting_EC2-2023_Standalone | plan (kit) | done |
-| 4 | footingec7 | Foundation · footing bearing & sliding (EC7) | Footing_EC7_Standalone | plan + section (kit) | todo |
-| 5 | singlepile | Foundation · cap on a single pile | SinglePileCap_EC2-2023_Standalone | plan (kit) | todo |
+| 4 | footingec7 | Foundation · footing bearing & sliding (EC7) | Footing_EC7_Standalone | plan + section (kit) | done (PR pending) |
+| 5 | singlepile | Foundation · cap on a single pile | SinglePileCap_EC2-2023_Standalone | plan (kit) | done (PR pending) |
 | 6 | pilecapstm | Foundation · pile cap STM (2-9 piles, one worksheet per layout) | TwoPileCap … NinePileCap_EC2-2023_Standalone | plan (kit, one spec per worksheet) | todo |
 | 7 | raft | Foundation · raft | Raft_EC7-2024_Standalone | plan (kit) | todo |
 | 8 | rccolumn | Columns · RC column section | Column_EC2-2023_Standalone | section with bars (kit) | todo |
@@ -35,5 +35,6 @@ Ready means `node tools/test_analysis.js`, `node tools/test_sheets.js` and a bro
 | 23 | finplate | Steel · fin-plate connection | FinPlate_EC3-2024_Standalone | elevation (kit) | todo |
 | 24 | tankwall | SLS · water tank wall | TankWall_EC2-2023_Standalone | section (kit) | todo |
 | 25 | pilelateral | Geotechnical · pile under lateral load | PileLateral_EC7-2024_Standalone | section with soil (kit) | todo |
+| 26 | pilefoundation | Geotechnical · pile foundation design (EC 2G) | PileFoundation_EC-2G | section with soil (kit) | todo |
 
 New worksheets that arrive from Drive and suit a drawing are added to the end of this table by the routine.

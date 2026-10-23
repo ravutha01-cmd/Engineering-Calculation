@@ -791,7 +791,7 @@ EC.sheetCatalog = [
 "title": "RC SHELL DESIGN FROM ETABS SHELL FORCES TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 63,
-"kb": 158
+"kb": 301
 },
 {
 "id": "Shortening_TallBuilding_EC1-2023_Standalone",
@@ -815,7 +815,7 @@ EC.sheetCatalog = [
 "title": "CAP ON A SINGLE PILE TO EN 1992-1-1:2023",
 "code": "EN 1992-1-1:2023",
 "nin": 49,
-"kb": 63
+"kb": 71
 },
 {
 "id": "SixPileCap_EC2-2023_Standalone",
